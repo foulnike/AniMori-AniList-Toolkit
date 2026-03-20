@@ -905,6 +905,19 @@
   "Plugin Assistance": "Помощь с плагинами",
   "Color Manager": "Менеджер по цвету",
   "Lab Manager": "Менеджер лаборатории",
-  "Studio Manager": "Менеджер студии"
+  "Studio Manager": "Менеджер студии",
+  "Choreography (OP)": "Хореография (OP)",
+  "Choreography (ED)": "Хореография (ED)",
+  "Theme Song Lyrics (OP)": "Текст песни (OP)",
+  "Theme Song Performance (OP)": "Исполнение песни (OP)",
+  "Theme Song Performance (ED)": "Исполнение песни (ED)",
+  "Theme Song Lyrics (ED)": "Текст песни (ED)",
+  "Theme Song Arrangement (ED)": "Аранжировка песни (ED)",
+  "Theme Song Arrangement (OP)": "Аранжировка песни (OP)",
+  "Theme Song Composition (OP)": "Композиция песни (OP)",
+  "Theme Song Composition (ED)": "Композиция песни (ED)",
+  "Music Composition": "Композиция музыки",
+  "Music Lyrics": "Текст песни",
+  "Music Performance": "Исполнение музыки"
 }
 
