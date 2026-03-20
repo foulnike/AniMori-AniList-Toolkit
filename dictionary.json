@@ -146,7 +146,6 @@
   "Romaji (Zoldyck Killua)": "Ромадзи (Zoldyck Killua)",
   "Native (キルア=ゾルディック)": "Оригинальный (キллуа=золдик)",
   "Activity Merge Time": "Время объединения активности",
-  "Episode and chapter activity created within this time period will be merged together (E.g. Watched episodes 10-12 )": "Активность по сериям и главам, созданная в течение этого времени, будет объединена (напр., Просмотрено серий 10-12)",
   "Never": "Никогда",
   "30 Minutes": "30 минут",
   "1 Hour": "1 час",
@@ -161,5 +160,8 @@
   "2 Weeks": "2 недели",
   "Always": "Всегда",
   "Airing Anime Notifications": "Уведомления о выходе серий",
-  "18+ Content": "Контент 18+"
+  "18+ Content": "Контент 18+",
+  "Episode and chapter activity created within this time period will be merged together (E.g. ": "Активность по сериям и главам за этот период будет объединена (напр., ",
+  "Watched episodes 10-12": "Просмотрено серий 10-12",
+  " )": " )"
 }
