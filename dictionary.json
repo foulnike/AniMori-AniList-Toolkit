@@ -997,6 +997,23 @@
   "delete": "удалить",
   "Subscribe": "Подписаться",
   "subscribe": "подписаться",
-  "Direct Link": "Прямая ссылка"
+  "Direct Link": "Прямая ссылка",
+  "Write a reply...": "Написать ответ...",
+  "Bold": "Жирный",
+  "italic": "курсив",
+  "Italic": "Курсив",
+  "strikethrough": "зачёркнутый",
+  "Strikethrough": "Зачёркнутый",
+  "Spoiler!": "Спойлер!",
+  "Link": "Ссылка",
+  "Image": "Изображение",
+  "Youtube Video": "Видео YouTube",
+  "WebM Video": "Видео WebM",
+  "Ordered List": "Нумерованный список",
+  "Unordered List": "Маркированный список",
+  "Header": "Заголовок",
+  "Center": "По центру",
+  "Quote": "Цитата",
+  "Code": "Код"
 }
 
