@@ -235,5 +235,7 @@
   "Everyone can view my profile, lists, and activity but my activity won't appear on the global public feeds.": "Все могут просматривать мой профиль, списки и активность, но моя активность не будет отображаться в глобальной ленте.",
   "To protect your account you will need to wait 24 hours after your initial account deletion request. Once 24 hours have passed please click the button below again to verify and complete your account deletion.": "Для защиты вашего аккаунта потребуется подождать 24 часа после первичного запроса на удаление. После того как пройдут сутки, нажмите кнопку ниже еще раз, чтобы подтвердить и завершить удаление.",
   "Episode and chapter activity created within this time period will be merged together (E.g.": "Активность по сериям и главам, созданная за этот период, будет объединена (Напр.",
-  "Allowed Formats: JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "Допустимые форматы: JPEG, PNG. Макс. размер: 3 МБ. Оптимальный размер: 230x230"
+  "Allowed Formats: JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "Допустимые форматы: JPEG, PNG. Макс. размер: 3 МБ. Оптимальный размер: 230x230",
+  "A little about yourself...": "Немного о себе...",
+  "Drop image here or click to upload": "Перетащите изображение сюда или нажмите для загрузки"  
 }
