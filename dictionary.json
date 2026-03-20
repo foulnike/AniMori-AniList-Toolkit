@@ -973,6 +973,24 @@
   "Polish (Gametoon)": "Польский (Gametoon)",
   "Korean": "Корейский",
   "Episode": "Серия",
-  "Duration": "Длительность"
+  "Duration": "Длительность",
+  "Prequel": "Приквел",
+  "Watched episode": "Просмотрена серия",
+  "Rewatched episode": "Пересмотрена серия",
+  "Set as Watching": "Отметить как «Смотрю»",
+  "Finish Date": "Дата завершения",
+  "Episode Progress": "Прогресс серий",
+  "Total Rewatches": "Всего пересмотров",
+  "Custom Lists": "Пользовательские списки",
+  "No custom anime lists": "Нет пользовательских списков аниме",
+  "replied": "ответил(а)",
+  "By": "От",
+  "Plans to watch": "В планах",
+  "Paused watching": "Отложено",
+  "Occupation:": "Род занятий:",
+  "Affiliation:": "Принадлежность:",
+  "Grade:": "Ранг:",
+  "Species:": "Раса:",
+  "Cursed Technique:": "Проклятая техника:"
 }
 
