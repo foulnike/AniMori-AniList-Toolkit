@@ -245,5 +245,11 @@
   "Episode and chapter activity created within this time period will be merged together (E.g.": "Активность по сериям и главам, созданная за этот период, будет объединена (Напр.",
   "Allowed Formats: JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "Допустимые форматы: JPEG, PNG. Макс. размер: 3 МБ. Оптимальный размер: 230x230",
   "A little about yourself...": "Немного о себе...",
-  "Drop image here or click to upload": "Перетащите изображение сюда или нажмите для загрузки"  
+  "Drop image here or click to upload": "Перетащите изображение сюда или нажмите для загрузки",
+   "Adventure": "Приключения",
+  "Write a status...": "Написать статус...",
+  "Please read the site guidelines before posting": "Пожалуйста, ознакомьтесь с правилами сайта перед публикацией",
+  "Cancel": "Отмена",
+  "Publish": "Опубликовать",
+  "Genre Overview": "Обзор жанров"
 }
