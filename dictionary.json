@@ -228,5 +228,12 @@
   "Overwrite manga already on my list": "Перезаписать мангу, которая уже есть в моем списке",
   "Apps connected with your account": "Приложения, подключенные к вашему аккаунту",
   "Api Clients": "API-клиенты",
-  "Contact app developer": "Связаться с разработчиком приложения"
+  "Contact app developer": "Связаться с разработчиком приложения",
+  "Revoke App": "Отменить доступ",
+  "Create New Client": "Создать новый клиент",
+  "OAuth Docs": "Документация OAuth",
+  "Allowed Formats: JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "Допустимые форматы: JPEG, PNG. Максимальный размер: 3 МБ. Оптимальные размеры: 230x230",
+  "Everyone can view my profile, lists, and activity but my activity won't appear on the global public feeds.": "Все могут просматривать мой профиль, списки и активность, но моя активность не будет отображаться в глобальной ленте.",
+  "To protect your account you will need to wait 24 hours after your initial account deletion request. Once 24 hours have passed please click the button below again to verify and complete your account deletion.": "Для защиты вашего аккаунта потребуется подождать 24 часа после первичного запроса на удаление. После того как пройдут сутки, нажмите кнопку ниже еще раз, чтобы подтвердить и завершить удаление.",
+  "Episode and chapter activity created within this time period will be merged together (E.g. ": "Активность по сериям и главам, созданная за этот период, будет объединена (Напр."
 }
