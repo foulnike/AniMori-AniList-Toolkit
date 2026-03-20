@@ -225,5 +225,8 @@
   "MyAnimeList: Import Anime List (Make sure to unzip the .xml.gz file first!)": "MyAnimeList: Импорт списка аниме (Сначала обязательно распакуйте файл .xml.gz!)",
   "Overwrite anime already on my list": "Перезаписать аниме, которые уже есть в моем списке",
   "MyAnimeList: Import Manga List (Make sure to unzip the .xml.gz file first!)": "MyAnimeList: Импорт списка манги (Сначала обязательно распакуйте файл .xml.gz!)",
-  "Overwrite manga already on my list": "Перезаписать мангу, которая уже есть в моем списке"
+  "Overwrite manga already on my list": "Перезаписать мангу, которая уже есть в моем списке",
+  "Apps connected with your account": "Приложения, подключенные к вашему аккаунту",
+  "Api Clients": "API-клиенты",
+  "Contact app developer": "Связаться с разработчиком приложения"
 }
