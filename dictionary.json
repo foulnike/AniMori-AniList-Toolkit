@@ -251,5 +251,9 @@
   "Please read the site guidelines before posting": "Пожалуйста, ознакомьтесь с правилами сайта перед публикацией",
   "Cancel": "Отмена",
   "Publish": "Опубликовать",
-  "Genre Overview": "Обзор жанров"
+  "Genre Overview": "Обзор жанров",
+  "New password": "Новый пароль",
+  "Confirm new password": "Подтвердите новый пароль",
+  "Custom List Name": "Название пользовательского списка",
+  "Drop list xml file here or click to upload": "Перетащите XML-файл списка сюда или нажмите для загрузки"
 }
