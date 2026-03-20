@@ -221,5 +221,9 @@
   "When an anime or manga in my list is deleted from the site": "Когда аниме или манга из моего списка удаляется с сайта",
   "When the status of my media submission is updated": "Когда статус моей правки контента (аниме/манга) обновлен",
   "When the status of my staff submission is updated": "Когда статус моей правки по персоналу обновлен",
-  "When the status of my character submission is updated": "Когда статус моей правки по персонажу обновлен"
+  "When the status of my character submission is updated": "Когда статус моей правки по персонажу обновлен",
+  "MyAnimeList: Import Anime List (Make sure to unzip the .xml.gz file first!)": "MyAnimeList: Импорт списка аниме (Сначала обязательно распакуйте файл .xml.gz!)",
+  "Overwrite anime already on my list": "Перезаписать аниме, которые уже есть в моем списке",
+  "MyAnimeList: Import Manga List (Make sure to unzip the .xml.gz file first!)": "MyAnimeList: Импорт списка манги (Сначала обязательно распакуйте файл .xml.gz!)",
+  "Overwrite manga already on my list": "Перезаписать мангу, которая уже есть в моем списке"
 }
