@@ -1286,6 +1286,14 @@
   "Nepali": "Непальский",
   "Hindi": "Хинди",
   "Urdu": "Урду",
-  "Back": "Назад"
+  "Back": "Назад",
+  "Image url": "Ссылка на изображение",
+  "Names": "Имена",
+  "Circle:": "Круг:",
+  "Even if your image is the correct aspect ratio and dimensions, image changes are ultimately left to our data moderators' discretion.": "Даже если ваше изображение имеет правильное соотношение сторон и размеры, решение об изменении изображения в конечном итоге остается на усмотрение наших модераторов данных.",
+  "Preferred Ratio: 2:3": "Рекомендуемое соотношение: 2:3",
+  "Submitted Ratio: 115:172 (230x344px)": "Загруженное соотношение: 115:172 (230x344px)",
+  "Submitted Ratio: 2:3 (230x345px)": "Загруженное соотношение: 2:3 (230x345px)",
+  "Alternative Spoiler Names": "Альтернативные спойлерные имена"
 }
 
