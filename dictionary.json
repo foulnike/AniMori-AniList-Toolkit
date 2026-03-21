@@ -1325,6 +1325,27 @@
   "Wed": "Срд",
   "Thu": "Чтв",
   "Fri": "Птн",
-  "Sat": "Суб"
+  "Sat": "Суб",
+  "Trailer": "Трейлер",
+  "Report Forum Comment": "Жалоба на комментарий форума",
+  "Main Theme": "Основная тема",
+  "Major Element": "Значимый элемент",
+  "Moderate Element": "Умеренный элемент",
+  "Lesser Element": "Незначительный элемент",
+  "Minor Element": "Эпизодический элемент",
+  "Not Relevant": "Не актуально",
+  "For staff, 1:1 aspect ratio images are acceptable in cases where only Twitter avatars are available, for example.": "Для персонала допускаются изображения с соотношением сторон 1:1, например, если доступны только аватары из Twitter.",
+  "Write a message…": "Написать сообщение…",
+  "pinned": "закреплено",
+  "Report": "Пожаловаться",
+  "manga": "манга",
+  "staff": "персонал",
+  "studios": "студии",
+  "Cover Corp": "Cover Corp",
+  "Doga Kobo": "Doga Kobo",
+  "Follow": "Подписаться",
+  "I do the things": "Я занимаюсь делами",
+  "Block": "Заблокировать",
+  "Compare with your list": "Сравнить со своим списком"
 }
 
