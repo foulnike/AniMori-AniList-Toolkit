@@ -1136,6 +1136,18 @@
   "Visuals": "Визуал",
   "Audio": "Звук",
   "Enjoyment": "Удовольствие",
+  "Time Watched": "Время просмотра",
+  "Human": "Человек",
+  "count": "количество",
+  "Count": "Количество",
+  "Add URL": "Добавить ссылку",
+  "Please input a URL": "Пожалуйста, введите ссылку",
+  "Add image": "Добавить изображение",
+  "Please input an image URL": "Пожалуйста, введите ссылку на изображение",
+  "Add YouTube Video": "Добавить видео YouTube",
+  "Please input a YouTube video URL": "Пожалуйста, введите ссылку на видео YouTube",
+  "Add WebM Video": "Добавить видео WebM",
+  "Please input a WebM video URL": "Пожалуйста, введите ссылку на видео WebM",
   "summary": "обобщение"
 }
 
