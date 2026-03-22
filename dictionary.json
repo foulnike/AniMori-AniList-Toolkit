@@ -1382,5 +1382,26 @@
   "watch": "смотреть",
   "I do the things": "Я занимаюсь делами",
   "Yapper": "Болтун",
-  "Donator": "Донатер"
+  "Donator": "Донатер",
+  
+  "___НЕОТСОРТИРОВАННЫЕ СТРОКИ___": "----------------------------------------",
+  "Please enter your password to confirm your list deletion": "Пожалуйста, введите пароль для подтверждения удаления списка",
+  "Delete anime list": "Удалить список аниме",
+  "OK, Delete my anime list entries": "ОК, удалить записи моего списка аниме",
+  "Delete manga list": "Удалить список манги",
+  "OK, Delete my manga list entries": "ОК, удалить записи моего списка манги",
+  "Reset anime list scores": "Сбросить оценки в списке аниме",
+  "Please enter your password to confirm your score reset": "Пожалуйста, введите пароль для подтверждения сброса оценок",
+  "OK, Reset my anime list scores": "ОК, сбросить оценки моего списка аниме",
+  "Reset manga list scores": "Сбросить оценки в списке манги",
+  "OK, Reset my manga list scores": "ОК, сбросить оценки моего списка манги",
+  "Hide from status lists was succesfully reset on your list entries": "Отметка «скрыть из статусных списков» была успешно сброшена для ваших записей",
+  "Stats successfully updated": "Статистика успешно обновлена",
+  "Please enter your password to confirm your account deletion": "Пожалуйста, введите пароль для подтверждения удаления аккаунта",
+  "OK, Delete my account": "ОК, удалить мой аккаунт",
+  "Reorder": "Изменить порядок",
+  "Hashtag": "Хэштег",
+  "Api Client": "API-клиент",
+  "Redirect URL": "URL перенаправления",
+  "Name": "Название"
 }
