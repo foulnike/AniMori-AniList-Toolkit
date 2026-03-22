@@ -1403,5 +1403,7 @@
   "Hashtag": "Хэштег",
   "Api Client": "API-клиент",
   "Redirect URL": "URL перенаправления",
-  "Name": "Название"
+  "Name": "Название",
+  "Allowed Formats: ": "Допустимые форматы: ",
+  "JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "JPEG, PNG. Макс. размер: 3 МБ. Оптимальный размер: 230x230"
 }
