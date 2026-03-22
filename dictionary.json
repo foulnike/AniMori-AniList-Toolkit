@@ -1405,5 +1405,7 @@
   "Redirect URL": "URL перенаправления",
   "Name": "Название",
   "Allowed Formats:": "Допустимые форматы:",
-  "JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "JPEG, PNG. Макс. размер: 3 МБ. Оптимальный размер: 230x230"
+  "JPEG, PNG. Max size: 3mb. Optimal dimensions: 230x230": "JPEG, PNG. Макс. размер: 3 МБ. Оптимальный размер: 230x230",
+  "Save Order": "Сохранить порядок",
+  "Write a message...": "Написать сообщение..."
 }
