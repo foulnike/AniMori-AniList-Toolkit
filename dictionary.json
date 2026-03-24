@@ -1963,5 +1963,12 @@
   "Submission Manual": "Руководство по правкам",
   "Release Data": "Данные о релизе",
   "Lengths": "Длительность",
-  "Add Studios": "Добавить студии"
+  "Add Studios": "Добавить студии",
+  "Advanced Scores": "Расширенные оценки",
+  "Warning": "Предупреждение",
+  "Are you sure you want to delete this list entry?": "Вы уверены, что хотите удалить эту запись из списка?",
+  "Hide from status lists": "Скрыть из списков статусов",
+  "Spoiler names, click to view": "Имена-спойлеры, нажмите для просмотра",
+  "Plans to read": "В планах на чтение",
+  "Paused reading": "Чтение приостановлено"
 }
