@@ -1989,5 +1989,12 @@
   "Failed to fetch announcement data": "Не удалось загрузить данные объявлений",
   "List entry deleted": "Запись списка удалена",
   "Removed from favorites": "Удалено из избранного",
-  "Added to favorites": "Добавлено в избранное"
+  "Added to favorites": "Добавлено в избранное",
+  "Add Recommendation": "Добавить рекомендацию",
+  "Search anime": "Поиск аниме",
+  "View Less": "Показать меньше",
+  "Airing Score Progression": "Динамика оценки онгоинга",
+  "Airing Watchers Progression": "Динамика зрителей онгоинга",
+  "Date of Birth": "Дата рождения",
+  "Age": "Возраст"
 }
