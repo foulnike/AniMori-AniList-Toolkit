@@ -1978,5 +1978,14 @@
   "Unfollow": "Отписаться",
   "Settings updated": "Настройки обновлены",
   "View all anime results": "Все результаты поиска аниме",
-  "View all  anime results": "Все результаты поиска аниме"
+  "View all  anime results": "Все результаты поиска аниме",
+  "The text field is required when locked is not present.": "Текстовое поле обязательно для заполнения, если блокировка отсутствует.",
+  "anime list scores successfully reset": "оценки списка аниме успешно сброшены",
+  "manga list scores successfully reset": "оценки списка манги успешно сброшены",
+  "anime list entries successfully deleted": "записи списка аниме успешно удалены",
+  "manga list entries successfully deleted": "записи списка манги успешно удалены",
+  "Search user": "Поиск пользователя",
+  "Weighted": "Взвешенный балл",
+  "Failed to fetch announcement data": "Не удалось загрузить данные объявлений",
+  "List entry deleted": "Запись списка удалена"
 }
