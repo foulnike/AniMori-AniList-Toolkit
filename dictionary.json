@@ -1987,5 +1987,7 @@
   "Search user": "Поиск пользователя",
   "Weighted": "Взвешенный балл",
   "Failed to fetch announcement data": "Не удалось загрузить данные объявлений",
-  "List entry deleted": "Запись списка удалена"
+  "List entry deleted": "Запись списка удалена",
+  "Removed from favorites": "Удалено из избранного",
+  "Added to favorites": "Добавлено в избранное"
 }
