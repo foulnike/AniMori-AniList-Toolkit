@@ -1996,5 +1996,12 @@
   "Airing Score Progression": "Динамика оценки онгоинга",
   "Airing Watchers Progression": "Динамика зрителей онгоинга",
   "Date of Birth": "Дата рождения",
-  "Age": "Возраст"
+  "Age": "Возраст",
+  "Custom List Deleted": "Пользовательский список удален",
+  "Are you sure you want to delete this activity?": "Вы уверены, что хотите удалить эту активность?",
+  "Activity Deleted": "Активность удалена",
+  "Custom list does not exist": "Пользовательский список не существует",
+  "Failed to reset list scores": "Не удалось сбросить оценки списка",
+  "Failed to delete list": "Не удалось удалить список",
+  "Too many stat update requests created recently. Slow down. (360 minute timeout)": "Слишком много запросов на обновление статистики за последнее время. Подождите. (Таймаут 360 минут)"
 }
