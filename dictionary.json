@@ -2003,5 +2003,10 @@
   "Custom list does not exist": "Пользовательский список не существует",
   "Failed to reset list scores": "Не удалось сбросить оценки списка",
   "Failed to delete list": "Не удалось удалить список",
-  "Too many stat update requests created recently. Slow down. (360 minute timeout)": "Слишком много запросов на обновление статистики за последнее время. Подождите. (Таймаут 360 минут)"
+  "Too many stat update requests created recently. Slow down. (360 minute timeout)": "Слишком много запросов на обновление статистики за последнее время. Подождите. (Таймаут 360 минут)",
+  "Updating Stats... this might take some time": "Обновление статистики... это может занять некоторое время",
+  "Report review": "Пожаловаться на отзыв",
+  "No Results": "Ничего не найдено",
+  "Search staff": "Поиск персонала",
+  "Search characters": "Поиск персонажей"
 }
