@@ -1,2 +1,91 @@
-# AniList Russian Translation dictionary
-Cловарь со строками интерфейса anilist.co , ссылка на скрипт перевода: https://greasyfork.org/ru/scripts/572948-animori-anilist-toolkit
+<div align="center">
+
+# AniMori: AniList Toolkit
+
+**Русификатор и набор инструментов для [AniList](https://anilist.co) — перевод интерфейса, плеер, рейтинги, дерево франшиз и экспорт списков из Shikimori.**
+
+[![Greasy Fork](https://img.shields.io/greasyfork/v/572948?label=Greasy%20Fork)](https://greasyfork.org/ru/scripts/572948-animori-anilist-toolkit)
+[![Installs](https://img.shields.io/greasyfork/dt/572948?label=установки)](https://greasyfork.org/ru/scripts/572948-animori-anilist-toolkit)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/Tampermonkey-userscript-orange)
+
+</div>
+
+---
+
+**AniMori** — пользовательский скрипт (userscript) для Tampermonkey, который превращает AniList в удобный для русскоязычного зрителя сервис: переводит интерфейс, подтягивает русские названия и описания с Shikimori, встраивает плеер, показывает рейтинги MAL и Shikimori, строит дерево хронологии франшизы и переносит списки из Shikimori в AniList.
+
+Этот репозиторий хранит **исходный код скрипта** (`animori.user.js`) и **словарь перевода интерфейса** (`dictionary.json`), который скрипт подгружает на лету.
+
+## Возможности
+
+### На AniList (`anilist.co`)
+- **Перевод интерфейса** — строки сайта переводятся по словарю `dictionary.json`.
+- **Русские тайтлы и описания** — названия и синопсисы подтягиваются с Shikimori.
+- **Перевод персонажей и персонала** — имена с Shikimori.
+- **Аниме-плеер** — встроенный плеер с выбором озвучки и серий (Kodik).
+- **Рейтинги MAL и Shikimori** — оценки из MyAnimeList (через Jikan API) и Shikimori рядом с оценкой AniList.
+- **Дерево франшизы** — хронология связанных тайтлов (включая записи, которых нет на AniList, — со стороны Shikimori).
+- **Музыкальные темы** — опенинги и эндинги.
+- **Внешние ссылки** — быстрый переход на RuTracker, YummyAnime, AnimeGO, MangaLib (домены настраиваются).
+- **Русский поиск** — поиск по русским названиям.
+
+### На Shikimori (`shikimori.io`)
+- **Экспорт списка Shikimori → AniList** — перенос аниме-списка в AniList (требуется токен AniList).
+
+### Прочее
+- **Локальный кэш (IndexedDB)** — данные Shikimori/MAL кэшируются на 90 дней, чтобы не дёргать API повторно.
+- **Гибкие настройки** — каждый модуль включается/отключается в панели «⚙ RU» в левом нижнем углу.
+- **Логгер** — встроенный инструмент отладки (по желанию).
+
+## Установка
+
+1. Установите менеджер пользовательских скриптов — [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Edge, Firefox, и др.).
+2. Установите скрипт со страницы **[Greasy Fork](https://greasyfork.org/ru/scripts/572948-animori-anilist-toolkit)** — это рекомендуемый способ, он обеспечивает автообновления.
+3. Откройте [AniList](https://anilist.co) — внизу слева появится кнопка **⚙ RU**.
+
+> Альтернатива: можно установить из этого репозитория, открыв [`animori.user.js`](animori.user.js) (Tampermonkey предложит установку). Автообновления при этом всё равно идут с Greasy Fork.
+
+## Авторизация (для экспорта и редактирования списков)
+
+Перевод, плеер и рейтинги работают без входа. Для экспорта списка из Shikimori и изменения своего списка на AniList нужен токен:
+
+1. Откройте панель **⚙ RU** → раздел «Авторизация API».
+2. Создайте API-клиент на [anilist.co/settings/developer](https://anilist.co/settings/developer) (в поле redirect укажите `https://anilist.co/api/v2/oauth/pin`).
+3. Вставьте Client ID, сгенерируйте ссылку, получите токен и вставьте его в поле.
+
+Токен хранится только локально в хранилище Tampermonkey.
+
+## Источники данных
+
+Скрипт обращается к публичным API напрямую из браузера:
+
+| Источник | Назначение |
+| :--- | :--- |
+| `raw.githubusercontent.com` | словарь перевода интерфейса (этот репозиторий) |
+| `graphql.anilist.co` | данные и списки AniList |
+| `shikimori.io` | русские названия, описания, персонажи, франшизы |
+| `api.jikan.moe` | рейтинги MyAnimeList |
+| `kodik-api.com` | видеоплеер |
+
+Скрипт не отправляет ваши данные на сторонние серверы: токен и настройки остаются в браузере, кэш — в локальной IndexedDB.
+
+## Словарь перевода
+
+`dictionary.json` — плоский набор пар `оригинал → перевод` для строк интерфейса AniList:
+
+```json
+{
+  "Home": "Главная",
+  "Browse": "Просмотр",
+  "Settings": "Настройки"
+}
+```
+
+Скрипт подгружает его напрямую из ветки `main`, поэтому правки словаря применяются у всех пользователей без обновления скрипта. Нашли непереведённую или неточно переведённую строку — присылайте Pull Request или открывайте Issue.
+
+## Лицензия
+
+[MIT](LICENSE) © foulnike
+
+Сторонние сервисы (AniList, Shikimori, MyAnimeList/Jikan, Kodik) принадлежат их владельцам и используются через их публичные API.
