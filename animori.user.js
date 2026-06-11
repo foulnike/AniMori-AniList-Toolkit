@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AniMori: AniList Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      1.7.3
+// @version      1.7.4
 // @description  Русский перевод, поиск, плеер, рейтинги Shiki и MAL, дерево хронологии, опенинги/эндинги, ссылки и экспорт списков Shikimori => Anilist.
 // @author       foulnike
 // @match        https://anilist.co/*
@@ -33,7 +33,7 @@
     const IS_ANILIST = window.location.hostname.includes("anilist.co");
 
     // Словарь для перевода интерфейса
-    const DICT_URL = 'https://raw.githubusercontent.com/foulnike/Anilist-RU-Interface-translation-glossary/main/dictionary.json';
+    const DICT_URL = 'https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/dictionary.json';
 
     // Shikimori
     const SHIKI_DOMAINS =['shikimori.io'];
