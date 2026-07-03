@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         AniMori: AniList Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      1.7.4
-// @description  Русский перевод, поиск, плеер, рейтинги Shiki и MAL, дерево хронологии, опенинги/эндинги, ссылки и экспорт списков Shikimori => Anilist.
+// @version      1.8.0
+// @description  Русский перевод, поиск, плеер, рейтинги Shiki и MAL, дерево хронологии, опенинги/эндинги, музыка (VK/YouTube/Spotify/SoundCloud), внешние ссылки, экспорт и сравнение списков Shikimori/AniList.
 // @author       foulnike
 // @match        https://anilist.co/*
 // @match        *://shikimori.io/*
@@ -70,7 +70,7 @@
         yummyDomain:         GM_getValue('set_yummy_domain', 'yummyanime.tv'),
         animegoDomain:       GM_getValue('set_animego_domain', 'animego.org'),
         mangalibDomain:      GM_getValue('set_mangalib_domain', 'mangalib.me'),
-        enableLogger:        GM_getValue('set_logger', false)
+        enableLogger:        GM_getValue('set_logger', true)
     };
 
     // Списки локализации для парсера дат и времени
@@ -472,6 +472,458 @@
         });
 
         renderAllLogs();
+    }
+
+    // ==========================================
+    // 1.5 СКАНЕР ДЕЛЬТЫ: сравнение списков Shikimori <-> AniList (read-only)
+    // Ключ сопоставления — MAL id (у Shikimori id == MAL id, у AniList media есть idMal).
+    // Ничего не пишет: только читает оба списка, считает статистику и расхождения.
+    // ==========================================
+
+    const CMP_STATUS_ORDER = ['watching', 'rewatching', 'planned', 'completed', 'on_hold', 'dropped'];
+    const CMP_STATUS_LABEL = {
+        watching: 'Смотрю/Читаю', rewatching: 'Пересматриваю', planned: 'Запланировано',
+        completed: 'Просмотрено', on_hold: 'Отложено', dropped: 'Брошено', null: '—'
+    };
+    const AL_STATUS_MAP = { CURRENT: 'watching', REPEATING: 'rewatching', PLANNING: 'planned', COMPLETED: 'completed', PAUSED: 'on_hold', DROPPED: 'dropped' };
+    // Типы связей AniList, указывающие на «тот же тайтл рядом» (деление на сезоны/куски,
+    // сиквелы/приквелы). Используются для группировки «связанных» записей (B).
+    const CMP_SPLIT_RELATIONS = ['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'ALTERNATIVE', 'SPIN_OFF'];
+    let cmpLast = null; // снимок последнего скана — чтобы перерисовывать без повторной загрузки
+
+    // Игнор-лист (C): MAL id, помеченные пользователем как «не показывать» (ложные расхождения).
+    function cmpGetIgnore() { try { return new Set(JSON.parse(GM_getValue('CMP_IGNORE', '[]'))); } catch (e) { return new Set(); } }
+    function cmpSaveIgnore(set) { GM_setValue('CMP_IGNORE', JSON.stringify([...set])); }
+    function cmpAddIgnore(id) { const s = cmpGetIgnore(); s.add(Number(id)); cmpSaveIgnore(s); }
+    function cmpRemoveIgnore(id) { const s = cmpGetIgnore(); s.delete(Number(id)); cmpSaveIgnore(s); }
+
+    function cmpEsc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function cmpStatusLabel(s) { return CMP_STATUS_LABEL[s] || '—'; }
+    function cmpFmtScore(v) { return v > 0 ? (Math.round(v * 10) / 10).toString() : '—'; }
+    function cmpFmtProg(e, type) { return type === 'manga' ? `${e.progress} гл. / ${e.volumes} т.` : `${e.progress} эп.`; }
+
+    // AniList: список пользователя (аниме/манга), ключ = idMal. Оценка запрошена как
+    // POINT_100 -> нормализуем в 0..10 делением на 10 (не зависим от шкалы пользователя).
+    async function cmpFetchAniListList(userName, type) {
+        const q = `query($n:String,$t:MediaType){MediaListCollection(userName:$n,type:$t){lists{entries{status score(format:POINT_100) progress progressVolumes repeat notes media{idMal title{romaji english} relations{edges{relationType node{idMal}}}}}}}}`;
+        const res = await anilistQuery(q, { n: userName, t: type }, true);
+        const lists = res && res.data && res.data.MediaListCollection && res.data.MediaListCollection.lists || [];
+        const map = new Map();
+        for (const l of lists) for (const e of (l.entries || [])) {
+            const mal = e.media && e.media.idMal;
+            if (!mal) continue;
+            map.set(mal, {
+                malId: mal,
+                title: (e.media.title && (e.media.title.romaji || e.media.title.english)) || ('MAL#' + mal),
+                status: AL_STATUS_MAP[e.status] || null,
+                score10: e.score ? e.score / 10 : 0,
+                progress: e.progress || 0,
+                volumes: e.progressVolumes || 0,
+                rewatches: e.repeat || 0,
+                notes: (e.notes || '').trim(),
+                relations: ((e.media.relations && e.media.relations.edges) || [])
+                    .filter(ed => CMP_SPLIT_RELATIONS.includes(ed.relationType))
+                    .map(ed => ed.node && ed.node.idMal).filter(Boolean),
+            });
+        }
+        return map;
+    }
+
+    // AniList: избранное (аниме/манга) с пагинацией. Множество idMal -> название.
+    async function cmpFetchAniListFavs(userName, kind) {
+        const map = new Map(); let page = 1;
+        while (true) {
+            const q = `query($n:String,$p:Int){User(name:$n){favourites{${kind}(page:$p){pageInfo{hasNextPage} nodes{idMal title{romaji english}}}}}}`;
+            const res = await anilistQuery(q, { n: userName, p: page }, true);
+            const fav = res && res.data && res.data.User && res.data.User.favourites && res.data.User.favourites[kind];
+            if (!fav) break;
+            for (const n of (fav.nodes || [])) { if (n.idMal) map.set(n.idMal, (n.title && (n.title.romaji || n.title.english)) || ('MAL#' + n.idMal)); }
+            if (!fav.pageInfo || !fav.pageInfo.hasNextPage) break;
+            page++; await new Promise(r => setTimeout(r, 700));
+        }
+        return map;
+    }
+
+    // Shikimori: список через v1 *_rates (сразу с названиями), ключ = target id (== MAL id).
+    async function cmpFetchShikiList(userId, type) {
+        const map = new Map(); let page = 1;
+        while (true) {
+            const r = await fetchShiki(`/api/users/${userId}/${type}_rates?limit=5000&page=${page}`);
+            const data = r && r.data;
+            if (!Array.isArray(data) || data.length === 0) break;
+            for (const it of data) {
+                const media = it[type];
+                if (!media || !media.id) continue;
+                const mal = media.id;
+                map.set(mal, {
+                    malId: mal,
+                    title: media.russian || media.name || ('MAL#' + mal),
+                    status: it.status || null,
+                    score10: it.score || 0,
+                    progress: type === 'anime' ? (it.episodes || 0) : (it.chapters || 0),
+                    volumes: type === 'manga' ? (it.volumes || 0) : 0,
+                    rewatches: it.rewatches || 0,
+                    notes: (it.text || '').trim(),
+                });
+            }
+            if (data.length < 5000) break;
+            page++; await new Promise(r => setTimeout(r, 700));
+        }
+        return map;
+    }
+
+    async function cmpFetchShikiFavs(userId) {
+        const r = await fetchShiki(`/api/users/${userId}/favourites`);
+        const d = (r && r.data) || {};
+        const toMap = arr => { const m = new Map(); (arr || []).forEach(x => { if (x && x.id) m.set(x.id, x.russian || x.name || ('MAL#' + x.id)); }); return m; };
+        // Персонажи/стафф: id нельзя мостить (у AniList свои), сравниваем по имени -> отдаём
+        // ромадзи (name) для матча и русское (russian) для показа.
+        const toNames = arr => (arr || []).map(x => ({ name: x.russian || x.name || '', romaji: x.name || '' })).filter(x => x.name || x.romaji);
+        // AniList «staff» — единый список; у Shikimori стафф разнесён по people/seyu/
+        // mangakas/producers. Объединяем для сопоставимости.
+        const staffAll = [...(d.people || []), ...(d.seyu || []), ...(d.mangakas || []), ...(d.producers || [])];
+        return { anime: toMap(d.animes), manga: toMap(d.mangas), characters: toNames(d.characters), people: toNames(staffAll) };
+    }
+
+    // AniList: избранные персонажи/стафф (kind: 'characters'|'staff'). id не мостится с Shiki,
+    // поэтому берём только имена (full — ромадзи, native — оригинал).
+    async function cmpFetchAniListFavPeople(userName, kind) {
+        const arr = []; let page = 1;
+        while (true) {
+            const q = `query($n:String,$p:Int){User(name:$n){favourites{${kind}(page:$p){pageInfo{hasNextPage} nodes{name{full native}}}}}}`;
+            const res = await anilistQuery(q, { n: userName, p: page }, true);
+            const fav = res && res.data && res.data.User && res.data.User.favourites && res.data.User.favourites[kind];
+            if (!fav) break;
+            for (const n of (fav.nodes || [])) arr.push({ name: (n.name && n.name.full) || '', native: (n.name && n.name.native) || '' });
+            if (!fav.pageInfo || !fav.pageInfo.hasNextPage) break;
+            page++; await new Promise(r => setTimeout(r, 700));
+        }
+        return arr;
+    }
+
+    // Нормализация имени для приблизительного матча: нижний регистр, ё->е, разбивка по
+    // не-буквам, сортировка токенов (гасит разный порядок «Имя Фамилия»).
+    function cmpNormName(s) { return (s || '').toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/i).filter(Boolean).sort().join(' '); }
+
+    // Сравнение избранных персонажей/стаффа по имени (приблизительно, без id-моста).
+    function cmpNameDiff(shikiArr, alArr) {
+        const alKeys = new Set(alArr.map(x => cmpNormName(x.name)).filter(Boolean));
+        const shKeys = new Set(shikiArr.map(x => cmpNormName(x.romaji || x.name)).filter(Boolean));
+        const onlyShiki = shikiArr.filter(x => { const k = cmpNormName(x.romaji || x.name); return k && !alKeys.has(k); }).map(x => ({ title: x.name }));
+        const onlyAl = alArr.filter(x => { const k = cmpNormName(x.name); return k && !shKeys.has(k); }).map(x => ({ title: x.name || x.native }));
+        return { onlyShiki, onlyAl, shikiCount: shikiArr.length, alCount: alArr.length };
+    }
+
+    // D: глубокая проверка каталогов (батчами). Возвращает множества MAL id, которые
+    // РЕАЛЬНО существуют в каталоге другой площадки (не в списке — а вообще в базе).
+    async function cmpDeepCheck(onlyShiki, onlyAl, setStatus) {
+        const alHas = new Set(), shikiHas = new Set();
+        if (setStatus) setStatus('Глубокая проверка: каталог AniList...');
+        for (const [type, ids] of [['ANIME', onlyShiki.anime], ['MANGA', onlyShiki.manga]]) {
+            for (let i = 0; i < ids.length; i += 50) {
+                const chunk = ids.slice(i, i + 50);
+                const res = await anilistQuery(`query($m:[Int],$t:MediaType){Page(page:1,perPage:50){media(idMal_in:$m,type:$t){idMal}}}`, { m: chunk, t: type });
+                const media = (res && res.data && res.data.Page && res.data.Page.media) || [];
+                media.forEach(m => { if (m.idMal) alHas.add(m.idMal); });
+                await new Promise(r => setTimeout(r, 700));
+            }
+        }
+        if (setStatus) setStatus('Глубокая проверка: каталог Shikimori...');
+        for (const [ep, ids] of [['animes', onlyAl.anime], ['mangas', onlyAl.manga]]) {
+            for (let i = 0; i < ids.length; i += 50) {
+                const chunk = ids.slice(i, i + 50);
+                const r = await fetchShiki(`/api/${ep}?ids=${chunk.join(',')}&limit=50`);
+                const data = (r && r.data) || [];
+                if (Array.isArray(data)) data.forEach(m => { if (m && m.id) shikiHas.add(m.id); });
+                await new Promise(r => setTimeout(r, 700));
+            }
+        }
+        return { alHas, shikiHas };
+    }
+
+    function cmpStats(map) {
+        const st = {}; CMP_STATUS_ORDER.forEach(s => st[s] = 0);
+        let scored = 0, sum = 0;
+        for (const e of map.values()) {
+            if (e.status && st[e.status] !== undefined) st[e.status]++;
+            if (e.score10 > 0) { scored++; sum += e.score10; }
+        }
+        return { total: map.size, byStatus: st, mean: scored ? sum / scored : 0 };
+    }
+
+    // Расхождения по одному типу (anime|manga). Возвращает ведёрки со списками.
+    function cmpDiff(shiki, al, type) {
+        // Множество idMal, на которые ссылаются связи записей AniList (для детекта «связанных»).
+        const alRelated = new Set();
+        for (const a of al.values()) for (const rid of (a.relations || [])) alRelated.add(rid);
+
+        const ids = new Set([...shiki.keys(), ...al.keys()]);
+        const out = { onlyShiki: [], onlyShikiRel: [], onlyAl: [], onlyAlRel: [], status: [], score: [], progress: [], rewatch: [], notes: [] };
+        for (const id of ids) {
+            const s = shiki.get(id), a = al.get(id);
+            if (s && !a) {
+                // B: если на этот тайтл ссылается какая-то запись AniList (сиквел/часть) — «связанный».
+                (alRelated.has(id) ? out.onlyShikiRel : out.onlyShiki).push({ id, title: s.title, info: cmpStatusLabel(s.status) });
+                continue;
+            }
+            if (a && !s) {
+                // B: если запись AniList связана с чем-то, что ЕСТЬ на Shiki — «связанный».
+                const rel = (a.relations || []).some(rid => shiki.has(rid));
+                (rel ? out.onlyAlRel : out.onlyAl).push({ id, title: a.title, info: cmpStatusLabel(a.status) });
+                continue;
+            }
+            const title = a.title || s.title;
+            if (s.status !== a.status) out.status.push({ id, title, shiki: cmpStatusLabel(s.status), al: cmpStatusLabel(a.status) });
+            if (Math.round(s.score10) !== Math.round(a.score10)) out.score.push({ id, title, shiki: cmpFmtScore(s.score10), al: cmpFmtScore(a.score10) });
+            let pDiff = s.progress !== a.progress || (type === 'manga' && s.volumes !== a.volumes);
+            if (pDiff) out.progress.push({ id, title, shiki: cmpFmtProg(s, type), al: cmpFmtProg(a, type) });
+            if (s.rewatches !== a.rewatches) out.rewatch.push({ id, title, shiki: s.rewatches, al: a.rewatches });
+            if (s.notes !== a.notes && (s.notes || a.notes)) out.notes.push({ id, title, shiki: s.notes ? 'есть' : '—', al: a.notes ? 'есть' : '—' });
+        }
+        return out;
+    }
+
+    function cmpFavDiff(shikiFav, alFav) {
+        const ids = new Set([...shikiFav.keys(), ...alFav.keys()]);
+        const onlyShiki = [], onlyAl = [];
+        for (const id of ids) {
+            if (shikiFav.has(id) && !alFav.has(id)) onlyShiki.push({ id, title: shikiFav.get(id) });
+            else if (alFav.has(id) && !shikiFav.has(id)) onlyAl.push({ id, title: alFav.get(id) });
+        }
+        return { onlyShiki, onlyAl, shikiCount: shikiFav.size, alCount: alFav.size };
+    }
+
+    // Резолв Shikimori user id по логину (ник) или числовому id.
+    async function cmpResolveShikiUser(login) {
+        const isNum = /^\d+$/.test(login);
+        const path = isNum ? `/api/users/${login}` : `/api/users/${encodeURIComponent(login)}?is_nickname=1`;
+        const r = await fetchShiki(path);
+        if (r && r.data && r.data.id) return r.data.id;
+        throw new Error('Пользователь Shikimori не найден: ' + login);
+    }
+
+    // --- Рендер ---
+    function cmpRenderSummary(label, sh, al) {
+        const rows = CMP_STATUS_ORDER.map(s =>
+            `<tr><td>${CMP_STATUS_LABEL[s]}</td><td>${sh.byStatus[s]}</td><td>${al.byStatus[s]}</td><td style="color:rgb(var(--color-text-light));">${al.byStatus[s] - sh.byStatus[s] > 0 ? '+' : ''}${al.byStatus[s] - sh.byStatus[s] || ''}</td></tr>`
+        ).join('');
+        return `<table class="amk-table" style="margin-bottom:12px;">
+            <thead><tr><th>${cmpEsc(label)}</th><th style="width:70px;color:rgb(var(--color-pink));">Shiki</th><th style="width:70px;color:rgb(var(--color-blue));">AniList</th><th style="width:50px;">Δ</th></tr></thead>
+            <tbody>${rows}
+            <tr style="font-weight:700;"><td>Всего</td><td>${sh.total}</td><td>${al.total}</td><td>${al.total - sh.total || ''}</td></tr>
+            <tr><td>Средняя оценка</td><td>${sh.mean ? sh.mean.toFixed(2) : '—'}</td><td>${al.mean ? al.mean.toFixed(2) : '—'}</td><td></td></tr>
+            </tbody></table>`;
+    }
+
+    function cmpRenderDiff(diff, ignore, catalog) {
+        const notIgn = arr => arr.filter(x => !ignore.has(Number(x.id)));
+        const ignBtn = id => `<span class="amk-x cmp-ignore" data-id="${id}" title="Скрыть (в игнор)">✕</span>`;
+        const row = (x, right) => `<div class="amk-diffrow"><span class="amk-name">${cmpEsc(x.title)}</span><span class="amk-meta">${right || ''}</span>${ignBtn(x.id)}</div>`;
+        const sec = (label, arr, fmt) => {
+            const a = notIgn(arr);
+            if (!a.length) return '';
+            const items = a.slice(0, 500).map(fmt).join('');
+            const more = a.length > 500 ? `<div style="opacity:.6;padding:6px;">…ещё ${a.length - 500}</div>` : '';
+            return `<details class="amk-collapse"><summary>${cmpEsc(label)} <span class="amk-count">(${a.length})</span></summary><div class="amk-collapse-body">${items}${more}</div></details>`;
+        };
+        let h = '';
+        // A: нейтральные «в списке только на одной площадке» — это НЕ ошибка синка.
+        // D: если была глубокая проверка — делим на «есть/нет в каталоге другой площадки».
+        if (catalog) {
+            h += sec('Только на Shikimori — ЕСТЬ в каталоге AniList (можно добавить)', diff.onlyShiki.filter(x => catalog.alHas.has(Number(x.id))), x => row(x, cmpEsc(x.info)));
+            h += sec('Только на Shikimori — НЕТ в каталоге AniList', diff.onlyShiki.filter(x => !catalog.alHas.has(Number(x.id))), x => row(x, cmpEsc(x.info)));
+            h += sec('Только на AniList — ЕСТЬ в каталоге Shikimori (можно добавить)', diff.onlyAl.filter(x => catalog.shikiHas.has(Number(x.id))), x => row(x, cmpEsc(x.info)));
+            h += sec('Только на AniList — НЕТ в каталоге Shikimori', diff.onlyAl.filter(x => !catalog.shikiHas.has(Number(x.id))), x => row(x, cmpEsc(x.info)));
+        } else {
+            h += sec('В списке только на Shikimori', diff.onlyShiki, x => row(x, cmpEsc(x.info)));
+            h += sec('В списке только на AniList', diff.onlyAl, x => row(x, cmpEsc(x.info)));
+        }
+        // B: связанные записи (деление на сезоны / сиквелы) — отдельным свёрнутым блоком.
+        const rel = [...diff.onlyShikiRel, ...diff.onlyAlRel];
+        h += sec('Связано с уже отслеживаемым (деление на сезоны / сиквелы)', rel, x => row(x, cmpEsc(x.info)));
+        // Реальные разногласия по СОВПАВШИМ (один MAL id) тайтлам.
+        h += sec('Разный статус', diff.status, x => row(x, `S: ${cmpEsc(x.shiki)} | A: ${cmpEsc(x.al)}`));
+        h += sec('Разная оценка', diff.score, x => row(x, `S: ${cmpEsc(x.shiki)} | A: ${cmpEsc(x.al)}`));
+        h += sec('Разный прогресс', diff.progress, x => row(x, `S: ${cmpEsc(x.shiki)} | A: ${cmpEsc(x.al)}`));
+        h += sec('Разные пересмотры', diff.rewatch, x => row(x, `S: ${cmpEsc(x.shiki)} | A: ${cmpEsc(x.al)}`));
+        h += sec('Разные заметки', diff.notes, x => row(x, `S: ${cmpEsc(x.shiki)} | A: ${cmpEsc(x.al)}`));
+        const total = ['onlyShiki', 'onlyAl', 'onlyShikiRel', 'onlyAlRel', 'status', 'score', 'progress', 'rewatch', 'notes'].reduce((n, k) => n + notIgn(diff[k]).length, 0);
+        if (!total) h += `<div style="opacity:.6;padding:8px;">Расхождений нет.</div>`;
+        return h;
+    }
+
+    function cmpRenderFavs(favA, favM, ignore) {
+        const notIgn = arr => arr.filter(x => !ignore.has(Number(x.id)));
+        const ignBtn = id => `<span class="amk-x cmp-ignore" data-id="${id}" title="Скрыть (в игнор)">✕</span>`;
+        const sec = (label, arr) => {
+            const a = notIgn(arr);
+            if (!a.length) return '';
+            const items = a.slice(0, 500).map(x => `<div class="amk-diffrow"><span class="amk-name">${cmpEsc(x.title)}</span>${ignBtn(x.id)}</div>`).join('');
+            return `<details class="amk-collapse"><summary>${cmpEsc(label)} <span class="amk-count">(${a.length})</span></summary><div class="amk-collapse-body">${items}</div></details>`;
+        };
+        let h = `<div style="font-size:13px;margin-bottom:6px;">Избранное — Аниме: <b style="color:rgb(var(--color-pink));">${favA.shikiCount}</b> Shiki / <b style="color:rgb(var(--color-blue));">${favA.alCount}</b> AniList · Манга: <b style="color:rgb(var(--color-pink));">${favM.shikiCount}</b> / <b style="color:rgb(var(--color-blue));">${favM.alCount}</b></div>`;
+        h += sec('Избранное аниме: только в Shikimori', favA.onlyShiki);
+        h += sec('Избранное аниме: только в AniList', favA.onlyAl);
+        h += sec('Избранное манга: только в Shikimori', favM.onlyShiki);
+        h += sec('Избранное манга: только в AniList', favM.onlyAl);
+        if (!notIgn(favA.onlyShiki).length && !notIgn(favA.onlyAl).length && !notIgn(favM.onlyShiki).length && !notIgn(favM.onlyAl).length) h += `<div style="opacity:.6;padding:8px;">Избранное совпадает.</div>`;
+        return h;
+    }
+
+    // Избранные персонажи/стафф — сравнение по имени (без id, приблизительно; без игнора).
+    function cmpRenderNameFavs(label, diff) {
+        const sec = (l, arr) => {
+            if (!arr.length) return '';
+            const items = arr.slice(0, 500).map(x => `<div class="amk-diffrow"><span class="amk-name">${cmpEsc(x.title)}</span></div>`).join('');
+            const more = arr.length > 500 ? `<div style="opacity:.6;padding:6px;">…ещё ${arr.length - 500}</div>` : '';
+            return `<details class="amk-collapse"><summary>${cmpEsc(l)} <span class="amk-count">(${arr.length})</span></summary><div class="amk-collapse-body">${items}${more}</div></details>`;
+        };
+        let h = `<div style="font-size:13px;margin:8px 0 4px;"><b>${cmpEsc(label)}</b> — <b style="color:rgb(var(--color-pink));">${diff.shikiCount}</b> Shiki / <b style="color:rgb(var(--color-blue));">${diff.alCount}</b> AniList <span style="opacity:.5;">(матч по имени, приблизительно)</span></div>`;
+        h += sec(label + ': только в Shikimori', diff.onlyShiki);
+        h += sec(label + ': только в AniList', diff.onlyAl);
+        return h;
+    }
+
+    // Пересчитывает дифф из снимка cmpLast и рендерит (с учётом игнор-листа). Вызывается
+    // и после скана, и после изменения игнора — без повторной загрузки данных.
+    function cmpRender(resultEl) {
+        if (!cmpLast) return;
+        const ignore = cmpGetIgnore();
+        const { shA, alA, shM, alM, shFav, alFavA, alFavM, alFavChar, alFavStaff, catalog } = cmpLast;
+        const stA = { sh: cmpStats(shA), al: cmpStats(alA) };
+        const stM = { sh: cmpStats(shM), al: cmpStats(alM) };
+        const dA = cmpDiff(shA, alA, 'anime');
+        const dM = cmpDiff(shM, alM, 'manga');
+        const favA = cmpFavDiff(shFav.anime, alFavA);
+        const favM = cmpFavDiff(shFav.manga, alFavM);
+        const favChar = cmpNameDiff(shFav.characters || [], alFavChar || []);
+        const favStaff = cmpNameDiff(shFav.people || [], alFavStaff || []);
+
+        const titleOf = id => {
+            id = Number(id);
+            for (const m of [shA, alA, shM, alM]) { const e = m.get(id); if (e) return e.title; }
+            for (const fm of [shFav.anime, alFavA, shFav.manga, alFavM]) { if (fm.has(id)) return fm.get(id); }
+            return 'MAL#' + id;
+        };
+        const ignArr = [...ignore];
+        const ignHtml = ignArr.length
+            ? `<details class="amk-collapse"><summary>Игнорируемые <span class="amk-count">(${ignArr.length})</span></summary><div class="amk-collapse-body">${ignArr.map(id => `<div class="amk-diffrow"><span class="amk-name">${cmpEsc(titleOf(id))}</span><span class="cmp-unignore amk-x" data-id="${id}" title="Вернуть" style="color:rgb(var(--color-blue));opacity:.85;">↩</span></div>`).join('')}</div></details>`
+            : '';
+
+        resultEl.innerHTML =
+            `<div style="display:flex;gap:20px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:280px;">${cmpRenderSummary('Аниме', stA.sh, stA.al)}</div>
+                <div style="flex:1;min-width:280px;">${cmpRenderSummary('Манга', stM.sh, stM.al)}</div>
+             </div>
+             <div style="margin-top:6px;">${cmpRenderFavs(favA, favM, ignore)}</div>
+             ${cmpRenderNameFavs('Избранные персонажи', favChar)}
+             ${cmpRenderNameFavs('Избранный стафф', favStaff)}
+             <h3 style="margin:16px 0 4px;color:rgb(var(--color-text));">Аниме</h3>${cmpRenderDiff(dA, ignore, catalog)}
+             <h3 style="margin:16px 0 4px;color:rgb(var(--color-text));">Манга</h3>${cmpRenderDiff(dM, ignore, catalog)}
+             ${ignHtml}
+             <div style="opacity:.5;font-size:11px;margin-top:14px;line-height:1.5;">«В списке только на одной площадке» — не ошибка синка, а различие каталогов/списков. «Связано с уже отслеживаемым» — вероятно деление на сезоны или сиквелы (по связям AniList). Крестик ✕ — скрыть строку (игнор, запоминается). Даты не сравниваются. Оценки нормализованы к 10-балльной. Сопоставление по MAL id.</div>`;
+
+        resultEl.querySelectorAll('.cmp-ignore').forEach(el => el.onclick = () => { cmpAddIgnore(el.dataset.id); cmpRender(resultEl); });
+        resultEl.querySelectorAll('.cmp-unignore').forEach(el => el.onclick = () => { cmpRemoveIgnore(el.dataset.id); cmpRender(resultEl); });
+    }
+
+    async function cmpRunScan(shikiLogin, alName, statusEl, resultEl, deepCheck) {
+        const setStatus = t => { if (statusEl) statusEl.textContent = t; };
+        try {
+            GM_setValue('SHIKI_LOGIN', shikiLogin);
+            // AniList-имя: если не задано — берём из Viewer (нужен токен).
+            if (!alName) {
+                setStatus('Определяю пользователя AniList...');
+                const v = await anilistQuery('query{Viewer{name}}', {}, true);
+                alName = v && v.data && v.data.Viewer && v.data.Viewer.name;
+                if (!alName) throw new Error('Не удалось определить AniList-пользователя. Укажите имя вручную или задайте токен в настройках.');
+            }
+            setStatus('Ищу пользователя Shikimori...');
+            const shikiId = await cmpResolveShikiUser(shikiLogin);
+
+            setStatus('Загружаю списки (аниме)...');
+            const [shA, alA] = [await cmpFetchShikiList(shikiId, 'anime'), await cmpFetchAniListList(alName, 'ANIME')];
+            setStatus('Загружаю списки (манга)...');
+            const [shM, alM] = [await cmpFetchShikiList(shikiId, 'manga'), await cmpFetchAniListList(alName, 'MANGA')];
+            setStatus('Загружаю избранное...');
+            const shFav = await cmpFetchShikiFavs(shikiId);
+            const alFavA = await cmpFetchAniListFavs(alName, 'anime');
+            const alFavM = await cmpFetchAniListFavs(alName, 'manga');
+            const alFavChar = await cmpFetchAniListFavPeople(alName, 'characters');
+            const alFavStaff = await cmpFetchAniListFavPeople(alName, 'staff');
+
+            // D: глубокая проверка каталогов (опционально, батчами).
+            let catalog = null;
+            if (deepCheck) {
+                const dA0 = cmpDiff(shA, alA, 'anime');
+                const dM0 = cmpDiff(shM, alM, 'manga');
+                catalog = await cmpDeepCheck(
+                    { anime: dA0.onlyShiki.map(x => x.id), manga: dM0.onlyShiki.map(x => x.id) },
+                    { anime: dA0.onlyAl.map(x => x.id), manga: dM0.onlyAl.map(x => x.id) },
+                    setStatus
+                );
+            }
+
+            setStatus('Сравниваю...');
+            cmpLast = { shA, alA, shM, alM, shFav, alFavA, alFavM, alFavChar, alFavStaff, catalog };
+            cmpRender(resultEl);
+            setStatus(`Готово: Shiki ${shA.size + shM.size} / AniList ${alA.size + alM.size} тайтлов.`);
+        } catch (e) {
+            Logger('ERROR', 'Сканер сравнения: ошибка', e);
+            setStatus('Ошибка: ' + (e && e.message ? e.message : e));
+        }
+    }
+
+    async function openCompareModal() {
+        if (document.getElementById('am-cmp-overlay')) return;
+        const overlay = document.createElement('div');
+        overlay.id = 'am-cmp-overlay';
+        overlay.className = 'amk-overlay';
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `
+            <div class="amk-modal amk-wide">
+                <div class="amk-head">
+                    <h2 class="amk-title"><span class="amk-dot"></span><span style="color:rgb(var(--color-pink));">Shikimori</span>&nbsp;⇄&nbsp;<span style="color:rgb(var(--color-blue));">AniList</span> <span class="amk-sub">сравнение списков</span></h2>
+                    <button class="amk-close" id="am-cmp-close" title="Закрыть">✕</button>
+                </div>
+                <div class="amk-head" style="border-bottom:1px solid rgba(var(--color-text-light),0.06);">
+                    <input class="amk-input" id="am-cmp-shiki" placeholder="Логин Shikimori" style="flex:1;min-width:150px;width:auto;">
+                    <input class="amk-input" id="am-cmp-al" placeholder="Имя AniList (авто по токену)" style="flex:1;min-width:150px;width:auto;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;white-space:nowrap;" title="Проверяет по каталогам обеих площадок наличие недостающих тайтлов. Медленнее (доп. запросы)."><input type="checkbox" id="am-cmp-deep"> Глубокая проверка</label>
+                    <button class="amk-btn amk-btn-primary" id="am-cmp-run">Сканировать</button>
+                </div>
+                <div id="am-cmp-status" style="padding:8px 18px;font-size:12px;color:rgb(var(--color-text-light));min-height:18px;flex-shrink:0;"></div>
+                <div class="amk-body" id="am-cmp-result" style="padding-top:6px;"></div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const closeEl = () => overlay.remove();
+        document.getElementById('am-cmp-close').onclick = closeEl;
+        overlay.addEventListener('click', e => { if (e.target === overlay) closeEl(); });
+
+        const shikiInput = document.getElementById('am-cmp-shiki');
+        const alInput = document.getElementById('am-cmp-al');
+        shikiInput.value = GM_getValue('SHIKI_LOGIN', '');
+        // Префилл имени AniList из Viewer (если есть токен) — без блокировки открытия.
+        anilistQuery('query{Viewer{name}}', {}, true).then(v => {
+            const n = v && v.data && v.data.Viewer && v.data.Viewer.name;
+            if (n && !alInput.value) alInput.placeholder = n + ' (по токену)';
+        }).catch(() => {});
+
+        const statusEl = document.getElementById('am-cmp-status');
+        const resultEl = document.getElementById('am-cmp-result');
+        const run = () => {
+            const login = shikiInput.value.trim();
+            if (!login) { statusEl.textContent = 'Укажите логин Shikimori.'; return; }
+            const deep = document.getElementById('am-cmp-deep').checked;
+            document.getElementById('am-cmp-run').disabled = true;
+            cmpRunScan(login, alInput.value.trim(), statusEl, resultEl, deep).finally(() => {
+                const b = document.getElementById('am-cmp-run'); if (b) b.disabled = false;
+            });
+        };
+        document.getElementById('am-cmp-run').onclick = run;
+        shikiInput.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+        alInput.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
     }
 
     // ==========================================
@@ -1137,36 +1589,57 @@
             await processFavorites(uniqStaff, 'STAFF', exAlFavs.staff, 'staffId');
         }
 
+        // На Shikimori переменных тем AniList (--color-*) нет — выводим их из реальных
+        // цветов страницы (фон/текст), чтобы кит подстроился и под светлую, и под тёмную
+        // тему Shiki. Акцент/статусы — фиксированные.
+        function amkShikiTokens(el) {
+            const triple = (c, fb) => { const m = (c || '').match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/); return m ? `${m[1]} ${m[2]} ${m[3]}` : fb; };
+            let bg = getComputedStyle(document.body).backgroundColor;
+            if (!bg || bg === 'transparent' || bg.replace(/\s/g, '').includes('rgba(0,0,0,0)')) bg = getComputedStyle(document.documentElement).backgroundColor;
+            const bgT = triple(bg, '18 18 28');
+            const txT = triple(getComputedStyle(document.body).color, '226 232 240');
+            const vars = { '--color-foreground': bgT, '--color-background': bgT, '--color-background-100': bgT, '--color-background-200': bgT, '--color-background-300': bgT, '--color-text': txT, '--color-text-light': txT, '--color-blue': '61 187 238', '--color-pink': '243 139 168', '--color-red': '252 129 129', '--color-green': '166 227 161', '--color-orange': '246 193 119', '--color-purple': '183 148 244' };
+            for (const k in vars) el.style.setProperty(k, vars[k]);
+        }
+
         async function openExportModal(btn) {
             if (document.getElementById('shiki-export-overlay')) return;
             const urlPath = window.location.pathname.split('/');
             const dUser = (urlPath.length > 1 && !['animes', 'mangas', 'forum'].includes(urlPath[1])) ? urlPath[1] : "";
             const tok = GM_getValue("AL_TOKEN", "");
 
+            const sw = (id, on = true) => `<label class="amk-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span class="amk-track"></span><span class="amk-thumb"></span></label>`;
             const overlayTemplate = `
-                <div id="shiki-export-overlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);z-index:999999;display:flex;justify-content:center;align-items:center;font-family:sans-serif;animation:player-fade 0.3s ease;">
-                    <div style="background:#12121c;color:#e2e8f0;padding:25px;border-radius:16px;width:480px;box-shadow:0 15px 50px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.1);position:relative;">
-                        <button id="se-close" style="position:absolute;top:15px;right:20px;background:none;border:none;color:#fc8181;font-size:24px;cursor:pointer;transition:0.2s;">✖</button>
-                        <h2 style="margin-top:0;margin-bottom:5px;color:#3dbbee;text-align:center;text-transform:uppercase;letter-spacing:1px;font-size:18px;">Экспорт Базы</h2>
-                        <div style="text-align:center; color:#a0aec0; font-size:13px; margin-bottom:20px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;"><span style="color:#f38ba8;">Shikimori</span> ➜ <span style="color:#89b4fa;">AniList</span></div>
-                        <div style="display:flex;gap:10px;margin-bottom:20px;">
-                            <input type="text" id="se-user" placeholder="Логин Shikimori" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#fff;outline:none;">
-                            <input type="password" id="se-token" placeholder="Токен AniList" style="flex:1;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#fff;outline:none;">
+                <div id="shiki-export-overlay" class="amk-overlay" style="display:flex;">
+                    <div class="amk-modal" style="width:500px;">
+                        <div class="amk-head">
+                            <h2 class="amk-title"><span class="amk-dot"></span><span style="color:rgb(var(--color-pink));">Shikimori</span>&nbsp;➜&nbsp;<span style="color:rgb(var(--color-blue));">AniList</span> <span class="amk-sub">экспорт</span></h2>
+                            <button class="amk-close" id="se-close" title="Закрыть">✕</button>
                         </div>
-                        <div style="margin-bottom:25px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-                            <label style="display:flex;align-items:center;cursor:pointer;font-weight:600;"><input type="checkbox" id="se-anime" checked style="margin-right:8px;accent-color:#3dbbee;">Аниме</label>
-                            <label style="display:flex;align-items:center;cursor:pointer;font-weight:600;"><input type="checkbox" id="se-manga" checked style="margin-right:8px;accent-color:#3dbbee;">Манга</label>
-                            <label style="display:flex;align-items:center;cursor:pointer;font-weight:600;"><input type="checkbox" id="se-favs" checked style="margin-right:8px;accent-color:#3dbbee;">Избранное</label>
-                            <label style="display:flex;align-items:center;cursor:pointer;font-weight:600;width:100%;margin-top:5px;" title="Может занять дополнительное время для загрузки вашей истории действий"><input type="checkbox" id="se-dates" checked style="margin-right:8px;accent-color:#3dbbee;">Точные даты просмотров (история Shikimori)</label>
-                        </div>
-                        <button id="se-start" style="width:100%;padding:14px;background:rgba(61,187,238,0.2);color:#3dbbee;border:1px solid rgba(61,187,238,0.4);border-radius:10px;font-weight:700;cursor:pointer;transition:0.3s;text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;">ЗАПУСК</button>
-                        <div style="background:rgba(0,0,0,0.3);padding:15px;border-radius:8px;font-size:12px;border:1px dashed rgba(255,255,255,0.1);">
-                            <div style="margin-bottom:8px;color:#a0aec0;">Где взять токен AniList? Создайте Client <a href="https://anilist.co/settings/developer" target="_blank" style="color:#89b4fa;text-decoration:none;">здесь</a> (URL: <span style="background:#000;padding:2px 4px;border-radius:3px;">https://anilist.co/api/v2/oauth/pin</span>)</div>
-                            <div style="display:flex;gap:8px;">
-                                <input type="text" id="se-gen-client" placeholder="Client ID (цифры)" style="flex:1;padding:8px;background:#11111b;border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:6px;outline:none;">
-                                <button id="se-gen-btn" style="padding:8px 12px;background:rgba(166,227,161,0.2);color:#a6e3a1;border:1px solid rgba(166,227,161,0.4);border-radius:6px;cursor:pointer;font-weight:bold;">Создать URL</button>
+                        <div class="amk-body">
+                            <div style="display:flex;gap:10px;">
+                                <input class="amk-input" id="se-user" placeholder="Логин Shikimori" style="flex:1;width:auto;">
+                                <input class="amk-input amk-mono" type="password" id="se-token" placeholder="Токен AniList" style="flex:1;width:auto;">
                             </div>
-                            <div id="se-gen-url" style="margin-top:10px;text-align:center;"></div>
+                            <div class="amk-card">
+                                <div class="amk-card-title">Что переносить</div>
+                                <div class="amk-row"><span class="amk-row-label"><b>Аниме</b></span>${sw('se-anime')}</div>
+                                <div class="amk-row"><span class="amk-row-label"><b>Манга</b></span>${sw('se-manga')}</div>
+                                <div class="amk-row"><span class="amk-row-label"><b>Избранное</b></span>${sw('se-favs')}</div>
+                                <div class="amk-row"><span class="amk-row-label"><b>Точные даты просмотров</b><span class="amk-row-hint">из истории Shikimori (медленнее)</span></span>${sw('se-dates')}</div>
+                            </div>
+                            <div class="amk-card">
+                                <div class="amk-card-title">Токен AniList</div>
+                                <div class="amk-row-hint" style="padding:8px 2px 6px;">Создайте Client <a href="https://anilist.co/settings/developer" target="_blank" style="color:rgb(var(--color-blue));text-decoration:none;">здесь</a>, redirect URL: <code style="background:rgba(var(--color-text-light),0.12);padding:1px 5px;border-radius:4px;">https://anilist.co/api/v2/oauth/pin</code></div>
+                                <div style="display:flex;gap:8px;">
+                                    <input class="amk-input amk-mono" id="se-gen-client" placeholder="Client ID" style="flex:1;width:auto;">
+                                    <button class="amk-btn amk-btn-ghost" id="se-gen-btn">Создать URL</button>
+                                </div>
+                                <div id="se-gen-url" style="margin-top:10px;text-align:center;font-size:12px;"></div>
+                            </div>
+                        </div>
+                        <div class="amk-foot">
+                            <button class="amk-btn amk-btn-primary amk-btn-block" id="se-start">Запуск</button>
                         </div>
                     </div>
                 </div>
@@ -1176,6 +1649,7 @@
             document.getElementById('se-token').value = tok;
 
             const overlay = document.getElementById('shiki-export-overlay');
+            amkShikiTokens(overlay);
             document.getElementById('se-close').onclick = () => overlay.remove();
             overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
@@ -1185,7 +1659,7 @@
                 const authLink = document.createElement('a');
                 authLink.href = `https://anilist.co/api/v2/oauth/authorize?client_id=${cid}&response_type=token`;
                 authLink.target = "_blank";
-                authLink.style.cssText = "color:#f38ba8;text-decoration:none;font-weight:bold;display:inline-block;padding:5px 10px;border:1px solid #f38ba8;border-radius:5px;";
+                authLink.style.cssText = "color:rgb(var(--color-blue));text-decoration:none;font-weight:700;display:inline-block;padding:6px 12px;border:1px solid rgb(var(--color-blue));border-radius:6px;";
                 authLink.textContent = "👉 Клик для авторизации";
                 document.getElementById('se-gen-url').innerHTML = '';
                 document.getElementById('se-gen-url').appendChild(authLink);
@@ -1243,10 +1717,11 @@
         }
 
         const btn = document.createElement('button');
-        btn.textContent = 'ЭКСПОРТ';
-        btn.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:9999;padding:12px 22px;background:rgba(18,18,28,0.8);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.1);color:#e2e8f0;border-radius:12px;cursor:pointer;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(0,0,0,0.3);transition:all 0.3s cubic-bezier(0.4,0,0.2,1);text-transform:uppercase;letter-spacing:0.5px;';
-        btn.onmouseover = () => { btn.style.transform = 'translateY(-3px)'; btn.style.borderColor = '#3dbbee'; btn.style.color = '#3dbbee'; btn.style.background = 'rgba(30,30,45,0.95)'; };
-        btn.onmouseout = () => { btn.style.transform = 'translateY(0)'; btn.style.borderColor = 'rgba(255,255,255,0.1)'; btn.style.color = '#e2e8f0'; btn.style.background = 'rgba(18,18,28,0.8)'; };
+        btn.textContent = 'Экспорт';
+        btn.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:9999;padding:11px 20px;background:rgba(var(--color-foreground),0.8);backdrop-filter:blur(16px) saturate(170%);-webkit-backdrop-filter:blur(16px) saturate(170%);border:1px solid rgba(var(--color-text-light),0.2);color:rgb(var(--color-text));border-radius:12px;cursor:pointer;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(0,0,0,0.18);transition:border-color .2s, color .2s;letter-spacing:0.3px;';
+        amkShikiTokens(btn);
+        btn.onmouseover = () => { btn.style.borderColor = 'rgb(var(--color-blue))'; btn.style.color = 'rgb(var(--color-blue))'; };
+        btn.onmouseout = () => { btn.style.borderColor = 'rgba(var(--color-text-light),0.2)'; btn.style.color = 'rgb(var(--color-text))'; };
         btn.onclick = () => openExportModal(btn);
         document.body.appendChild(btn);
     }
@@ -1952,23 +2427,35 @@
                 });
 
                 if (sorted.length > 5) {
-                    const toggleBtn = document.createElement('button');
-                    toggleBtn.className = 'franchise-toggle';
-                    toggleBtn.innerText = `Развернуть (${sorted.length})`;
+                    // Верхняя кнопка «Свернуть» (sticky, видна только в развёрнутом виде): при
+                    // 50–100 тайтлах нижняя кнопка улетает вниз, поэтому дублируем сверху.
+                    const topToggle = document.createElement('button');
+                    topToggle.className = 'franchise-toggle franchise-toggle-top';
+                    topToggle.innerText = 'Свернуть ▲';
+                    topToggle.style.display = 'none';
+                    fTitle.after(topToggle);
+
+                    const bottomToggle = document.createElement('button');
+                    bottomToggle.className = 'franchise-toggle';
+                    bottomToggle.innerText = `Развернуть (${sorted.length}) ▼`;
+
                     let expanded = false;
-                    toggleBtn.onclick = () => {
-                        expanded = !expanded;
-                        if (expanded) {
-                            list.classList.add('expanded'); toggleBtn.innerText = 'Свернуть';
-                        } else {
-                            list.classList.remove('expanded'); toggleBtn.innerText = `Развернуть (${sorted.length})`;
+                    const setExpanded = (state) => {
+                        expanded = state;
+                        list.classList.toggle('expanded', expanded);
+                        topToggle.style.display = expanded ? 'block' : 'none';
+                        bottomToggle.innerText = expanded ? 'Свернуть ▲' : `Развернуть (${sorted.length}) ▼`;
+                        if (!expanded) {
                             setTimeout(() => {
                                 const activeNode = list.querySelector('.active');
                                 if (activeNode) list.scrollTop = activeNode.offsetTop - (list.clientHeight / 2) + (activeNode.clientHeight / 2);
+                                franchiseBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                             }, 50);
                         }
                     };
-                    franchiseBox.appendChild(toggleBtn);
+                    topToggle.onclick = () => setExpanded(false);
+                    bottomToggle.onclick = () => setExpanded(!expanded);
+                    franchiseBox.appendChild(bottomToggle);
                 }
 
                 currentMediaData.franchiseBox = franchiseBox;
@@ -2058,9 +2545,28 @@
                 const titleEl = document.createElement('h2');
                 titleEl.textContent = 'Музыкальные темы'; titleEl.style.margin = '0'; titleEl.style.width = '100%'; titleEl.style.textAlign = 'center';
 
+                // Формирование поисковой ссылки под выбранный сервис
+                const musicUrl = (svc, q) => {
+                    const eq = encodeURIComponent(q);
+                    if (svc === 'vk') return `https://vk.com/audio?q=${eq}`;
+                    if (svc === 'spotify') return `https://open.spotify.com/search/${eq}`;
+                    if (svc === 'sc') return `https://soundcloud.com/search?q=${eq}`;
+                    return `https://music.youtube.com/search?q=${eq}`;
+                };
+                // Брендовые иконки (монохром, fill наследуется от цвета кнопки)
+                const svcIcons = {
+                    vk: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M13.16 18.06c-6.27 0-9.85-4.3-10-11.45h3.14c.1 5.25 2.42 7.47 4.25 7.93V6.61h2.96v4.53c1.81-.19 3.71-2.26 4.35-4.53h2.96c-.49 2.8-2.56 4.87-4.03 5.72 1.47.69 3.83 2.49 4.73 5.73h-3.26c-.7-2.18-2.44-3.87-4.75-4.09v4.09h-.36z"/></svg>',
+                    yt: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10 10-4.49 10-10S17.51 2 12 2zm-1.75 14.5v-9l6 4.5-6 4.5z"/></svg>',
+                    spotify: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.59 14.42a.62.62 0 0 1-.86.21c-2.35-1.44-5.3-1.76-8.79-.96a.62.62 0 1 1-.28-1.22c3.81-.87 7.08-.5 9.72 1.11.29.18.39.57.21.86zm1.23-2.73a.78.78 0 0 1-1.07.26c-2.69-1.65-6.79-2.13-9.98-1.17a.78.78 0 1 1-.45-1.49c3.64-1.1 8.16-.57 11.24 1.33.37.22.49.71.26 1.07zm.11-2.85C14.72 8.95 9.5 8.76 6.53 9.66a.94.94 0 1 1-.54-1.8c3.41-1.03 9.17-.83 12.79 1.31a.94.94 0 0 1-.96 1.62z"/></svg>',
+                    sc: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M1.4 13.2c-.08 0-.14.06-.15.15l-.18 1.85.18 1.82c.01.08.07.14.15.14.08 0 .14-.06.15-.15l.21-1.81-.21-1.85c-.01-.08-.07-.15-.15-.15zm1.02-.95c-.09 0-.16.07-.17.16l-.24 2.79.24 2.7c.01.09.08.16.17.16.09 0 .16-.07.17-.16l.27-2.7-.27-2.79c-.01-.09-.08-.16-.17-.16zm7.72-3.13c-.14 0-.25.11-.26.25l-.3 6.63.3 3.6c.01.14.12.25.26.25.14 0 .25-.11.26-.25l.34-3.6-.34-6.63c-.01-.14-.12-.25-.26-.25zm-2.5.9c-.13 0-.23.1-.24.23l-.27 5.98.27 3.63c.01.13.11.23.24.23s.23-.1.24-.24l.31-3.62-.31-5.98c-.01-.13-.11-.23-.24-.23zm-2.48.62c-.11 0-.2.09-.21.21l-.28 5.38.28 3.65c.01.12.1.21.21.21.11 0 .2-.09.21-.21l.31-3.65-.31-5.38c-.01-.12-.1-.21-.21-.21zm-1.24-.12c-.11 0-.19.08-.2.2l-.26 5.31.26 3.64c.01.11.09.2.2.2.1 0 .19-.09.2-.2l.29-3.64-.29-5.31c-.01-.12-.1-.2-.2-.2zm8.75-1.03c-.15 0-.27.12-.28.28l-.27 6.28.27 3.58c.01.16.13.28.28.28.15 0 .27-.12.28-.28l.3-3.58-.3-6.28c-.01-.16-.13-.28-.28-.28zm2.71 10.7c1.86 0 3.37-1.5 3.37-3.35 0-1.86-1.51-3.36-3.37-3.36-.46 0-.9.09-1.3.26-.27-3.04-2.83-5.43-5.95-5.43-.76 0-1.5.15-2.16.4-.26.1-.33.2-.33.4v11.09c0 .21.16.38.36.4h9.38z"/></svg>'
+                };
+                const svcTitles = { vk: 'VK Музыка', yt: 'YouTube Music', spotify: 'Spotify', sc: 'SoundCloud' };
+
                 const serviceToggle = document.createElement('div');
                 serviceToggle.className = 'am-service-toggle';
-                serviceToggle.innerHTML = `<div class="am-service-btn ${activeMusicService === 'vk' ? 'active' : ''}" data-val="vk">VK</div><div class="am-service-btn ${activeMusicService === 'yt' ? 'active' : ''}" data-val="yt">YouTube</div>`;
+                serviceToggle.innerHTML = ['vk', 'yt', 'spotify', 'sc'].map(v =>
+                    `<div class="am-service-btn ${activeMusicService === v ? 'active' : ''}" data-val="${v}" title="${svcTitles[v]}" aria-label="${svcTitles[v]}">${svcIcons[v]}</div>`
+                ).join('');
 
                 headerFlex.appendChild(titleEl); headerFlex.appendChild(serviceToggle);
 
@@ -2073,11 +2579,11 @@
 
                     const wrap = document.createElement('a');
                     wrap.className = 'franchise-node am-theme-track'; wrap.dataset.query = searchQ;
-                    wrap.href = activeMusicService === 'vk' ? `https://vk.com/audio?q=${encodeURIComponent(searchQ)}` : `https://music.youtube.com/search?q=${encodeURIComponent(searchQ)}`;
+                    wrap.href = musicUrl(activeMusicService, searchQ);
                     wrap.target = '_blank'; wrap.style.cssText = 'flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 8px; cursor: pointer; text-decoration: none;';
 
                     const typeBadge = document.createElement('span'); typeBadge.className = 'node-kind';
-                    typeBadge.style.cssText = `font-size: 0.85rem; padding: 2px 6px; background: ${type === 'OP' ? 'rgba(61,187,238,0.2)' : 'rgba(252,129,129,0.2)'}; color: ${type === 'OP' ? '#3dbbee' : '#fc8181'};`;
+                    typeBadge.style.cssText = `font-size:0.8rem; padding:2px 9px; border-radius:6px; font-weight:800; background:${type === 'OP' ? 'rgba(var(--color-blue),0.2)' : 'rgba(var(--color-red),0.22)'}; color:${type === 'OP' ? 'rgb(var(--color-blue))' : 'rgb(var(--color-red))'}; border:1px solid ${type === 'OP' ? 'rgba(var(--color-blue),0.55)' : 'rgba(var(--color-red),0.65)'};`;
                     typeBadge.textContent = type;
 
                     const titleSpan = document.createElement('span'); titleSpan.className = 'node-title';
@@ -2094,15 +2600,13 @@
                 themesBox.appendChild(headerFlex); themesBox.appendChild(listEl); themesBox.style.display = 'block';
 
                 serviceToggle.querySelectorAll('.am-service-btn').forEach(btn => {
-                    btn.onclick = (e) => {
+                    btn.onclick = () => {
                         serviceToggle.querySelectorAll('.am-service-btn').forEach(b => b.classList.remove('active'));
-                        e.target.classList.add('active');
-                        activeMusicService = e.target.dataset.val; GM_setValue('am_music_service', activeMusicService);
+                        btn.classList.add('active');
+                        activeMusicService = btn.dataset.val; GM_setValue('am_music_service', activeMusicService);
 
-                        const tracks = listEl.querySelectorAll('.am-theme-track');
-                        tracks.forEach(tr => {
-                            const q = tr.dataset.query;
-                            tr.href = activeMusicService === 'vk' ? `https://vk.com/audio?q=${encodeURIComponent(q)}` : `https://music.youtube.com/search?q=${encodeURIComponent(q)}`;
+                        listEl.querySelectorAll('.am-theme-track').forEach(tr => {
+                            tr.href = musicUrl(activeMusicService, tr.dataset.query);
                         });
                     };
                 });
@@ -2120,23 +2624,26 @@
             const romaji = malData.title.romaji; const ruTitle = shikiData?.russian || romaji;
             const yummyDomain = settings.yummyDomain || 'yummyanime.tv'; const animegoDomain = settings.animegoDomain || 'animego.org'; const mangalibDomain = settings.mangalibDomain || 'mangalib.me';
 
-            const createExtLink = (name, colorMain, colorBg, action) => {
+            // token — имя тема-токена AniList (blue/red/green/orange/pink/purple/...),
+            // цвет чипа адаптируется под тему сайта. Стили — в классе .am-extlink.
+            // Фолбэк-триплы на случай, если тема AniList не определяет часть --color-* токенов
+            const tokenFallback = { blue: '61, 187, 238', red: '252, 129, 129', green: '166, 227, 161', orange: '246, 193, 119', pink: '243, 139, 168', purple: '183, 148, 244' };
+            const createExtLink = (name, token, action) => {
                 const a = document.createElement('a');
                 if (typeof action === 'string') { a.href = action; a.target = '_blank'; a.rel = 'noopener noreferrer'; } else { a.href = '#'; a.onclick = action; }
                 a.textContent = name;
-                a.style.cssText = `text-decoration: none; font-weight: 800; font-size: 0.95rem; padding: 10px 18px; border-radius: 10px; background: ${colorBg}; color: ${colorMain}; border: 1px solid ${colorMain}40; transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94); text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: inline-block;`;
-                a.onmouseover = () => { a.style.transform = 'translateY(-3px)'; a.style.boxShadow = `0 6px 15px ${colorBg}`; a.style.background = `${colorMain}20`; a.style.borderColor = `${colorMain}80`; };
-                a.onmouseout = () => { a.style.transform = 'translateY(0)'; a.style.boxShadow = '0 4px 10px rgba(0,0,0,0.1)'; a.style.background = colorBg; a.style.borderColor = `${colorMain}40`; };
+                a.className = 'am-extlink';
+                a.style.setProperty('--c', `var(--color-${token}, ${tokenFallback[token] || '120, 130, 150'})`);
                 return a;
             };
 
             let linksAdded = 0;
-            if (settings.enableLinkRutracker) { pList.appendChild(createExtLink('RuTracker', '#ffa500', 'rgba(255,165,0,0.15)', `https://rutracker.org/forum/tracker.php?nm=${encodeURIComponent(romaji)}`)); linksAdded++; }
+            if (settings.enableLinkRutracker) { pList.appendChild(createExtLink('RuTracker', 'orange', `https://rutracker.org/forum/tracker.php?nm=${encodeURIComponent(romaji)}`)); linksAdded++; }
             if (malData.type === 'ANIME') {
-                if (settings.enableLinkYummy) { pList.appendChild(createExtLink('YummyAnime', '#ff69b4', 'rgba(255,105,180,0.15)', `https://${yummyDomain}/index.php?do=search&subaction=search&story=${encodeURIComponent(ruTitle)}`)); linksAdded++; }
-                if (settings.enableLinkAnimego) { pList.appendChild(createExtLink('AnimeGO', '#b794f4', 'rgba(128,90,213,0.15)', `https://${animegoDomain}/search/anime?q=${encodeURIComponent(ruTitle)}`)); linksAdded++; }
+                if (settings.enableLinkYummy) { pList.appendChild(createExtLink('YummyAnime', 'pink', `https://${yummyDomain}/index.php?do=search&subaction=search&story=${encodeURIComponent(ruTitle)}`)); linksAdded++; }
+                if (settings.enableLinkAnimego) { pList.appendChild(createExtLink('AnimeGO', 'purple', `https://${animegoDomain}/search/anime?q=${encodeURIComponent(ruTitle)}`)); linksAdded++; }
             } else if (malData.type === 'MANGA') {
-                if (settings.enableLinkMangalib) { pList.appendChild(createExtLink('MangaLib', '#3dbbee', 'rgba(61,187,238,0.15)', `https://${mangalibDomain}/`)); linksAdded++; }
+                if (settings.enableLinkMangalib) { pList.appendChild(createExtLink('MangaLib', 'blue', `https://${mangalibDomain}/ru/catalog?q=${encodeURIComponent(ruTitle)}`)); linksAdded++; }
             }
 
             if (linksAdded > 0) {
@@ -2152,7 +2659,7 @@
             if (!btn) {
                 const actionsContainer = document.getElementById('animori-actions');
                 if (actionsContainer) {
-                    btn = document.createElement('button'); btn.id = 'ru-player-btn'; btn.className = 'am-premium-btn pulse-glow'; btn.innerHTML = '▶ СМОТРЕТЬ'; actionsContainer.prepend(btn);
+                    btn = document.createElement('button'); btn.id = 'ru-player-btn'; btn.className = 'am-premium-btn'; btn.innerHTML = '▶ Плеер'; btn.title = 'Смотреть онлайн'; actionsContainer.prepend(btn);
                 }
             }
 
@@ -2160,7 +2667,7 @@
                 btn.style.display = 'flex';
                 if (!document.getElementById('ru-player-overlay')) {
                     const overlay = document.createElement('div'); overlay.id = 'ru-player-overlay';
-                    overlay.innerHTML = `<div id="ru-player-close">&times;</div><div id="ru-info-panel" style="margin-top:0; margin-bottom:15px;"><div style="color:rgb(var(--color-blue));font-weight:bold;font-size:16px;text-transform:uppercase;letter-spacing:1px;text-align:center;" id="info-anime-title">Загрузка...</div></div><div id="ru-translations-panel" style="display:none;"></div><div id="ru-player-container"><iframe id="ru-p-iframe" allowfullscreen allow="autoplay; fullscreen"></iframe></div><div id="ru-episodes-panel" style="display:none;"></div>`;
+                    overlay.innerHTML = `<div id="ru-player-close">&times;</div><div id="ru-info-panel"><div style="color:rgb(var(--color-blue));font-weight:bold;font-size:16px;text-transform:uppercase;letter-spacing:1px;text-align:center;" id="info-anime-title">Загрузка...</div></div><div id="ru-translations-panel" style="display:none;"></div><div id="ru-player-container"><iframe id="ru-p-iframe" allowfullscreen allow="autoplay; fullscreen"></iframe></div><div id="ru-episodes-panel" style="display:none;"></div>`;
                     document.body.appendChild(overlay);
                     const closeOverlay = () => { overlay.style.display = 'none'; document.getElementById('ru-p-iframe').src = ''; };
                     document.getElementById('ru-player-close').onclick = closeOverlay;
@@ -2204,6 +2711,8 @@
                                         if (r.translation && r.translation.title && !trMap.has(r.translation.title)) {
                                             let link = r.link;
                                             if (link.startsWith('//')) link = 'https:' + link;
+                                            // Скрываем родные селекторы (наш UI), но функционал жив — сериями рулим
+                                            // через API плеера (change_episode) без перезагрузки, даже в фуллскрине.
                                             link += (link.includes('?') ? '&' : '?') + 'hide_selectors=true';
 
                                             let eps =[];
@@ -2231,12 +2740,28 @@
 
                                     let activeTranslation = defaultTr;
                                     let activeEpisode = activeTranslation.episodes.length > 0 ? activeTranslation.episodes[0] : 1;
+                                    let loadedTranslation = null; // какая озвучка реально загружена в iframe
 
-                                    const updatePlayer = () => {
-                                        const finalLink = activeTranslation.type === 'anime-serial' ? activeTranslation.link + '&episode=' + activeEpisode : activeTranslation.link;
-                                        iframe.src = finalLink;
-                                        if (activeTranslation.type === 'anime-serial') titleEl.innerText = `${defaultTitle} — ${activeTranslation.title} (Серия ${activeEpisode})`;
-                                        else titleEl.innerText = `${defaultTitle} — ${activeTranslation.title}`;
+                                    const setTitle = () => {
+                                        titleEl.innerText = activeTranslation.type === 'anime-serial'
+                                            ? `${defaultTitle} — ${activeTranslation.title} (Серия ${activeEpisode})`
+                                            : `${defaultTitle} — ${activeTranslation.title}`;
+                                    };
+
+                                    // seamless=true — сменить серию через API плеера, без перезагрузки iframe
+                                    // (видео не перезапускается, нативный фуллскрин не слетает). Работает только
+                                    // внутри уже загруженной озвучки; смена озвучки = загрузка её ссылки.
+                                    const updatePlayer = (seamless = false) => {
+                                        const isSerial = activeTranslation.type === 'anime-serial';
+                                        if (seamless && isSerial && loadedTranslation === activeTranslation && iframe.contentWindow) {
+                                            try {
+                                                iframe.contentWindow.postMessage({ key: 'kodik_player_api', value: { method: 'change_episode', episode: activeEpisode } }, '*');
+                                            } catch (e) { Logger('ERROR', 'Kodik API change_episode', e); }
+                                        } else {
+                                            iframe.src = isSerial ? activeTranslation.link + '&episode=' + activeEpisode : activeTranslation.link;
+                                            loadedTranslation = activeTranslation;
+                                        }
+                                        setTitle();
                                     };
 
                                     const renderEpisodes = () => {
@@ -2251,7 +2776,7 @@
                                             if (isWatched) btnEp.classList.add('watched');
                                             if (ep === activeEpisode) btnEp.classList.add('active');
                                             btnEp.textContent = ep;
-                                            btnEp.onclick = () => { activeEpisode = ep; renderEpisodes(); updatePlayer(); };
+                                            btnEp.onclick = () => { activeEpisode = ep; renderEpisodes(); updatePlayer(true); };
                                             ePanel.appendChild(btnEp);
                                         });
                                     };
@@ -2284,6 +2809,19 @@
                                     };
 
                                     tPanel.style.display = 'flex'; renderTranslations(); renderEpisodes(); updatePlayer();
+
+                                    // Синхронизация: плеер сам сообщает текущую серию (автопереход по окончании,
+                                    // либо смена изнутри). Подсвечиваем её в нашей панели и правим заголовок.
+                                    // Слушатель один — снимаем предыдущий, чтобы не накапливались при переоткрытии.
+                                    if (window.__amKodikSync) window.removeEventListener('message', window.__amKodikSync);
+                                    window.__amKodikSync = (message) => {
+                                        const d = message && message.data;
+                                        if (!d || d.key !== 'kodik_player_current_episode' || !d.value) return;
+                                        const ep = Number(d.value.episode);
+                                        if (!ep || ep === activeEpisode || !activeTranslation.episodes.includes(ep)) return;
+                                        activeEpisode = ep; renderEpisodes(); setTitle();
+                                    };
+                                    window.addEventListener('message', window.__amKodikSync);
                                 } else { fallbackPlayer(); }
                             } catch(e) { fallbackPlayer('API Error'); }
                         },
@@ -2410,13 +2948,17 @@
         Logger('INFO', 'Скрипт AniMori загружается...');
 
         GM_addStyle(`
-            #animori-actions { position:fixed; bottom:25px; left:25px; z-index:9999; display:flex; gap:15px; align-items:center; }
-            .am-premium-btn { background: rgba(var(--color-background-100), 0.8); backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%); border: 1px solid rgba(var(--color-text-light), 0.2); color: rgb(var(--color-text)); padding: 12px 22px; border-radius: 12px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: center; }
-            .am-premium-btn:hover { background: rgba(var(--color-background-200), 0.95); transform: translateY(-3px); border: 1px solid rgb(var(--color-blue)); color: rgb(var(--color-blue)); box-shadow: 0 8px 25px rgba(var(--color-blue), 0.2); }
-            #am-log-btn { padding: 12px 14px; font-size: 12px; letter-spacing: 0px; }
+            /* Единый блок-пилюля из кнопок (плеер прирастает слева при наличии) */
+            #animori-actions { position:fixed; bottom:25px; left:25px; z-index:9999; display:flex; align-items:stretch; gap:0; background:rgba(var(--color-foreground),0.8); backdrop-filter:blur(16px) saturate(170%); -webkit-backdrop-filter:blur(16px) saturate(170%); border:1px solid rgba(var(--color-text-light),0.2); border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.18); overflow:hidden; }
+            .am-premium-btn { background:transparent; border:none; border-radius:0; box-shadow:none; color:rgb(var(--color-text)); padding:11px 18px; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:background .15s, color .15s; display:flex; align-items:center; justify-content:center; letter-spacing:0.3px; }
+            .am-premium-btn + .am-premium-btn { border-left:1px solid rgba(var(--color-text-light),0.14); }
+            .am-premium-btn:hover { background:rgba(var(--color-text-light),0.1); color:rgb(var(--color-blue)); }
+            #am-set-btn, #am-log-btn, #am-cmp-btn { font-size:15px; width:46px; padding:11px 0; }
+            #ru-player-btn { color:rgb(var(--color-blue)); font-weight:700; }
+            #ru-player-btn:hover { background:rgba(var(--color-blue),0.14); }
             .pulse-glow { animation: am-pulse 2.5s infinite cubic-bezier(0.66, 0, 0, 1); }
             @keyframes am-pulse { 0% { box-shadow: 0 0 0 0 rgba(var(--color-blue), 0.3); } 70% { box-shadow: 0 0 0 15px rgba(var(--color-blue), 0); border-color: rgba(var(--color-blue), 0.5); } 100% { box-shadow: 0 0 0 0 rgba(var(--color-blue), 0); } }
-            #am-panel { position: fixed; bottom: 85px; left: 25px; z-index: 9999; background: rgba(var(--color-background-100), 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(var(--color-background-200), 1); border-radius: 16px; padding: 20px; width: 280px; color: rgb(var(--color-text)); box-shadow: 0 15px 40px rgba(0,0,0,0.15); display: none; transform-origin: bottom left; animation: panel-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); max-height: 80vh; overflow-y: auto; }
+            /* #am-panel теперь модалка-overlay (см. UI-кит выше) */
             @keyframes panel-pop { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
             #am-panel::-webkit-scrollbar { width: 6px; } #am-panel::-webkit-scrollbar-thumb { background: rgba(var(--color-blue), 0.4); border-radius: 4px; }
             #am-panel h3 { margin:0 0 15px 0; font-size:14px; color:rgb(var(--color-blue)); text-transform:uppercase; border-bottom:1px solid rgba(var(--color-blue),0.3); padding-bottom:10px; font-weight: 700; letter-spacing: 1px;}
@@ -2424,67 +2966,135 @@
             .am-opt input[type="checkbox"] { accent-color: rgb(var(--color-blue)); width: 16px; height: 16px; cursor: pointer; }
             .am-btn { background: rgba(var(--color-background-200), 1); color: rgb(var(--color-text)); border: 1px solid rgba(var(--color-text-light), 0.2); padding:10px; border-radius:8px; cursor:pointer; font-size:13px; width:100%; margin-top:15px; font-weight:600; transition: all 0.2s; }
             .am-btn:hover { background: rgba(var(--color-background-300), 1); border-color: rgb(var(--color-blue)); color: rgb(var(--color-blue)); transform: translateY(-1px); }
-            #ru-player-overlay { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); backdrop-filter: blur(10px); z-index:10000; display:none; justify-content:center; align-items:center; flex-direction:column; animation: player-fade 0.3s ease; }
+
+            /* ===== AniMori UI Kit — тема-нативные компоненты (адаптируются ко всем темам AniList) ===== */
+            .amk-overlay, #am-panel { position:fixed; inset:0; z-index:999999; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(0,0,0,0.55); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); animation:amk-fade .18s ease; }
+            @keyframes amk-fade { from{opacity:0} to{opacity:1} }
+            @keyframes amk-pop { from{transform:translateY(10px) scale(.985); opacity:0} to{transform:none; opacity:1} }
+            .amk-modal { display:flex; flex-direction:column; width:540px; max-width:96vw; max-height:88vh; background:rgba(var(--color-foreground),0.8); backdrop-filter:blur(22px) saturate(170%); -webkit-backdrop-filter:blur(22px) saturate(170%); color:rgb(var(--color-text)); border:1px solid rgba(var(--color-text-light),0.16); border-radius:14px; box-shadow:0 12px 44px rgba(0,0,0,0.22); overflow:hidden; animation:amk-pop .2s cubic-bezier(.2,.8,.2,1); font-family:inherit; font-size:14px; }
+            .amk-modal.amk-wide { width:920px; }
+            .amk-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; border-bottom:1px solid rgba(var(--color-text-light),0.1); flex-wrap:wrap; flex-shrink:0; }
+            .amk-title { margin:0; font-size:15px; font-weight:700; letter-spacing:.3px; display:flex; align-items:center; gap:9px; }
+            .amk-title .amk-dot { width:9px; height:9px; border-radius:50%; background:rgb(var(--color-blue)); box-shadow:0 0 10px rgba(var(--color-blue),0.6); }
+            .amk-sub { font-size:12px; color:rgb(var(--color-text-light)); font-weight:500; }
+            .amk-body { padding:16px 18px; overflow-y:auto; display:flex; flex-direction:column; gap:14px; flex:1 1 auto; min-height:0; }
+            .amk-body > * { flex-shrink:0; }
+            .amk-foot { padding:12px 18px; border-top:1px solid rgba(var(--color-text-light),0.1); display:flex; gap:10px; flex-shrink:0; }
+            .amk-body::-webkit-scrollbar { width:8px; } .amk-body::-webkit-scrollbar-thumb { background:rgba(var(--color-text-light),0.25); border-radius:4px; }
+            .amk-card { background:rgba(var(--color-background-100),0.55); border:1px solid rgba(var(--color-text-light),0.1); border-radius:10px; padding:2px 12px 6px; }
+            .amk-card-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:rgb(var(--color-text-light)); padding:10px 2px 4px; }
+            .amk-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 2px; }
+            .amk-row + .amk-row { border-top:1px solid rgba(var(--color-text-light),0.07); }
+            .amk-row-label { display:flex; flex-direction:column; gap:2px; min-width:0; }
+            .amk-row-label b { font-weight:600; }
+            .amk-row-hint { font-size:11px; color:rgb(var(--color-text-light)); line-height:1.45; }
+            .amk-switch { position:relative; width:38px; height:22px; flex-shrink:0; cursor:pointer; display:inline-block; }
+            .amk-switch input { position:absolute; opacity:0; width:0; height:0; }
+            .amk-track { position:absolute; inset:0; border-radius:6px; background:rgba(var(--color-text-light),0.3); transition:background .18s; }
+            .amk-thumb { position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:4px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.35); transition:transform .18s; }
+            .amk-switch input:checked ~ .amk-track { background:rgb(var(--color-blue)); }
+            .amk-switch input:checked ~ .amk-thumb { transform:translateX(16px); }
+            .amk-input, .amk-select { width:100%; box-sizing:border-box; background:rgba(var(--color-background-200),0.7); border:1px solid rgba(var(--color-text-light),0.18); color:rgb(var(--color-text)); border-radius:8px; padding:8px 10px; font-size:13px; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s; }
+            .amk-input:focus, .amk-select:focus { border-color:rgb(var(--color-blue)); box-shadow:0 0 0 3px rgba(var(--color-blue),0.18); }
+            .amk-input.amk-mono { font-family:"Cascadia Code","Fira Code",Consolas,monospace; font-size:12px; }
+            .amk-input::placeholder { color:rgba(var(--color-text-light),0.7); }
+            .amk-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:9px 16px; border-radius:8px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; border:1px solid transparent; transition:all .15s; white-space:nowrap; }
+            .amk-btn-primary { background:rgb(var(--color-blue)); color:#fff; }
+            .amk-btn-primary:hover { filter:brightness(1.08); box-shadow:0 4px 14px rgba(var(--color-blue),0.35); }
+            .amk-btn-ghost { background:rgba(var(--color-text-light),0.08); color:rgb(var(--color-text)); border-color:rgba(var(--color-text-light),0.18); }
+            .amk-btn-ghost:hover { background:rgba(var(--color-text-light),0.15); border-color:rgb(var(--color-blue)); color:rgb(var(--color-blue)); }
+            .amk-btn-danger { background:rgba(var(--color-red),0.12); color:rgb(var(--color-red)); border-color:rgba(var(--color-red),0.35); }
+            .amk-btn-danger:hover { background:rgba(var(--color-red),0.2); }
+            .amk-btn:disabled { opacity:.5; cursor:default; }
+            .amk-btn-block { width:100%; }
+            .amk-close { background:rgba(var(--color-text-light),0.1); border:1px solid rgba(var(--color-text-light),0.18); color:rgb(var(--color-text)); width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:15px; line-height:1; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+            .amk-close:hover { background:rgba(var(--color-red),0.15); color:rgb(var(--color-red)); border-color:rgba(var(--color-red),0.3); }
+            .amk-chip { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; background:rgba(var(--color-text-light),0.08); border:1px solid rgba(var(--color-text-light),0.15); color:rgb(var(--color-text)); transition:all .15s; }
+            .amk-chip:hover { border-color:rgb(var(--color-blue)); }
+            .amk-chip.active { background:rgba(var(--color-blue),0.15); border-color:rgb(var(--color-blue)); color:rgb(var(--color-blue)); }
+            .amk-collapse { border:1px solid rgba(var(--color-text-light),0.1); border-radius:10px; overflow:hidden; margin:6px 0; }
+            .amk-collapse > summary { list-style:none; cursor:pointer; padding:10px 12px; font-weight:600; font-size:13px; background:rgba(var(--color-background-100),0.5); display:flex; align-items:center; gap:8px; }
+            .amk-collapse > summary::-webkit-details-marker { display:none; }
+            .amk-collapse > summary:hover { background:rgba(var(--color-text-light),0.06); }
+            .amk-collapse[open] > summary { border-bottom:1px solid rgba(var(--color-text-light),0.1); }
+            .amk-collapse-body { padding:4px 6px; max-height:340px; overflow:auto; }
+            .amk-count { color:rgb(var(--color-text-light)); font-weight:500; }
+            .amk-diffrow { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px; border-bottom:1px solid rgba(var(--color-text-light),0.06); font-size:12px; }
+            .amk-diffrow .amk-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+            .amk-diffrow .amk-meta { opacity:.85; white-space:nowrap; }
+            .amk-x { cursor:pointer; opacity:.5; padding:0 4px; flex-shrink:0; } .amk-x:hover { opacity:1; color:rgb(var(--color-red)); }
+            .amk-table { width:100%; border-collapse:collapse; font-size:13px; }
+            .amk-table th, .amk-table td { padding:4px 8px; text-align:center; } .amk-table th:first-child, .amk-table td:first-child { text-align:left; }
+            .amk-table thead th { border-bottom:1px solid rgba(var(--color-text-light),0.15); font-weight:600; }
+            .amk-table tbody tr:not(:last-child) td { border-bottom:1px solid rgba(var(--color-text-light),0.06); }
+            #ru-player-overlay { position:fixed; inset:0; width:100vw; height:100vh; background:rgba(0,0,0,0.82); backdrop-filter:blur(14px) saturate(160%); -webkit-backdrop-filter:blur(14px) saturate(160%); z-index:10000; display:none; justify-content:center; align-items:center; flex-direction:column; gap:12px; animation: player-fade 0.3s ease; }
             @keyframes player-fade { from { opacity: 0; } to { opacity: 1; } }
-            #ru-player-container { width:90%; max-width:1100px; aspect-ratio:16/9; background:#000; border-radius:16px; overflow:hidden; border:1px solid rgba(var(--color-blue),0.3); position:relative; box-shadow: 0 20px 60px rgba(0,0,0,0.8); flex-shrink: 0;}
+            #ru-player-container { width:90%; max-width:1100px; aspect-ratio:16/9; background:#000; border-radius:12px; overflow:hidden; border:1px solid rgba(var(--color-blue),0.3); position:relative; box-shadow: 0 20px 60px rgba(0,0,0,0.55); flex-shrink: 0;}
             #ru-p-iframe { width:100%; height:100%; border:none; }
-            #ru-player-close { position:absolute; top:20px; right:30px; color:rgb(var(--color-text-light)); font-size:40px; cursor:pointer; opacity: 0.6; transition: 0.2s; }
-            #ru-player-close:hover { opacity: 1; transform: scale(1.1); color: #fc8181; }
-            #ru-info-panel { width:90%; max-width:1100px; background: rgba(var(--color-background-100), 0.8); backdrop-filter: blur(10px); border-radius:12px; padding:15px; border: 1px solid rgba(var(--color-text-light), 0.2); flex-shrink: 0; }
-            #ru-translations-panel { width:90%; max-width:1100px; display:flex; gap:10px; margin-bottom:15px; overflow-x:auto; padding-bottom:8px; flex-shrink: 0;}
-            #ru-translations-panel::-webkit-scrollbar { height: 6px; } #ru-translations-panel::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; } #ru-translations-panel::-webkit-scrollbar-thumb { background: rgba(var(--color-blue), 0.4); border-radius: 4px; } #ru-translations-panel::-webkit-scrollbar-thumb:hover { background: rgba(var(--color-blue), 0.8); }
-            .tr-btn { flex-shrink:0; display:flex; align-items:center; background:rgba(var(--color-background-100), 0.9); border:1px solid rgba(var(--color-text-light), 0.2); padding:8px 14px; border-radius:10px; cursor:pointer; white-space:nowrap; transition:all 0.2s; color:rgb(var(--color-text)); font-weight:600; font-size:13px; gap:8px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-            .tr-btn:hover { background:rgba(var(--color-background-200), 1); border-color:rgba(var(--color-blue), 0.5); transform:translateY(-2px); } .tr-btn.active { border-color:rgb(var(--color-blue)); background:rgba(var(--color-blue), 0.15); color:rgb(var(--color-blue)); box-shadow: 0 6px 15px rgba(var(--color-blue), 0.2); } .tr-btn.favorite { border-color:#f38ba8; color:#f38ba8; background:rgba(243,139,168,0.05); } .tr-btn.favorite.active { background:rgba(243,139,168,0.15); box-shadow: 0 6px 15px rgba(243,139,168,0.2); }
+            #ru-player-close { position:absolute; top:18px; right:24px; width:40px; height:40px; display:flex; align-items:center; justify-content:center; line-height:1; color:rgb(var(--color-text-light)); font-size:26px; cursor:pointer; border-radius:8px; background:rgba(var(--color-foreground),0.6); border:1px solid rgba(var(--color-text-light),0.15); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all .18s; }
+            #ru-player-close:hover { color:#fff; background:rgb(var(--color-red)); border-color:rgb(var(--color-red)); transform:scale(1.05); }
+            #ru-info-panel { width:90%; max-width:1100px; background:rgba(var(--color-foreground),0.85); backdrop-filter:blur(14px) saturate(160%); -webkit-backdrop-filter:blur(14px) saturate(160%); border-radius:10px; padding:12px 16px; border:1px solid rgba(var(--color-text-light),0.15); flex-shrink:0; }
+            #ru-translations-panel { width:90%; max-width:1100px; display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; flex-shrink:0; }
+            #ru-translations-panel::-webkit-scrollbar { height: 6px; } #ru-translations-panel::-webkit-scrollbar-track { background: rgba(var(--color-text-light),0.08); border-radius: 4px; } #ru-translations-panel::-webkit-scrollbar-thumb { background: rgba(var(--color-blue), 0.4); border-radius: 4px; } #ru-translations-panel::-webkit-scrollbar-thumb:hover { background: rgba(var(--color-blue), 0.8); }
+            .tr-btn { flex-shrink:0; display:flex; align-items:center; background:rgba(var(--color-foreground),0.8); border:1px solid rgba(var(--color-text-light),0.18); padding:8px 14px; border-radius:8px; cursor:pointer; white-space:nowrap; transition:all .18s; color:rgb(var(--color-text)); font-weight:600; font-size:13px; gap:8px; }
+            .tr-btn:hover { border-color:rgba(var(--color-blue),0.5); transform:translateY(-2px); } .tr-btn.active { border-color:rgb(var(--color-blue)); background:rgba(var(--color-blue),0.15); color:rgb(var(--color-blue)); } .tr-btn.favorite { border-color:rgb(var(--color-pink, 243,139,168)); color:rgb(var(--color-pink, 243,139,168)); background:rgba(var(--color-pink, 243,139,168),0.06); } .tr-btn.favorite.active { background:rgba(var(--color-pink, 243,139,168),0.16); }
             .tr-heart { font-size:15px; transition:transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); user-select:none; } .tr-heart:hover { transform:scale(1.3); } .tr-name { font-family:inherit; }
-            #ru-episodes-panel { width: 90%; max-width: 1100px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 22px; max-height: 180px; overflow-y: auto; padding-right: 5px; flex-shrink: 0; }
-            #ru-episodes-panel::-webkit-scrollbar { width: 6px; } #ru-episodes-panel::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; } #ru-episodes-panel::-webkit-scrollbar-thumb { background: rgba(var(--color-blue), 0.4); border-radius: 4px; }
-            .ep-btn { width: 46px; height: 36px; display: flex; justify-content: center; align-items: center; flex-shrink: 0; background: rgba(var(--color-background-100), 0.9); border: 1px solid rgba(var(--color-text-light), 0.2); color: rgb(var(--color-text)); font-weight: 700; font-size: 13px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+            #ru-episodes-panel { width: 90%; max-width: 1100px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-height: 180px; overflow-y: auto; padding-right: 4px; flex-shrink: 0; }
+            #ru-episodes-panel::-webkit-scrollbar { width: 6px; } #ru-episodes-panel::-webkit-scrollbar-track { background: rgba(var(--color-text-light),0.08); border-radius: 4px; } #ru-episodes-panel::-webkit-scrollbar-thumb { background: rgba(var(--color-blue), 0.4); border-radius: 4px; }
+            .ep-btn { width: 46px; height: 36px; display: flex; justify-content: center; align-items: center; flex-shrink: 0; background: rgba(var(--color-foreground),0.8); border: 1px solid rgba(var(--color-text-light),0.18); color: rgb(var(--color-text)); font-weight: 700; font-size: 13px; border-radius: 8px; cursor: pointer; transition: all .18s; }
             .ep-btn:hover { border-color: rgba(var(--color-blue), 0.5); transform: translateY(-2px); } .ep-btn.active { background: rgb(var(--color-blue)); color: #fff; border-color: rgb(var(--color-blue)); box-shadow: 0 4px 12px rgba(var(--color-blue), 0.3); }
-            .ep-btn.watched { border-color: #a6e3a1; color: #a6e3a1; } .ep-btn.watched:hover { background: rgba(166,227,161, 0.1); border-color: #a6e3a1; } .ep-btn.watched.active { background: #a6e3a1; color: #11111b; border-color: #a6e3a1; box-shadow: 0 4px 12px rgba(166,227,161, 0.3); }
-            .animori-ratings { display:flex; flex-direction:column; gap:12px; margin-bottom:20px; background:rgba(var(--color-background-100),1); border-radius:12px; padding:18px; border: 1px solid rgba(255,255,255,0.03); }
-            .rating-item { display:flex; justify-content:space-between; align-items:center; padding: 6px 0; border-bottom: 1px solid rgba(var(--color-text),0.05); } .rating-item:last-child { border-bottom: none; }
-            .rating-badge { transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94); cursor: pointer; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #fff !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5); font-family: monospace, sans-serif; display: flex; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-            .rating-badge:hover { transform: translateY(-2px); }
-            .shiki-badge { background: linear-gradient(135deg, #2b2d42, #1a1a24); border-left: 3px solid #dd2e44; } .mal-badge { background: linear-gradient(135deg, #1d3a77, #13244e); border-left: 3px solid #ffffff; } .al-badge { background: linear-gradient(135deg, #182232, #0b111a); border-left: 3px solid #3dbbee; }
-            .rating-value { font-size: 1.4rem; font-weight: 700; color: rgb(var(--color-text)); text-shadow: 0 0 15px rgba(255,255,255,0.05); }
-            .animori-franchise { margin-top:0; margin-bottom:20px; background:rgba(var(--color-background-100),1); border-radius:12px; padding:18px; border: 1px solid rgba(255,255,255,0.03); }
-            .animori-franchise h2 { font-size:1.4rem; margin-bottom:15px; color:rgb(var(--color-text-lighter)); font-weight: 700; }
-            .franchise-list { max-height: 280px; overflow-y: auto; scroll-behavior: smooth; padding-right: 5px; position: relative; transition: max-height 0.4s ease; } .franchise-list.expanded { max-height: 4000px; overflow-y: auto; }
-            .franchise-list::-webkit-scrollbar, .themes-list::-webkit-scrollbar { width: 6px; } .franchise-list::-webkit-scrollbar-track, .themes-list::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; } .franchise-list::-webkit-scrollbar-thumb, .themes-list::-webkit-scrollbar-thumb { background: rgba(var(--color-blue), 0.4); border-radius: 4px; } .franchise-list::-webkit-scrollbar-thumb:hover, .themes-list::-webkit-scrollbar-thumb:hover { background: rgba(var(--color-blue), 0.8); }
-            .franchise-node { display:flex; gap:12px; padding:10px; border-radius:8px; text-decoration:none !important; border-left:3px solid transparent; align-items:center; margin-bottom:6px; transition: 0.2s; } .franchise-node:hover { background:rgba(var(--color-background-200),1); } .franchise-node.active { background:rgba(var(--color-blue),0.1); border-left:3px solid rgb(var(--color-blue)); } .franchise-node.shiki-only { border-left: 3px dashed #a0aec0; opacity: 0.85; }
-            .node-year { font-size:1.1rem; color:rgb(var(--color-text-lighter)); min-width:40px; font-weight: 600; } .node-title { font-size:1.3rem; color:rgb(var(--color-text)); flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight: 500; } .node-kind { font-size:1rem; padding:4px 8px; background:rgba(var(--color-background-300),1); color:rgb(var(--color-text-lighter)); border-radius:6px; text-transform:uppercase; font-weight: 700; }
-            .franchise-toggle { display: block; width: 100%; text-align: center; padding: 10px; margin-top: 12px; background: rgba(var(--color-background-200), 1); border-radius: 8px; color: rgb(var(--color-blue)); cursor: pointer; font-weight: 700; font-size: 1.1rem; transition: 0.2s; border: 1px dashed rgba(var(--color-blue), 0.3); outline: none; } .franchise-toggle:hover { background: rgba(var(--color-blue), 0.1); border-color: rgba(var(--color-blue), 0.6); }
-            .am-service-toggle { display: flex; background: rgba(var(--color-background-200), 1); border-radius: 20px; padding: 4px; border: 1px solid rgba(var(--color-text-light), 0.2); gap: 4px; margin: 0 auto; } .am-service-btn { padding: 6px 16px; font-size: 0.9rem; font-weight: 700; border-radius: 16px; cursor: pointer; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); color: rgb(var(--color-text-light)); user-select: none; } .am-service-btn:hover:not(.active) { color: rgb(var(--color-text)); background: rgba(255,255,255,0.05); } .am-service-btn.active { background: rgb(var(--color-blue)); color: #fff; box-shadow: 0 2px 8px rgba(var(--color-blue), 0.4); }
+            .ep-btn.watched { border-color: rgb(var(--color-green, 166,227,161)); color: rgb(var(--color-green, 166,227,161)); } .ep-btn.watched:hover { background: rgba(var(--color-green, 166,227,161),0.12); } .ep-btn.watched.active { background: rgb(var(--color-green, 166,227,161)); color: rgb(var(--color-background, 17,17,27)); border-color: rgb(var(--color-green, 166,227,161)); box-shadow: 0 4px 12px rgba(var(--color-green, 166,227,161),0.3); }
+            .animori-ratings { display:flex; flex-direction:column; gap:6px; margin-bottom:20px; background:rgba(var(--color-foreground),1); border-radius:12px; padding:14px 16px; border:1px solid rgba(var(--color-text-light),0.1); box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+            .rating-item { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid rgba(var(--color-text-light),0.08); } .rating-item:last-child { border-bottom:none; }
+            .rating-badge { transition:transform .15s; cursor:pointer; padding:5px 10px; border-radius:6px; font-size:11px; font-weight:800; letter-spacing:.8px; font-family:inherit; display:flex; align-items:center; background:rgba(var(--color-text-light),0.1); border:1px solid rgba(var(--color-text-light),0.14); border-left-width:3px; text-decoration:none; }
+            .rating-badge:hover { transform:translateY(-1px); }
+            .animori-ratings .rating-badge.shiki-badge { color:#e05264 !important; border-left-color:#e05264; } .animori-ratings .rating-badge.mal-badge { color:#5a7fd4 !important; border-left-color:#5a7fd4; } .animori-ratings .rating-badge.al-badge { color:rgb(var(--color-blue)) !important; border-left-color:rgb(var(--color-blue)); }
+            .rating-value { font-size:1.4rem; font-weight:700; color:rgb(var(--color-text)); }
+            .animori-franchise { margin:0 0 20px; background:rgba(var(--color-foreground),1); border-radius:12px; padding:16px; border:1px solid rgba(var(--color-text-light),0.1); box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+            .animori-franchise h2 { font-size:1.2rem; margin:0 0 12px; color:rgb(var(--color-text)); font-weight:700; letter-spacing:.3px; }
+
+            .franchise-list { max-height:300px; overflow-y:auto; scroll-behavior:smooth; padding-right:4px; position:relative; transition:max-height .4s ease; display:flex; flex-direction:column; gap:4px; } .franchise-list.expanded { max-height:none; }
+            .franchise-list::-webkit-scrollbar, .themes-list::-webkit-scrollbar { width:6px; } .franchise-list::-webkit-scrollbar-track, .themes-list::-webkit-scrollbar-track { background:transparent; } .franchise-list::-webkit-scrollbar-thumb, .themes-list::-webkit-scrollbar-thumb { background:rgba(var(--color-text-light),0.25); border-radius:4px; } .franchise-list::-webkit-scrollbar-thumb:hover, .themes-list::-webkit-scrollbar-thumb:hover { background:rgba(var(--color-blue),0.6); }
+            .franchise-node { display:flex; gap:10px; padding:8px 10px; border-radius:8px; text-decoration:none !important; border-left:3px solid transparent; align-items:center; transition:background .15s, border-color .15s; background:rgba(var(--color-text-light),0.04); } .franchise-node:hover { background:rgba(var(--color-text-light),0.1); } .franchise-node.active { background:rgba(var(--color-blue),0.12); border-left:3px solid rgb(var(--color-blue)); } .franchise-node.shiki-only { border-left:3px dashed rgba(var(--color-text-light),0.5); opacity:0.8; }
+            .node-year { font-size:0.95rem; color:rgb(var(--color-text-light)); min-width:38px; font-weight:600; font-variant-numeric:tabular-nums; } .node-title { font-size:1.15rem; color:rgb(var(--color-text)); flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; } .node-kind { font-size:0.85rem; padding:3px 8px; background:rgba(var(--color-text-light),0.12); color:rgb(var(--color-text-light)); border-radius:6px; text-transform:uppercase; font-weight:700; letter-spacing:.5px; flex-shrink:0; }
+            .franchise-toggle { display:block; width:100%; text-align:center; padding:9px; margin-top:10px; background:rgba(var(--color-text-light),0.08); border-radius:8px; color:rgb(var(--color-blue)); cursor:pointer; font-weight:600; font-size:1rem; transition:background .15s, border-color .15s; border:1px solid rgba(var(--color-blue),0.25); outline:none; } .franchise-toggle:hover { background:rgba(var(--color-blue),0.12); border-color:rgb(var(--color-blue)); }
+            .franchise-toggle-top { margin-top:0; margin-bottom:12px; position:sticky; top:0; z-index:2; background:rgba(var(--color-foreground),0.92); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+            .am-extlink { text-decoration:none; font-weight:700; font-size:1rem; padding:11px 20px; border-radius:9px; background:rgba(var(--c),0.14); color:rgb(var(--c)); border:1px solid rgba(var(--c),0.4); transition:background .15s, border-color .15s, transform .15s; letter-spacing:0.3px; display:inline-block; } .am-extlink:hover { transform:translateY(-2px); background:rgba(var(--c),0.24); border-color:rgb(var(--c)); }
+            .am-service-toggle { display:flex; width:100%; box-sizing:border-box; background:rgba(var(--color-text-light),0.1); border-radius:8px; padding:3px; border:1px solid rgba(var(--color-text-light),0.15); gap:3px; margin:0 auto; } .am-service-btn { flex:1 1 0; min-width:0; display:flex; align-items:center; justify-content:center; padding:8px 0; border-radius:6px; cursor:pointer; transition:all .15s; color:rgb(var(--color-text-light)); user-select:none; } .am-service-btn svg { display:block; } .am-service-btn:hover:not(.active) { color:rgb(var(--color-text)); background:rgba(var(--color-text-light),0.1); } .am-service-btn.active { color:#fff; }
+            .am-service-btn.active[data-val="vk"] { background:rgb(var(--color-blue)); box-shadow:0 2px 8px rgba(var(--color-blue),0.35); }
+            .am-service-btn.active[data-val="yt"] { background:rgb(var(--color-red)); box-shadow:0 2px 8px rgba(var(--color-red),0.35); }
+            .am-service-btn.active[data-val="spotify"] { background:rgb(var(--color-green)); box-shadow:0 2px 8px rgba(var(--color-green),0.35); }
+            .am-service-btn.active[data-val="sc"] { background:rgb(var(--color-orange)); box-shadow:0 2px 8px rgba(var(--color-orange),0.35); }
             body.am-ru-search-active .results .result-col:not(.animori-custom-result-col) { display: none !important; } .animori-custom-result-col { flex: 1; padding: 0 10px; } .am-ru-loading { text-align: center; padding: 20px; color: rgb(var(--color-text-light)); font-weight: bold; animation: am-pulse 1.5s infinite; width: 100%; } .am-ru-empty { text-align: center; padding: 20px; color: #fc8181; font-weight: bold; width: 100%; } .am-ru-injected-container { display: flex; width: 100%; }
 
-            #am-logger-overlay { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); backdrop-filter:blur(5px); z-index:999999; display:flex; justify-content:center; align-items:center; animation:player-fade 0.2s ease; }
-            .am-logger-modal { background: #151521; width: 85%; max-width: 900px; height: 80vh; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.8); }
-            .am-logger-header { background: #1a1a29; padding: 15px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-            .am-logger-header h2 { margin: 0; color: #e2e8f0; font-size: 16px; font-weight: bold; display: flex; align-items: center; gap: 10px; }
-            .am-logger-filters { display: flex; gap: 6px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 8px; }
-            .am-log-filter { background: transparent; border: none; color: #a0aec0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; } .am-log-filter:hover { background: rgba(255,255,255,0.05); color: #fff; } .am-log-filter.active { background: rgba(61,187,238,0.2); color: #3dbbee; }
-            .am-logger-actions { display: flex; gap: 10px; } .am-logger-actions button { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #e2e8f0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; } .am-logger-actions button:hover { background: rgba(255,255,255,0.1); }
-            #am-log-close { background: rgba(252,129,129,0.15); color: #fc8181; border-color: rgba(252,129,129,0.3); } #am-log-close:hover { background: rgba(252,129,129,0.3); }
-            #am-log-container { flex: 1; overflow-y: auto; padding: 15px; font-family: "Cascadia Code", "Fira Code", Consolas, monospace; font-size: 12px; background: #0f0f16; }
-            #am-log-container::-webkit-scrollbar { width: 8px; } #am-log-container::-webkit-scrollbar-track { background: transparent; } #am-log-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-            .am-log-entry { margin-bottom: 6px; border-radius: 6px; background: rgba(255,255,255,0.02); border: 1px solid transparent; }
-            .am-log-header { padding: 8px 12px; display: flex; align-items: center; gap: 10px; } .am-log-header:hover { background: rgba(255,255,255,0.04); }
-            .am-log-time { color: #6e7681; font-size: 11px; flex-shrink: 0; } .am-log-badge { padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; flex-shrink: 0; width: 50px; text-align: center; text-transform: uppercase; } .am-log-msg { color: #c9d1d9; flex-grow: 1; word-break: break-word; } .am-log-expand { color: #8b949e; font-size: 10px; transition: 0.2s; user-select: none; }
-            .am-log-details { padding: 10px 12px; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(255,255,255,0.05); border-radius: 0 0 6px 6px; font-family: inherit; font-size: 11.5px; line-height: 1.4; }
-            .am-log-details details summary::-webkit-details-marker { display: none; }
-            .type-info .am-log-badge { background: rgba(61,187,238,0.15); color: #3dbbee; border: 1px solid rgba(61,187,238,0.3); } .type-api .am-log-badge { background: rgba(183,148,244,0.15); color: #b794f4; border: 1px solid rgba(183,148,244,0.3); } .type-db .am-log-badge { background: rgba(166,227,161,0.15); color: #a6e3a1; border: 1px solid rgba(166,227,161,0.3); } .type-queue .am-log-badge { background: rgba(246,193,119,0.15); color: #f6c177; border: 1px solid rgba(246,193,119,0.3); } .type-error .am-log-badge { background: rgba(252,129,129,0.15); color: #fc8181; border: 1px solid rgba(252,129,129,0.3); } .type-error { border-color: rgba(252,129,129,0.2); background: rgba(252,129,129,0.05); }
-
-            .am-log-path { color: #8b949e; font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; background: rgba(255,255,255,0.05); padding: 2px 4px; border-radius: 4px; cursor: default; }
-            .am-log-btn-stack { font-size: 10px; color: #fc8181; cursor: pointer; transition: 0.2s; user-select: none; font-weight: bold; background: rgba(252,129,129,0.1); padding: 2px 4px; border-radius: 4px; border: 1px solid rgba(252,129,129,0.3); }
-            .am-log-btn-stack:hover { background: rgba(252,129,129,0.3); color: #fff; }
+            #am-logger-overlay { position:fixed; inset:0; z-index:999999; display:flex; justify-content:center; align-items:center; padding:24px; background:rgba(0,0,0,0.55); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); animation:amk-fade .18s ease; }
+            .am-logger-modal { background:rgba(var(--color-foreground),0.8); backdrop-filter:blur(22px) saturate(170%); -webkit-backdrop-filter:blur(22px) saturate(170%); color:rgb(var(--color-text)); width:920px; max-width:96vw; height:82vh; border-radius:14px; border:1px solid rgba(var(--color-text-light),0.16); display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 44px rgba(0,0,0,0.22); animation:amk-pop .2s cubic-bezier(.2,.8,.2,1); }
+            .am-logger-header { padding:14px 18px; border-bottom:1px solid rgba(var(--color-text-light),0.1); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+            .am-logger-header h2 { margin:0; color:rgb(var(--color-text)); font-size:15px; font-weight:700; display:flex; align-items:center; gap:9px; }
+            #am-log-search { background:rgba(var(--color-background-200),0.7) !important; border:1px solid rgba(var(--color-text-light),0.18) !important; color:rgb(var(--color-text)) !important; }
+            .am-logger-filters { display:flex; gap:4px; background:rgba(var(--color-text-light),0.08); padding:4px; border-radius:8px; }
+            .am-log-filter { background:transparent; border:none; color:rgb(var(--color-text-light)); padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; transition:.15s; } .am-log-filter:hover { background:rgba(var(--color-text-light),0.1); color:rgb(var(--color-text)); } .am-log-filter.active { background:rgba(var(--color-blue),0.18); color:rgb(var(--color-blue)); }
+            .am-logger-actions { display:flex; gap:8px; } .am-logger-actions button { background:rgba(var(--color-text-light),0.08); border:1px solid rgba(var(--color-text-light),0.18); color:rgb(var(--color-text)); padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; transition:.15s; } .am-logger-actions button:hover { background:rgba(var(--color-text-light),0.15); border-color:rgb(var(--color-blue)); color:rgb(var(--color-blue)); }
+            #am-log-close { background:rgba(var(--color-red),0.14) !important; color:rgb(var(--color-red)) !important; border-color:rgba(var(--color-red),0.3) !important; } #am-log-close:hover { background:rgba(var(--color-red),0.24) !important; }
+            #am-log-container { flex:1; overflow-y:auto; padding:14px; font-family:"Cascadia Code","Fira Code",Consolas,monospace; font-size:12px; background:rgba(var(--color-background),0.35); }
+            #am-log-container::-webkit-scrollbar { width:8px; } #am-log-container::-webkit-scrollbar-thumb { background:rgba(var(--color-text-light),0.25); border-radius:4px; }
+            .am-log-entry { margin-bottom:6px; border-radius:8px; background:rgba(var(--color-text-light),0.04); border:1px solid transparent; }
+            .am-log-header { padding:8px 12px; display:flex; align-items:center; gap:10px; } .am-log-header:hover { background:rgba(var(--color-text-light),0.06); }
+            .am-log-time { color:rgb(var(--color-text-light)); font-size:11px; flex-shrink:0; } .am-log-badge { padding:2px 6px; border-radius:4px; font-weight:700; font-size:10px; flex-shrink:0; width:50px; text-align:center; text-transform:uppercase; } .am-log-msg { color:rgb(var(--color-text)); flex-grow:1; word-break:break-word; } .am-log-expand { color:rgb(var(--color-text-light)); font-size:10px; transition:.2s; user-select:none; }
+            .am-log-details { padding:10px 12px; background:rgba(var(--color-background),0.4); border-top:1px solid rgba(var(--color-text-light),0.08); border-radius:0 0 8px 8px; font-family:inherit; font-size:11.5px; line-height:1.4; }
+            .am-log-details details summary::-webkit-details-marker { display:none; }
+            .type-info .am-log-badge { background:rgba(var(--color-blue),0.15); color:rgb(var(--color-blue)); border:1px solid rgba(var(--color-blue),0.3); } .type-api .am-log-badge { background:rgba(var(--color-purple),0.15); color:rgb(var(--color-purple)); border:1px solid rgba(var(--color-purple),0.3); } .type-db .am-log-badge { background:rgba(var(--color-green),0.15); color:rgb(var(--color-green)); border:1px solid rgba(var(--color-green),0.3); } .type-queue .am-log-badge { background:rgba(var(--color-orange),0.15); color:rgb(var(--color-orange)); border:1px solid rgba(var(--color-orange),0.3); } .type-error .am-log-badge { background:rgba(var(--color-red),0.15); color:rgb(var(--color-red)); border:1px solid rgba(var(--color-red),0.3); } .type-error { border-color:rgba(var(--color-red),0.2); background:rgba(var(--color-red),0.05); }
+            .am-log-path { color:rgb(var(--color-text-light)); font-size:10px; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; background:rgba(var(--color-text-light),0.08); padding:2px 4px; border-radius:4px; cursor:default; }
+            .am-log-btn-stack { font-size:10px; color:rgb(var(--color-red)); cursor:pointer; transition:.2s; user-select:none; font-weight:700; background:rgba(var(--color-red),0.1); padding:2px 4px; border-radius:4px; border:1px solid rgba(var(--color-red),0.3); }
+            .am-log-btn-stack:hover { background:rgba(var(--color-red),0.24); }
         `);
 
         if (IS_SHIKI) {
             initExporter();
         } else if (IS_ANILIST) {
             const actionsRoot = document.createElement('div'); actionsRoot.id = 'animori-actions'; document.body.appendChild(actionsRoot);
-            const btnSet = document.createElement('button'); btnSet.id = 'am-set-btn'; btnSet.className = 'am-premium-btn'; btnSet.innerHTML = '⚙ RU';
-            btnSet.onclick = () => { const p = document.getElementById('am-panel'); p.style.display = window.getComputedStyle(p).display === 'none' ? 'block' : 'none'; };
+            const btnSet = document.createElement('button'); btnSet.id = 'am-set-btn'; btnSet.className = 'am-premium-btn'; btnSet.innerHTML = '⚙'; btnSet.title = 'Настройки AniMori';
+            btnSet.onclick = () => { const p = document.getElementById('am-panel'); p.style.display = window.getComputedStyle(p).display === 'none' ? 'flex' : 'none'; };
             actionsRoot.appendChild(btnSet);
 
             // Кнопка Логгера
@@ -2492,45 +3102,69 @@
                 const btnLog = document.createElement('button'); btnLog.id = 'am-log-btn'; btnLog.className = 'am-premium-btn'; btnLog.innerHTML = '&lt;/&gt;'; btnLog.title = 'Открыть логгер (AniMori)'; btnLog.onclick = openLoggerModal; actionsRoot.appendChild(btnLog);
             }
 
-            // Рендер панели настроек
+            // Кнопка Сравнения списков (сканер дельты Shikimori <-> AniList)
+            const btnCmp = document.createElement('button'); btnCmp.id = 'am-cmp-btn'; btnCmp.className = 'am-premium-btn'; btnCmp.innerHTML = '⇄'; btnCmp.title = 'Сравнить списки Shikimori и AniList (AniMori)'; btnCmp.onclick = openCompareModal; actionsRoot.appendChild(btnCmp);
+
+            // Рендер настроек — модалка на UI-ките (id инпутов сохранены для биндингов).
+            const sw = (id, on, extra = '') => `<label class="amk-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${extra}><span class="amk-track"></span><span class="amk-thumb"></span></label>`;
             const panel = document.createElement('div'); panel.id = 'am-panel';
             panel.innerHTML = `
-                <h3>AniMori Настройки</h3>
-                <div class="am-opt"><span>Перевод интерфейса</span><input type="checkbox" id="set_interface" ${settings.translateInterface ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Тайтлы и Описания (Shiki)</span><input type="checkbox" id="set_titles" ${settings.translateTitles ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Персонажи (Shiki)</span><input type="checkbox" id="set_chars" ${settings.translateCharacters ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Персонал (Shiki)</span><input type="checkbox" id="set_staff" ${settings.translateStaff ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Аниме Плеер</span><input type="checkbox" id="set_player" ${settings.enablePlayer ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Рейтинги MAL и Shiki</span><input type="checkbox" id="set_ratings" ${settings.enableRatings ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Дерево франшизы</span><input type="checkbox" id="set_franchise" ${settings.enableFranchise ? 'checked' : ''}></div>
-                <div class="am-opt"><span>Музыкальные темы</span><input type="checkbox" id="set_themes" ${settings.enableThemes ? 'checked' : ''}></div>
-
-                <div class="am-opt" style="border-top:1px solid rgba(var(--color-text-light),0.1); padding-top:10px; margin-bottom:5px;"><span style="font-weight:700;">Внешние ссылки</span><input type="checkbox" id="set_extlinks" ${settings.enableExtLinks ? 'checked' : ''}></div>
-                <div class="am-opt" style="padding-left:10px; font-size:12px; gap:10px; display:flex; margin-bottom:8px;"><label style="display:flex; align-items:center; gap:6px; cursor:pointer; flex:1; margin:0;"><input type="checkbox" id="set_link_rutracker" ${settings.enableLinkRutracker ? 'checked' : ''}> - RuTracker</label></div>
-                <div class="am-opt" style="padding-left:10px; font-size:12px; gap:10px; display:flex; margin-bottom:8px;"><label style="display:flex; align-items:center; gap:6px; cursor:pointer; flex:1; margin:0;"><input type="checkbox" id="set_link_yummy" ${settings.enableLinkYummy ? 'checked' : ''}> - YummyAnime</label><input type="text" id="set_yummy_domain" placeholder="yummyanime.tv" style="width:110px; background:rgba(var(--color-background-200),1); border:1px solid rgba(var(--color-text-light),0.2); color:rgb(var(--color-text)); padding:4px 8px; border-radius:6px; outline:none; font-family:monospace; font-size:11px;"></div>
-                <div class="am-opt" style="padding-left:10px; font-size:12px; gap:10px; display:flex; margin-bottom:8px;"><label style="display:flex; align-items:center; gap:6px; cursor:pointer; flex:1; margin:0;"><input type="checkbox" id="set_link_animego" ${settings.enableLinkAnimego ? 'checked' : ''}> - AnimeGO</label><input type="text" id="set_animego_domain" placeholder="animego.org" style="width:110px; background:rgba(var(--color-background-200),1); border:1px solid rgba(var(--color-text-light),0.2); color:rgb(var(--color-text)); padding:4px 8px; border-radius:6px; outline:none; font-family:monospace; font-size:11px;"></div>
-                <div class="am-opt" style="padding-left:10px; font-size:12px; gap:10px; display:flex; margin-bottom:8px;"><label style="display:flex; align-items:center; gap:6px; cursor:pointer; flex:1; margin:0;"><input type="checkbox" id="set_link_mangalib" ${settings.enableLinkMangalib ? 'checked' : ''}> - MangaLib</label><input type="text" id="set_mangalib_domain" placeholder="mangalib.me" style="width:110px; background:rgba(var(--color-background-200),1); border:1px solid rgba(var(--color-text-light),0.2); color:rgb(var(--color-text)); padding:4px 8px; border-radius:6px; outline:none; font-family:monospace; font-size:11px;"></div>
-
-                <div class="am-opt" style="border-top:1px solid rgba(var(--color-text-light),0.1); padding-top:10px; margin-bottom:5px; flex-direction:column; align-items:flex-start; gap:8px;">
-                    <span style="font-weight:700;">Авторизация API</span>
-                    <div style="font-size: 11px; color: #a0aec0; margin-bottom: 2px;">Где взять токен? Создайте Client <a href="https://anilist.co/settings/developer" target="_blank" style="color:#89b4fa;text-decoration:none;">здесь</a><br>(Вставьте URL: <span style="background:rgba(0,0,0,0.3);padding:2px 4px;border-radius:3px;font-family:monospace;">https://anilist.co/api/v2/oauth/pin</span>)</div>
-                    <div style="display:flex; gap:8px; width:100%;"><input type="password" id="set_al_token" placeholder="Токен AniList" style="flex:1; background:rgba(var(--color-background-200),1); border:1px solid rgba(var(--color-text-light),0.2); color:rgb(var(--color-text)); padding:6px 8px; border-radius:6px; outline:none; font-family:monospace; font-size:11px;"></div>
-                    <div style="display:flex; gap:8px; width:100%;"><input type="text" id="set_al_client" placeholder="Client ID" style="width:70px; background:rgba(var(--color-background-200),1); border:1px solid rgba(var(--color-text-light),0.2); color:rgb(var(--color-text)); padding:6px 8px; border-radius:6px; outline:none; font-family:monospace; font-size:11px;"><button id="set_al_gen" class="am-btn" style="margin:0; padding:6px; flex:1; font-size:11px;" title="Создать ссылку для получения токена">Создать ссылку</button></div>
-                    <div id="set_al_link_wrap" style="width:100%; text-align:center; font-size:11px;"></div>
+                <div class="amk-modal">
+                    <div class="amk-head">
+                        <h2 class="amk-title"><span class="amk-dot"></span>AniMori <span class="amk-sub">настройки</span></h2>
+                        <button class="amk-close" id="am-set-close" title="Закрыть">✕</button>
+                    </div>
+                    <div class="amk-body">
+                        <div class="amk-card">
+                            <div class="amk-card-title">Перевод</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Интерфейс</b></span>${sw('set_interface', settings.translateInterface)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Тайтлы и описания</b><span class="amk-row-hint">с Shikimori</span></span>${sw('set_titles', settings.translateTitles)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Персонажи</b><span class="amk-row-hint">с Shikimori</span></span>${sw('set_chars', settings.translateCharacters)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Персонал</b><span class="amk-row-hint">с Shikimori</span></span>${sw('set_staff', settings.translateStaff)}</div>
+                        </div>
+                        <div class="amk-card">
+                            <div class="amk-card-title">Модули</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Аниме-плеер</b></span>${sw('set_player', settings.enablePlayer)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Рейтинги MAL и Shiki</b></span>${sw('set_ratings', settings.enableRatings)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Дерево франшизы</b></span>${sw('set_franchise', settings.enableFranchise)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Музыкальные темы</b></span>${sw('set_themes', settings.enableThemes)}</div>
+                        </div>
+                        <div class="amk-card">
+                            <div class="amk-card-title">Внешние ссылки</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Показывать ссылки</b></span>${sw('set_extlinks', settings.enableExtLinks)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>RuTracker</b></span>${sw('set_link_rutracker', settings.enableLinkRutracker)}</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>YummyAnime</b></span>${sw('set_link_yummy', settings.enableLinkYummy)}</div>
+                            <input class="amk-input amk-mono" id="set_yummy_domain" placeholder="yummyanime.tv" style="margin:2px 0 8px;">
+                            <div class="amk-row"><span class="amk-row-label"><b>AnimeGO</b></span>${sw('set_link_animego', settings.enableLinkAnimego)}</div>
+                            <input class="amk-input amk-mono" id="set_animego_domain" placeholder="animego.org" style="margin:2px 0 8px;">
+                            <div class="amk-row"><span class="amk-row-label"><b>MangaLib</b></span>${sw('set_link_mangalib', settings.enableLinkMangalib)}</div>
+                            <input class="amk-input amk-mono" id="set_mangalib_domain" placeholder="mangalib.me" style="margin:2px 0 6px;">
+                        </div>
+                        <div class="amk-card">
+                            <div class="amk-card-title">Авторизация AniList</div>
+                            <div class="amk-row-hint" style="padding:8px 2px 6px;">Токен нужен для экспорта и сравнения списков. Создайте Client <a href="https://anilist.co/settings/developer" target="_blank" style="color:rgb(var(--color-blue));text-decoration:none;">здесь</a>, redirect URL: <code style="background:rgba(var(--color-text-light),0.12);padding:1px 5px;border-radius:4px;">https://anilist.co/api/v2/oauth/pin</code></div>
+                            <input class="amk-input amk-mono" type="password" id="set_al_token" placeholder="Токен AniList" style="margin-bottom:8px;">
+                            <div style="display:flex; gap:8px; margin-bottom:6px;"><input class="amk-input amk-mono" id="set_al_client" placeholder="Client ID" style="flex:1;"><button class="amk-btn amk-btn-ghost" id="set_al_gen" title="Создать ссылку авторизации">Ссылка</button></div>
+                            <div id="set_al_link_wrap" style="text-align:center; font-size:12px;"></div>
+                        </div>
+                        <div class="amk-card">
+                            <div class="amk-card-title">Прочее</div>
+                            <div class="amk-row"><span class="amk-row-label"><b>Логгер</b><span class="amk-row-hint">отслеживание действий скрипта (для отладки)</span></span>${sw('set_logger', settings.enableLogger)}</div>
+                        </div>
+                    </div>
+                    <div class="amk-foot">
+                        <button class="amk-btn amk-btn-primary amk-btn-block" id="am-apply">Применить и перезагрузить</button>
+                        <button class="amk-btn amk-btn-danger" id="am-clear">Очистить кэш</button>
+                    </div>
                 </div>
-
-                <div class="am-opt" style="border-top:1px solid rgba(var(--color-text-light),0.1); padding-top:10px; margin-bottom:15px;"><span style="font-weight:700;">Включить Логгер</span><input type="checkbox" id="set_logger" ${settings.enableLogger ? 'checked' : ''} title="Включает отслеживание действий скрипта. Полезно для отладки."></div>
-                <button class="am-btn" id="am-apply">Применить и перезагрузить</button>
-                <button class="am-btn" id="am-clear" style="margin-top:8px; border-color: rgba(227,93,93,0.3); color: #fc8181; background: rgba(227,93,93,0.1);">Очистить кэш базы</button>
             `;
             document.body.appendChild(panel);
 
             document.getElementById('set_yummy_domain').value = settings.yummyDomain; document.getElementById('set_animego_domain').value = settings.animegoDomain; document.getElementById('set_mangalib_domain').value = settings.mangalibDomain;
 
-            // Закрытие панели при клике вне её
-            document.addEventListener('click', (e) => {
-                if (panel && window.getComputedStyle(panel).display === 'block') { if (!panel.contains(e.target) && btnSet && !btnSet.contains(e.target)) panel.style.display = 'none'; }
-            });
+            // Закрытие модалки настроек: клик по фону-оверлею или по кнопке ✕.
+            panel.addEventListener('click', (e) => { if (e.target === panel) panel.style.display = 'none'; });
+            { const c = document.getElementById('am-set-close'); if (c) c.onclick = () => { panel.style.display = 'none'; }; }
 
             // Биндим сохранение настроек
             const booleanSettings =['set_interface', 'set_titles', 'set_chars', 'set_staff', 'set_player', 'set_ratings', 'set_franchise', 'set_themes', 'set_extlinks', 'set_link_rutracker', 'set_link_yummy', 'set_link_animego', 'set_link_mangalib', 'set_logger'];
@@ -2549,7 +3183,7 @@
                     if (!cid) return alert("Введите Client ID (его можно создать в настройках AniList -> Developer)");
                     const authLink = document.createElement('a');
                     authLink.href = `https://anilist.co/api/v2/oauth/authorize?client_id=${cid}&response_type=token`;
-                    authLink.target = "_blank"; authLink.style.cssText = "color:#89b4fa; text-decoration:none; font-weight:bold; display:block; padding:6px; border:1px dashed #89b4fa; border-radius:6px; margin-top:5px; transition: 0.2s;";
+                    authLink.target = "_blank"; authLink.style.cssText = "color:rgb(var(--color-blue)); text-decoration:none; font-weight:bold; display:block; padding:6px; border:1px dashed rgb(var(--color-blue)); border-radius:6px; margin-top:5px; transition: 0.2s;";
                     authLink.textContent = "👉 Клик: Перейти к авторизации";
                     const wrap = document.getElementById('set_al_link_wrap'); wrap.innerHTML = ''; wrap.appendChild(authLink);
                 };
