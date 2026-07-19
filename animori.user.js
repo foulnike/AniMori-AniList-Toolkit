@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AniMori: AniList Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      1.8.0
+// @version      1.8.1
 // @description  Русский перевод, поиск, плеер, рейтинги Shiki и MAL, дерево хронологии, опенинги/эндинги, музыка (VK/YouTube/Spotify/SoundCloud), внешние ссылки, экспорт и сравнение списков Shikimori/AniList.
 // @author       foulnike
 // @match        https://anilist.co/*
@@ -15,8 +15,8 @@
 // @connect      raw.githubusercontent.com
 // @connect      shikimori.io
 // @connect      graphql.anilist.co
-// @connect      api.jikan.moe
 // @connect      kodik-api.com
+// @connect      api.animethemes.moe
 // @license      MIT
 // @downloadURL https://update.greasyfork.org/scripts/572948/AniMori%3A%20AniList%20Toolkit.user.js
 // @updateURL https://update.greasyfork.org/scripts/572948/AniMori%3A%20AniList%20Toolkit.meta.js
@@ -1174,31 +1174,61 @@
         return { data: null, domain: null };
     }
 
-    // Запрос музыкальных тем с Jikan (MAL API)
+    // Запрос музыкальных тем с AnimeThemes API
     async function fetchMalThemes(malId) {
         if (!malId) return null;
         const cacheKey = `THEMES_${malId}`;
         const cached = await dbGet('shikiCache', cacheKey);
         if (cached && (Date.now() - cached.ts < CACHE_TIME)) return cached.data;
 
-        Logger('API', `Запрос Jikan (MAL) Themes для ID: ${malId}`);
+        Logger('API', `Запрос AnimeThemes.moe для MAL ID: ${malId}`);
         return new Promise((resolve) => {
             GM_xmlhttpRequest({
                 method: "GET",
-                url: `https://api.jikan.moe/v4/anime/${malId}/themes`,
+                url: `https://api.animethemes.moe/anime?filter[has]=resources&filter[site]=MyAnimeList&filter[external_id]=${malId}&include=animethemes.song`,
                 onload: (res) => {
                     if (res.status === 200) {
                         try {
-                            const data = JSON.parse(res.responseText).data;
-                            dbSet('shikiCache', { key: cacheKey, data: data, ts: Date.now() });
-                            resolve(data);
-                        } catch (e) { Logger('ERROR', 'Ошибка парсинга Jikan', e); resolve(null); }
+                            const data = JSON.parse(res.responseText);
+                            const animeList = data.anime || [];
+
+                            // Если аниме не найдено, отдаем пустые массивы
+                            if (animeList.length === 0) {
+                                const emptyData = { openings: [], endings: [] };
+                                dbSet('shikiCache', { key: cacheKey, data: emptyData, ts: Date.now() });
+                                return resolve(emptyData);
+                            }
+
+                            const themes = animeList[0].animethemes || [];
+                            const formattedData = { openings: [], endings: [] };
+
+                            themes.forEach(t => {
+                                const title = t.song && t.song.title ? t.song.title : t.slug;
+                                const seq = t.slug.replace(/[^0-9]/g, '') || '1';
+                                const str = `${seq}: "${title}"`;
+
+                                if (t.type === 'OP') formattedData.openings.push(str);
+                                else if (t.type === 'ED') formattedData.endings.push(str);
+                            });
+
+                            dbSet('shikiCache', { key: cacheKey, data: formattedData, ts: Date.now() });
+                            resolve(formattedData);
+                        } catch (e) {
+                            Logger('ERROR', 'Ошибка парсинга AnimeThemes', e);
+                            resolve(null);
+                        }
                     } else if (res.status === 429) {
-                        Logger('ERROR', 'Jikan Rate Limit 429! Повторная попытка...');
+                        Logger('ERROR', 'AnimeThemes Rate Limit 429! Повторная попытка...');
                         setTimeout(() => resolve(fetchMalThemes(malId)), 1500 + Math.floor(Math.random() * 500));
-                    } else { Logger('ERROR', `Jikan Error HTTP ${res.status}`); resolve(null); }
+                    } else {
+                        Logger('ERROR', `AnimeThemes Error HTTP ${res.status}`);
+                        resolve(null);
+                    }
                 },
-                onerror: (e) => { Logger('ERROR', 'Jikan Network Error', e); resolve(null); }
+                onerror: (e) => {
+                    Logger('ERROR', 'AnimeThemes Network Error', e);
+                    resolve(null);
+                }
             });
         });
     }
@@ -2536,7 +2566,11 @@
             else sidebar.prepend(themesBox);
 
             fetchMalThemes(malData.idMal).then(themes => {
-                if (!themes || (!themes.openings.length && !themes.endings.length)) { themesBox.remove(); return; }
+                if (!themes || (!themes.openings.length && !themes.endings.length)) {
+        // Больше не удаляем themesBox. Он останется скрытым (display: none),
+        // тем самым блокируя повторные запуски ensureWidgets.
+        return;
+                }
 
                 let activeMusicService = GM_getValue('am_music_service', 'vk');
                 const headerFlex = document.createElement('div');
