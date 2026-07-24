@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AniMori: AniList Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      1.9.0
+// @version      1.8.2
 // @description  Русский перевод, поиск, плеер, рейтинги Shiki и MAL, дерево хронологии, опенинги/эндинги, музыка (VK/YouTube/Spotify/SoundCloud), внешние ссылки, экспорт и сравнение списков Shikimori/AniList.
 // @author       foulnike
 // @match        https://anilist.co/*
