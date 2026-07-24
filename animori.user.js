@@ -22,24 +22,9 @@
 // @updateURL https://update.greasyfork.org/scripts/572948/AniMori%3A%20AniList%20Toolkit.meta.js
 // ==/UserScript==
 
-// @ts-nocheck
-// Размещено после метаблока UserScript (а не первой строкой файла), т.к. Tampermonkey
-// и greasyfork/GitHub-парсеры метаданных скрипта ожидают, что "// ==UserScript==" будет
-// самой первой строкой файла — так безопаснее для будущих обновлений/публикации.
-//
-// Почему @ts-nocheck, а не @ts-check: файл — большой legacy-скрипт без TS build step,
-// написанный без учёта строгой типизации (implicit any, GM_* глобалы без @types,
-// отсутствие null-guard'ов там, где рантайм и так безопасен благодаря `||`/`?.` и т.п.).
-// Прогон `npx typescript --allowJs --checkJs --noEmit animori.user.js` даёт ~670 ошибок
-// по всему файлу (не только в новых typedef-секциях) — в основном implicit-any (TS7006),
-// "possibly undefined" (TS18048/TS2531) из-за Map.get()/optional chaining и отсутствие
-// типов Tampermonkey API (GM_getValue и т.п., TS2304). Включать @ts-check с таким объёмом
-// шума нецелесообразно: он не даёт сигнала по существу и сделает будущие правки менее
-// заметными на фоне сотен нерелевантных предупреждений. JSDoc @typedef и @param/@returns
-// на ключевых функциях (сканер дельты, IndexedDB, API-модуль) оставлены как задел —
-// они уже дают автодополнение/подсказки типов в редакторах (VSCode и т.п.) независимо от
-// @ts-check, и позволяют в будущем постепенно включить проверку по частям (например через
-// отдельный jsconfig.json с "checkJs": true и точечными // @ts-expect-error на legacy-местах).
+// @ts-nocheck — legacy-код без TS build step, включение @ts-check даёт ~670 шумных ошибок
+// (implicit any, GM_* без типов). JSDoc-типы ниже уже дают автодополнение в редакторе.
+
 (function() {
     'use strict';
 
@@ -127,16 +112,9 @@
     }
 
     /**
-     * Безопасная сборка HTML: статичные части шаблона вставляются как есть,
-     * а все интерполированные значения (${...}) автоматически экранируются через escapeHTML.
-     * Используй как: el.innerHTML = html`<div class="x">${userName}</div>`;
-     * Если значение уже доверенное готовое HTML (например результат другого html`` вызова
-     * или заведомо безопасная константа) и НЕ должно экранироваться — оберни его в rawHTML(value).
-     *
-     * Примечание: strings.length всегда на 1 больше, чем values.length (первый статичный
-     * кусок шаблона идёт до первого ${...}), поэтому на i-й итерации reduce (i начинается с 0)
-     * нужное экранированное значение — values[i - 1], а для i === 0 подставлять значение не нужно
-     * (перед самым первым статичным куском ничего интерполировать не может).
+     * Безопасная сборка HTML: интерполированные значения экранируются через escapeHTML.
+     * Используй: el.innerHTML = html`<div class="x">${userName}</div>`;
+     * Для уже доверенного HTML — оберни в rawHTML(value), чтобы не экранировать повторно.
      */
     function html(strings, ...values) {
         return strings.reduce((out, str, i) => {
@@ -186,8 +164,7 @@
 
         if (Array.isArray(obj)) {
             if (obj.length === 0) return '[]';
-            // Локальная переменная-аккумулятор HTML-строки; названа jsonHtml, а не html,
-            // чтобы не затенять глобальный tagged-template хелпер html`` из блока утилит.
+            // jsonHtml, а не html — не затеняем глобальный html`` хелпер.
             let jsonHtml = `<details ${isRoot ? 'open' : ''} style="margin-left:${isRoot?0:15}px;"><summary style="cursor:pointer;color:#89b4fa;user-select:none;outline:none;">Array(${obj.length})[</summary><div style="margin-left:15px; border-left:1px solid rgba(255,255,255,0.1); padding-left:10px;">`;
             for(let i=0; i<obj.length; i++) {
                 jsonHtml += `<div style="margin-bottom:2px;"><span style="color:#cdd6f4">${i}:</span> ${createJSONView(obj[i], false)}</div>`;
@@ -247,12 +224,8 @@
     }
 
     /**
-     * Признак того, что ошибка относится именно к нашему userscript-у, а не к сторонним
-     * скриптам страницы AniList/Shikimori (React/Vue бандлы сайта, расширения браузера и т.п.).
-     * Решение: проверяем filename/stack на маркеры "userscript" и "tampermonkey" (стандартные
-     * признаки sandbox-окружения GM_*), а также на "animori"/".user.js" (имя самого файла скрипта
-     * при локальной установке/разработке). Если ни один маркер не совпал — ошибка считается чужой
-     * и не попадает в лог, чтобы не заспамить логгер шумом стороннего кода страницы.
+     * Проверяет, относится ли ошибка к нашему скрипту (а не к стороннему коду страницы),
+     * по маркерам в filename/stack.
      */
     function isOwnScriptSource(str) {
         if (!str) return false;
@@ -276,14 +249,10 @@
     }
 
     /**
-     * Универсальная обёртка для безопасного вызова функций (в т.ч. async) с единообразным
-     * логированием ошибок через Logger('ERROR', ...). Не меняет существующий стиль вызовов —
-     * достаточно обернуть уже готовый вызов в стрелочную функцию без аргументов:
-     *   await safeCall(() => anilistQuery(query, vars, true), 'anilistQuery/Viewer');
-     * По умолчанию исключение пробрасывается дальше (silent = false), чтобы не менять
-     * поведение существующих try/catch, которые ожидают проброс ошибки выше по стеку.
-     * @param {Function} fn - функция без аргументов (может быть async), которую нужно выполнить.
-     * @param {string} context - краткое описание места вызова для сообщения в логе (модуль/функция).
+     * Обёртка для вызова функции (в т.ч. async) с логированием ошибок через Logger('ERROR', ...).
+     * Пример: await safeCall(() => anilistQuery(query, vars, true), 'anilistQuery/Viewer');
+     * @param {Function} fn - функция без аргументов (может быть async).
+     * @param {string} context - описание места вызова для лога.
      * @param {{silent?: boolean}} [options] - silent=true подавляет повторный throw после логирования.
      * @returns {Promise<*>} результат fn(), либо undefined при silent=true и ошибке.
      */
@@ -303,7 +272,7 @@
 
         let detailsHtml = rawHTML('');
         if (entry.details) {
-            // createJSONView сам рекурсивно экранирует все строковые значения — доверенный HTML.
+            // createJSONView сам экранирует строки — доверенный HTML.
             detailsHtml = rawHTML(`<div class="am-log-details" style="display:none;">${createJSONView(entry.details)}</div>`);
         }
 
@@ -444,7 +413,6 @@
 
         const overlay = document.createElement('div');
         overlay.id = 'am-logger-overlay';
-        // activeLogFilter — внутреннее состояние (строка из фиксированного набора значений), не пользовательский ввод.
         overlay.innerHTML = html`
             <div class="am-logger-modal" style="position:relative;">
                 <div class="am-logger-header">
@@ -1059,9 +1027,7 @@
             ? `<details class="amk-collapse"><summary>Игнорируемые <span class="amk-count">(${ignArr.length})</span></summary><div class="amk-collapse-body">${ignArr.map(id => `<div class="amk-diffrow"><span class="amk-name">${cmpEsc(titleOf(id))}</span><span class="cmp-unignore amk-x" data-id="${id}" title="Вернуть" style="color:rgb(var(--color-blue));opacity:.85;">↩</span></div>`).join('')}</div></details>`
             : '';
 
-        // Все под-HTML (cmpRenderSummary/cmpRenderFavs/cmpRenderDiff/cmpRenderNameFavs, ignHtml)
-        // уже экранируют пользовательские значения вручную через cmpEsc() на своём уровне —
-        // здесь это доверенный готовый HTML, поэтому оборачиваем в rawHTML().
+        // Под-HTML уже экранирован через cmpEsc() — доверенный, оборачиваем в rawHTML().
         resultEl.innerHTML = html`<div style="display:flex;gap:20px;flex-wrap:wrap;">
                 <div style="flex:1;min-width:280px;">${rawHTML(cmpRenderSummary('Аниме', stA.sh, stA.al))}</div>
                 <div style="flex:1;min-width:280px;">${rawHTML(cmpRenderSummary('Манга', stM.sh, stM.al))}</div>
@@ -1199,31 +1165,16 @@
     // ==========================================
 
     /**
-     * Версионированные миграции схемы IndexedDB.
+     * Версионированные миграции схемы IndexedDB. Каждый ключ — номер версии,
+     * значение — функция-мигратор `(db, tx) => {...}` от версии (N-1) к N.
+     * Выполняются последовательно от `oldVersion+1` до `db.version`. Каждый шаг должен
+     * быть идемпотентным (проверять `objectStoreNames.contains(...)`).
      *
-     * Паттерн: каждый ключ объекта — номер версии БД, значение — функция-мигратор
-     * `(db, tx) => { ... }`, которая приводит схему БД от версии (N-1) к версии N.
-     *   - `db`  — экземпляр IDBDatabase (для createObjectStore/deleteObjectStore и т.п.);
-     *   - `tx`  — транзакция апгрейда (IDBVersionChangeTransaction), через неё можно достучаться
-     *            до object store уже созданных на предыдущих шагах в этом же onupgradeneeded
-     *            (например `tx.objectStore('shikiCache').createIndex(...)`).
-     * Миграции выполняются последовательно от `event.oldVersion + 1` до `db.version` — то есть
-     * при первом создании БД у нового пользователя выполнятся ВСЕ шаги по порядку (1..N), а у
-     * существующего пользователя, обновляющего версию скрипта — только недостающие шаги.
-     * Каждый шаг должен быть идемпотентным (проверять `objectStoreNames.contains(...)` перед
-     * созданием стора) — это на случай ручных сбоев/повторных прогонов.
+     * Чтобы добавить миграцию N+1: увеличить DB_VERSION, добавить ключ `[N+1]: ...`,
+     * не трогать существующие шаги.
      *
-     * Как добавить миграцию для новой версии N+1 в будущем:
-     *   1. Увеличить константу DB_VERSION до N+1.
-     *   2. Добавить в DB_MIGRATIONS ключ `[N+1]: (db, tx) => { ...изменения схемы... }`.
-     *   3. НЕ трогать существующие шаги 1..N — история должна оставаться неизменной.
-     *
-     * ВАЖНО (историческое ограничение): реальные шаги миграций 1→2, 2→3, 3→4, 4→5 в проекте
-     * ранее не были явно разделены — onupgradeneeded просто идемпотентно создавал все три
-     * object store одним блоком без версионирования по шагам, поэтому достоверно восстановить,
-     * что именно менялось на каждой промежуточной версии, невозможно. Чтобы не выдумывать
-     * несуществующую историю, вся текущая схема консолидирована в шаг DB_VERSION (5). Для всех
-     * будущих изменений используйте отдельные шаги, начиная с 6.
+     * Историю версий 1→5 в проекте раньше не разделяли по шагам, поэтому вся текущая
+     * схема консолидирована в шаг 5. Будущие изменения — начиная с 6.
      */
     const DB_MIGRATIONS = {
         5: (db, tx) => {
@@ -1431,140 +1382,115 @@
 
     // Типы данных (JSDoc, без TypeScript build step)
     // -------------------------------------------------------------------------
-    // Ниже описаны основные "формы" данных, с которыми работает скрипт: сырые
-    // ответы AniList GraphQL / Shikimori REST, нормализованные записи сканера
-    // сравнения (см. "1.5 СКАНЕР ДЕЛЬТЫ") и записи кэша IndexedDB. Это только
-    // документация для редактора/tsc (checkJs) — рантайм-поведение не меняется.
+    // Типы данных сканера дельты и кэша IndexedDB (JSDoc, для автодополнения в редакторе).
 
     /**
-     * Заголовок тайтла AniList (Media.title), как возвращается GraphQL (романизированное
-     * и/или английское название; оба поля могут быть null в ответе API).
      * @typedef {Object} AniListMediaTitle
-     * @property {?string} [romaji] Название ромадзи (обычно основное).
-     * @property {?string} [english] Английское название (может отсутствовать).
+     * @property {?string} [romaji] Название ромадзи.
+     * @property {?string} [english] Английское название.
      */
 
     /**
-     * Связь между тайтлами AniList (media.relations.edges[]), используется сканером
-     * дельты для определения "сиквел/приквел/спин-офф и т.п." при построении групп
-     * "связанных" расхождений.
      * @typedef {Object} AniListRelationEdge
-     * @property {string} relationType Тип связи (например 'SEQUEL', 'PREQUEL', 'PARENT', ...).
-     * @property {{idMal: ?number}} node Узел связанного тайтла (нужен только idMal).
+     * @property {string} relationType Тип связи ('SEQUEL', 'PREQUEL', 'PARENT', ...).
+     * @property {{idMal: ?number}} node Связанный тайтл.
      */
 
     /**
-     * Урезанный Media из AniList GraphQL, встречающийся в MediaListCollection.entries[].media
-     * (см. cmpFetchAniListList) — только поля, реально запрашиваемые скриптом.
+     * Урезанный Media из AniList GraphQL (MediaListCollection.entries[].media).
      * @typedef {Object} AniListMediaLite
-     * @property {?number} idMal MyAnimeList ID тайтла (ключ сопоставления Shikimori<->AniList).
-     * @property {AniListMediaTitle} [title] Заголовки тайтла.
-     * @property {{edges: AniListRelationEdge[]}} [relations] Связанные тайтлы.
+     * @property {?number} idMal MyAnimeList ID.
+     * @property {AniListMediaTitle} [title]
+     * @property {{edges: AniListRelationEdge[]}} [relations]
      */
 
     /**
-     * Полная запись Media из AniList GraphQL (Media{...}), как используется при
-     * рендере виджетов страницы тайтла (injectMediaExtensions / ensureWidgets) —
-     * см. запрос `query($id:Int){Media(id:$id){id type idMal seasonYear averageScore title{...}}}`.
+     * Полная запись Media из AniList GraphQL, используется при рендере виджетов страницы тайтла.
      * @typedef {Object} AniListMedia
      * @property {number} id AniList ID тайтла.
-     * @property {'ANIME'|'MANGA'} type Тип тайтла.
-     * @property {?number} idMal MyAnimeList ID (мост к Shikimori/MAL).
-     * @property {?number} [seasonYear] Год сезона выхода.
-     * @property {?number} [averageScore] Средняя оценка AniList (шкала 0..100).
-     * @property {AniListMediaTitle} [title] Заголовки тайтла.
-     * @property {{status: ?string, progress?: number}} [mediaListEntry] Запись текущего юзера в списке (если есть).
+     * @property {'ANIME'|'MANGA'} type
+     * @property {?number} idMal MyAnimeList ID.
+     * @property {?number} [seasonYear]
+     * @property {?number} [averageScore] Шкала 0..100.
+     * @property {AniListMediaTitle} [title]
+     * @property {{status: ?string, progress?: number}} [mediaListEntry]
      */
 
     /**
-     * Запись пользовательского списка AniList (MediaListEntry), нормализованная сканером
-     * дельты в cmpFetchAniListList — ключ карты (Map) — malId.
+     * Запись списка AniList, нормализованная сканером дельты (ключ карты — malId).
      * @typedef {Object} CmpAniListEntry
-     * @property {number} malId MyAnimeList ID (== ключ карты).
-     * @property {string} title Название тайтла (romaji/english либо 'MAL#<id>' фолбэк).
-     * @property {?string} status Статус списка Shikimori-стиля ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null),
-     *                              получен маппингом AL_STATUS_MAP из статуса AniList (CURRENT/REPEATING/PLANNING/COMPLETED/PAUSED/DROPPED).
-     * @property {number} score10 Оценка, нормализованная к шкале 0..10 (из AniList score(format:POINT_100) / 10).
-     * @property {number} progress Просмотрено серий / прочитано глав.
-     * @property {number} volumes Прочитано томов (для манги).
-     * @property {number} rewatches Количество пересмотров/перечитываний (AniList `repeat`).
-     * @property {string} notes Пользовательские заметки (обрезаны trim()).
-     * @property {number[]} relations Список idMal связанных тайтлов (сиквелы/приквелы/части), см. CMP_SPLIT_RELATIONS.
+     * @property {number} malId
+     * @property {string} title
+     * @property {?string} status Shikimori-стиль ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null).
+     * @property {number} score10 Оценка 0..10.
+     * @property {number} progress
+     * @property {number} volumes
+     * @property {number} rewatches
+     * @property {string} notes
+     * @property {number[]} relations idMal связанных тайтлов.
      */
 
     /**
-     * Урезанная запись Shikimori-тайтла внутри ответа `${type}_rates` (it.anime / it.manga),
-     * содержит только поля, которые реально читает cmpFetchShikiList.
+     * Урезанный тайтл Shikimori внутри ответа `${type}_rates`.
      * @typedef {Object} ShikiMediaLite
-     * @property {number} id ID тайтла Shikimori (равен MyAnimeList ID).
-     * @property {?string} [russian] Русское название.
-     * @property {?string} [name] Оригинальное/английское название.
+     * @property {number} id Равен MyAnimeList ID.
+     * @property {?string} [russian]
+     * @property {?string} [name]
      */
 
     /**
-     * Полная карточка тайтла Shikimori (GET /api/animes/:id или /api/mangas/:id), как
-     * используется при рендере виджетов (рейтинги, франшиза) — см. injectMediaExtensions.
-     * Перечислены только реально используемые скриптом поля; реальный ответ API шире.
+     * Карточка тайтла Shikimori (GET /api/animes/:id или /api/mangas/:id), только используемые поля.
      * @typedef {Object} ShikiMedia
-     * @property {number} id ID тайтла Shikimori.
-     * @property {?string} [russian] Русское название.
-     * @property {?string} [name] Оригинальное название.
-     * @property {?string} [url] Относительный путь тайтла на Shikimori (без домена).
-     * @property {?string} [domain] Зеркало Shikimori, с которого получен ответ (проставляется fetchShiki).
-     * @property {?string} [description] Описание (на русском, HTML/BBCode-подобная разметка Shikimori).
-     * @property {?number} [score] Средняя оценка Shikimori (шкала 0..10, строкой или числом в реальном ответе).
-     * @property {Array<{name: string, value: number}>} [rates_scores_stats] Гистограмма оценок пользователей ("name" — балл 1..10 строкой, "value" — количество голосов).
+     * @property {number} id
+     * @property {?string} [russian]
+     * @property {?string} [name]
+     * @property {?string} [url]
+     * @property {?string} [domain] Зеркало Shikimori.
+     * @property {?string} [description]
+     * @property {?number} [score] Шкала 0..10.
+     * @property {Array<{name: string, value: number}>} [rates_scores_stats] Гистограмма оценок.
      */
 
     /**
-     * Запись пользовательского списка Shikimori (users/:id/{type}_rates), нормализованная
-     * сканером дельты в cmpFetchShikiList — ключ карты (Map) — malId (== id тайтла Shikimori).
+     * Запись списка Shikimori, нормализованная сканером дельты (ключ карты — malId).
      * @typedef {Object} CmpShikiEntry
-     * @property {number} malId MyAnimeList ID (== Shikimori target id, == ключ карты).
-     * @property {string} title Русское/оригинальное название либо 'MAL#<id>' фолбэк.
-     * @property {?string} status Статус Shikimori ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null).
-     * @property {number} score10 Оценка пользователя (шкала 0..10, как есть у Shikimori).
-     * @property {number} progress Просмотрено серий (it.episodes) / прочитано глав (it.chapters).
-     * @property {number} volumes Прочитано томов (it.volumes, только для манги).
-     * @property {number} rewatches Количество пересмотров/перечитываний (it.rewatches).
-     * @property {string} notes Пользовательские заметки (it.text, обрезаны trim()).
+     * @property {number} malId
+     * @property {string} title
+     * @property {?string} status ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null).
+     * @property {number} score10
+     * @property {number} progress
+     * @property {number} volumes
+     * @property {number} rewatches
+     * @property {string} notes
      */
 
-    /**
-     * Общая нормализованная форма записи списка (используется в местах, где неважно,
-     * пришла ли запись из AniList или Shikimori — например cmpDiff/cmpStats).
-     * @typedef {CmpAniListEntry|CmpShikiEntry} CmpListEntry
-     */
+    /** @typedef {CmpAniListEntry|CmpShikiEntry} CmpListEntry Нормализованная запись, независимо от источника. */
 
     /**
-     * Запись объекта, кладущегося в IndexedDB store `shikiCache` (keyPath: 'key').
-     * Используется и для кэша карточек тайтлов (`FULL_<id>`, `MED2_<id>`), персонажей
-     * (`CHR2_<id>`), персонала (`STF3_<id>`), музыкальных тем (`THEMES_<id>`) — форма
-     * одна и та же, различается только префикс ключа и содержимое `data`.
+     * Запись в IndexedDB store `shikiCache` (keyPath: 'key'). Используется для карточек тайтлов,
+     * персонажей, персонала и музыкальных тем — форма одна, различается префикс ключа и `data`.
      * @typedef {Object} ShikiCacheRecord
-     * @property {string} key Составной ключ вида "<ПРЕФИКС>_<id>" (например "FULL_123", "MED2_123", "THEMES_123").
-     * @property {*} data Полезная нагрузка (ShikiMedia, {ru: string}, {ru:'NOT_FOUND'}, {openings: string[], endings: string[]} и т.п. — зависит от префикса).
-     * @property {number} ts Unix-таймстамп записи (Date.now()) — используется для протухания по CACHE_TIME и garbage collector'ом.
+     * @property {string} key Составной ключ вида "ПРЕФИКС_id" (например "FULL_123").
+     * @property {*} data Полезная нагрузка (зависит от префикса).
+     * @property {number} ts Unix-таймстамп записи (для протухания по CACHE_TIME).
      */
 
     /**
-     * Запись объекта, кладущегося в IndexedDB store `malCache` (keyPath: 'id') — кэш
-     * соответствия AniList ID -> сырой AniListMedia (см. injectMediaExtensions).
+     * Запись в IndexedDB store `malCache` (keyPath: 'id') — кэш AniList ID -> AniListMedia.
      * @typedef {Object} MalCacheRecord
-     * @property {number} id AniList Media ID (ключ стора).
-     * @property {AniListMedia} data Закэшированный ответ AniList Media{...}.
+     * @property {number} id AniList Media ID.
+     * @property {AniListMedia} data
      */
 
     /**
-     * Запись объекта, кладущегося в IndexedDB store `franchiseCache` (keyPath: 'id').
-     * На момент написания стор создаётся миграцией схемы и участвует в clearCache(),
-     * но нигде в коде явно не заполняется через dbSet('franchiseCache', ...) — зарезервирован
-     * под будущее кэширование дерева франшизы. Форма ниже — ожидаемая/рекомендуемая на будущее.
+     * Запись в IndexedDB store `franchiseCache` (keyPath: 'id'). Стор зарезервирован под
+     * будущее кэширование дерева франшизы, пока нигде явно не заполняется.
      * @typedef {Object} FranchiseCacheRecord
-     * @property {number} id Ключ записи (обычно AniList/MAL ID корневого узла франшизы).
-     * @property {*} data Полезная нагрузка (дерево франшизы, форма пока не зафиксирована использованием).
-     * @property {number} [ts] Unix-таймстамп записи (для протухания по CACHE_TIME), если будет использоваться так же, как shikiCache.
+     * @property {number} id
+     * @property {*} data
+     * @property {number} [ts]
      */
+
 
     /**
      * Возвращает токен доступа AniList: либо сохранённый пользователем в настройках скрипта,
@@ -2308,8 +2234,7 @@
         function cleanShikiBB(text, url) {
             if (!text) return "";
             let safeText = escapeHTML(text);
-            // Локальная переменная названа bbHtml, а не html, чтобы не затенять глобальный
-            // tagged-template хелпер html`` из блока утилит.
+            // bbHtml, а не html — не затеняем глобальный html`` хелпер.
             const bbHtml = safeText.replace(/\[i\](.*?)\[\/i\]/gi, '<i>$1</i>').replace(/\[b\](.*?)\[\/b\]/gi, '<b>$1</b>').replace(/\[u\](.*?)\[\/u\]/gi, '<u>$1</u>').replace(/\[\w+=\d+\](.*?)\[\/\w+\]/gi, '$1').replace(/\[\w+(=.*?)?\]/gi, '').replace(/\[\/\w+\]/gi, '').replace(/\n/g, '<br>');
             const safeUrl = escapeHTML(url);
             return bbHtml + `<br><br><small style="opacity:0.75;font-size:0.85em;">Описание предоставлено <a href="${safeUrl}" target="_blank" style="color:#3dbbee; font-weight:bold;">Shikimori</a></small>`;
@@ -2755,11 +2680,7 @@
                     else if (item.el.classList && item.el.classList.contains('description') && data.desc) {
                         if (!item.el.querySelector('.ru-desc')) {
                             const origHTML = item.el.innerHTML;
-                            // data.desc — уже готовый доверенный HTML из cleanShikiBB() (он сам
-                            // экранирует исходный текст и оборачивает его в безопасную разметку).
-                            // origHTML — это уже отрендеренный AniList-ом DOM текущего описания.
-                            // Оба значения доверенные — оборачиваем в rawHTML(), чтобы html``
-                            // не экранировал их повторно (что сломало бы вёрстку/теги).
+                            // data.desc (cleanShikiBB) и origHTML (уже отрендеренный DOM) — оба доверенные HTML.
                             item.el.innerHTML = html`<div class="ru-desc" style="margin-bottom:20px;">${rawHTML(data.desc)}</div><details style="opacity:0.85;font-size:0.9em;background:rgba(128,128,128,0.15);padding:10px;border-radius:5px;"><summary style="cursor:pointer;color:#3dbbee;font-weight:bold;outline:none;">Оригинальное описание (AniList)</summary><div style="margin-top:10px;">${rawHTML(origHTML)}</div></details>`;
                         }
                     }
@@ -3140,8 +3061,7 @@
 
                 const serviceToggle = document.createElement('div');
                 serviceToggle.className = 'am-service-toggle';
-                // v/svcTitles/svcIcons — все статичные, захардкоженные в коде значения (не из API),
-                // svcIcons[v] содержит доверенную SVG-разметку — оборачиваем в rawHTML().
+                // svcIcons[v] — доверенная SVG-разметка, поэтому rawHTML().
                 serviceToggle.innerHTML = ['vk', 'yt', 'spotify', 'sc'].map(v =>
                     html`<div class="am-service-btn ${activeMusicService === v ? 'active' : ''}" data-val="${v}" title="${svcTitles[v]}" aria-label="${svcTitles[v]}">${rawHTML(svcIcons[v])}</div>`
                 ).join('');
@@ -3463,8 +3383,6 @@
                         const alItem = alMap[`${typeStr.toUpperCase()}_${item.id}`]; if (!alItem) return;
                         const year = alItem.seasonYear || (item.aired_on ? new Date(item.aired_on).getFullYear() : '???');
                         const format = (alItem.format || typeStr).replace(/_/g, ' ');
-                        // URL обложки уже подготовлен через encodeURI — доверенное готовое значение
-                        // для CSS url(), оборачиваем в rawHTML() чтобы html`` не экранировал его повторно.
                         const coverSafe = rawHTML(encodeURI(alItem.coverImage.medium).replace(/'/g, "%27"));
                         colHtml += html`<div class="result"><div><a href="/${String(alItem.type).toLowerCase()}/${alItem.id}" class=""><div class="image" style="background-image: url('${coverSafe}');"></div><div class="name">${item.russian || item.name}<div class="info"><span>${year}</span> <span>${format}</span></div></div></a></div></div>`;
                     });
@@ -3498,8 +3416,7 @@
             }
 
             document.querySelectorAll('.am-ru-injected-container').forEach(el => el.remove());
-            // htmlContent — уже готовый доверенный HTML (собран вызывающей стороной через html``,
-            // пользовательские значения внутри него экранированы там), поэтому здесь просто оборачиваем.
+            // htmlContent уже готовый доверенный HTML.
             const wrapper = document.createElement('div'); wrapper.className = 'am-ru-injected-container'; wrapper.innerHTML = html`${rawHTML(htmlContent)}`;
             resultsContainer.appendChild(wrapper);
         }
@@ -3690,9 +3607,7 @@
             // Кнопка Сравнения списков (сканер дельты Shikimori <-> AniList)
             const btnCmp = document.createElement('button'); btnCmp.id = 'am-cmp-btn'; btnCmp.className = 'am-premium-btn'; btnCmp.innerHTML = '⇄'; btnCmp.title = 'Сравнить списки Shikimori и AniList (AniMori)'; btnCmp.onclick = openCompareModal; actionsRoot.appendChild(btnCmp);
 
-            // Рендер настроек — модалка на UI-ките (id инпутов сохранены для биндингов).
-            // sw() собирает доверенный HTML переключателя из внутренних (не пользовательских) значений,
-            // поэтому результат оборачивается в rawHTML() при подстановке в html``.
+            // sw() — доверенный HTML переключателя, оборачиваем в rawHTML().
             const sw = (id, on, extra = '') => rawHTML(`<label class="amk-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${extra}><span class="amk-track"></span><span class="amk-thumb"></span></label>`);
             const panel = document.createElement('div'); panel.id = 'am-panel';
             panel.innerHTML = html`
