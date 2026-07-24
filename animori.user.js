@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AniMori: AniList Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      1.8.1
+// @version      1.8.2
 // @description  Русский перевод, поиск, плеер, рейтинги Shiki и MAL, дерево хронологии, опенинги/эндинги, музыка (VK/YouTube/Spotify/SoundCloud), внешние ссылки, экспорт и сравнение списков Shikimori/AniList.
 // @author       foulnike
 // @match        https://anilist.co/*
@@ -21,6 +21,9 @@
 // @downloadURL https://update.greasyfork.org/scripts/572948/AniMori%3A%20AniList%20Toolkit.user.js
 // @updateURL https://update.greasyfork.org/scripts/572948/AniMori%3A%20AniList%20Toolkit.meta.js
 // ==/UserScript==
+
+// @ts-nocheck — legacy-код без TS build step, включение @ts-check даёт ~670 шумных ошибок
+// (implicit any, GM_* без типов). JSDoc-типы ниже уже дают автодополнение в редакторе.
 
 (function() {
     'use strict';
@@ -108,6 +111,22 @@
         return String(str).replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
     }
 
+    /**
+     * Безопасная сборка HTML: интерполированные значения экранируются через escapeHTML.
+     * Используй: el.innerHTML = html`<div class="x">${userName}</div>`;
+     * Для уже доверенного HTML — оберни в rawHTML(value), чтобы не экранировать повторно.
+     */
+    function html(strings, ...values) {
+        return strings.reduce((out, str, i) => {
+            const val = values[i - 1];
+            const safe = (val && val.__isRawHTML) ? val.value : escapeHTML(val);
+            return out + (i > 0 ? safe : '') + str;
+        }, '');
+    }
+    function rawHTML(value) {
+        return { __isRawHTML: true, value: String(value == null ? '' : value) };
+    }
+
     function getPlural(n, forms) {
         return (n % 10 === 1 && n % 100 !== 11 ? forms[0] : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? forms[1] : forms[2]));
     }
@@ -128,7 +147,11 @@
         try {
             const savedLogs = sessionStorage.getItem('animori_logs');
             if (savedLogs) scriptLogs = JSON.parse(savedLogs);
-        } catch (e) {}
+        } catch (e) {
+            // Logger ещё не гарантированно готов к моменту восстановления, поэтому используем
+            // прямой console.warn, чтобы не потерять сообщение и не создать цикл зависимостей.
+            console.warn('[AniMori] Не удалось восстановить логи сессии', e);
+        }
     }
 
     // Интерактивный просмотрщик JSON
@@ -141,23 +164,24 @@
 
         if (Array.isArray(obj)) {
             if (obj.length === 0) return '[]';
-            let html = `<details ${isRoot ? 'open' : ''} style="margin-left:${isRoot?0:15}px;"><summary style="cursor:pointer;color:#89b4fa;user-select:none;outline:none;">Array(${obj.length})[</summary><div style="margin-left:15px; border-left:1px solid rgba(255,255,255,0.1); padding-left:10px;">`;
+            // jsonHtml, а не html — не затеняем глобальный html`` хелпер.
+            let jsonHtml = `<details ${isRoot ? 'open' : ''} style="margin-left:${isRoot?0:15}px;"><summary style="cursor:pointer;color:#89b4fa;user-select:none;outline:none;">Array(${obj.length})[</summary><div style="margin-left:15px; border-left:1px solid rgba(255,255,255,0.1); padding-left:10px;">`;
             for(let i=0; i<obj.length; i++) {
-                html += `<div style="margin-bottom:2px;"><span style="color:#cdd6f4">${i}:</span> ${createJSONView(obj[i], false)}</div>`;
+                jsonHtml += `<div style="margin-bottom:2px;"><span style="color:#cdd6f4">${i}:</span> ${createJSONView(obj[i], false)}</div>`;
             }
-            html += `</div><span style="color:#89b4fa;">]</span></details>`;
-            return html;
+            jsonHtml += `</div><span style="color:#89b4fa;">]</span></details>`;
+            return jsonHtml;
         }
 
         if (typeof obj === 'object') {
             const keys = Object.keys(obj);
             if (keys.length === 0) return '{}';
-            let html = `<details ${isRoot ? 'open' : ''} style="margin-left:${isRoot?0:15}px;"><summary style="cursor:pointer;color:#89b4fa;user-select:none;outline:none;">Object {</summary><div style="margin-left:15px; border-left:1px solid rgba(255,255,255,0.1); padding-left:10px;">`;
+            let jsonHtml = `<details ${isRoot ? 'open' : ''} style="margin-left:${isRoot?0:15}px;"><summary style="cursor:pointer;color:#89b4fa;user-select:none;outline:none;">Object {</summary><div style="margin-left:15px; border-left:1px solid rgba(255,255,255,0.1); padding-left:10px;">`;
             for(let key of keys) {
-                html += `<div style="margin-bottom:2px;"><span style="color:#cdd6f4">"${escapeHTML(key)}":</span> ${createJSONView(obj[key], false)}</div>`;
+                jsonHtml += `<div style="margin-bottom:2px;"><span style="color:#cdd6f4">"${escapeHTML(key)}":</span> ${createJSONView(obj[key], false)}</div>`;
             }
-            html += `</div><span style="color:#89b4fa;">}</span></details>`;
-            return html;
+            jsonHtml += `</div><span style="color:#89b4fa;">}</span></details>`;
+            return jsonHtml;
         }
         return escapeHTML(String(obj));
     }
@@ -196,21 +220,49 @@
 
         if (isLoggerOpen) appendLogEntry(entry);
         if (type === 'ERROR') console.error(`[AniMori ERROR] ${message}`, details || '');
+        else if (type === 'WARN') console.warn(`[AniMori WARN] ${message}`, details || '');
+    }
+
+    /**
+     * Проверяет, относится ли ошибка к нашему скрипту (а не к стороннему коду страницы),
+     * по маркерам в filename/stack.
+     */
+    function isOwnScriptSource(str) {
+        if (!str) return false;
+        const s = String(str).toLowerCase();
+        return s.includes('userscript') || s.includes('tampermonkey') || s.includes('animori') || s.includes('.user.js');
     }
 
     // Глобальный перехватчик критических ошибок скрипта
     if (settings.enableLogger) {
         window.addEventListener('error', (e) => {
-            // Фильтруем ошибки, чтобы не логировать внутренние баги самого AniList
-            if (e.filename && (e.filename.includes('userscript') || e.filename.includes('tampermonkey'))) {
+            // Фильтруем ошибки, чтобы не логировать внутренние баги самого AniList/Shikimori
+            if (isOwnScriptSource(e.filename) || isOwnScriptSource(e.error?.stack)) {
                 Logger('ERROR', `Uncaught Error: ${e.message}`, { file: e.filename, line: e.lineno, col: e.colno, stack: e.error?.stack });
             }
         });
         window.addEventListener('unhandledrejection', (e) => {
-            if (e.reason && e.reason.stack && (e.reason.stack.includes('userscript') || e.reason.stack.includes('tampermonkey'))) {
+            if (isOwnScriptSource(e.reason && e.reason.stack)) {
                 Logger('ERROR', `Unhandled Promise Rejection: ${e.reason}`, typeof e.reason === 'object' ? e.reason : { reason: e.reason });
             }
         });
+    }
+
+    /**
+     * Обёртка для вызова функции (в т.ч. async) с логированием ошибок через Logger('ERROR', ...).
+     * Пример: await safeCall(() => anilistQuery(query, vars, true), 'anilistQuery/Viewer');
+     * @param {Function} fn - функция без аргументов (может быть async).
+     * @param {string} context - описание места вызова для лога.
+     * @param {{silent?: boolean}} [options] - silent=true подавляет повторный throw после логирования.
+     * @returns {Promise<*>} результат fn(), либо undefined при silent=true и ошибке.
+     */
+    async function safeCall(fn, context, { silent = false } = {}) {
+        try {
+            return await fn();
+        } catch (e) {
+            Logger('ERROR', `Ошибка в ${context}: ${e && e.message ? e.message : e}`, e);
+            if (!silent) throw e;
+        }
     }
 
     // Рендер одиночной записи логгера
@@ -218,25 +270,26 @@
         const el = document.createElement('div');
         el.className = `am-log-entry type-${entry.type.toLowerCase()}`;
 
-        let detailsHtml = '';
+        let detailsHtml = rawHTML('');
         if (entry.details) {
-            detailsHtml = `<div class="am-log-details" style="display:none;">${createJSONView(entry.details)}</div>`;
+            // createJSONView сам экранирует строки — доверенный HTML.
+            detailsHtml = rawHTML(`<div class="am-log-details" style="display:none;">${createJSONView(entry.details)}</div>`);
         }
 
         const shortPath = entry.path === '/' ? '/' : (entry.path.split('/').slice(1, 3).join('/') || '/');
 
-        el.innerHTML = `
+        el.innerHTML = html`
             <div class="am-log-header">
                 <span class="am-log-time">${entry.time}</span>
                 <span class="am-log-badge">${entry.type}</span>
-                <span class="am-log-path" title="${escapeHTML(entry.path)}">/${escapeHTML(shortPath)}</span>
-                <span class="am-log-msg">${escapeHTML(entry.message)}</span>
+                <span class="am-log-path" title="${entry.path}">/${shortPath}</span>
+                <span class="am-log-msg">${entry.message}</span>
                 <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
-                    ${entry.stack ? '<span class="am-log-btn-stack" title="Показать Stack Trace">[Stack]</span>' : ''}
-                    ${entry.details ? '<span class="am-log-expand">▼</span>' : ''}
+                    ${rawHTML(entry.stack ? '<span class="am-log-btn-stack" title="Показать Stack Trace">[Stack]</span>' : '')}
+                    ${rawHTML(entry.details ? '<span class="am-log-expand">▼</span>' : '')}
                 </div>
             </div>
-            ${entry.stack ? `<div class="am-log-stack-details" style="display:none; padding:8px 12px; background:rgba(252,129,129,0.1); border-top:1px solid rgba(255,255,255,0.05);"><pre style="margin:0; font-size:10.5px; color:#f38ba8; white-space:pre-wrap; font-family:inherit;">${escapeHTML(entry.stack)}</pre></div>` : ''}
+            ${rawHTML(entry.stack ? `<div class="am-log-stack-details" style="display:none; padding:8px 12px; background:rgba(252,129,129,0.1); border-top:1px solid rgba(255,255,255,0.05);"><pre style="margin:0; font-size:10.5px; color:#f38ba8; white-space:pre-wrap; font-family:inherit;">${escapeHTML(entry.stack)}</pre></div>` : '')}
             ${detailsHtml}
         `;
 
@@ -309,7 +362,7 @@
                 groupEl.className = `am-log-group type-${entry.type.toLowerCase()}`;
                 groupEl.dataset.groupType = entry.type;
                 groupEl.dataset.groupCount = "2";
-                groupEl.innerHTML = `
+                groupEl.innerHTML = html`
                     <div class="am-log-header am-log-group-header">
                         <span class="am-log-time">${entry.time}</span>
                         <span class="am-log-badge">${entry.type}</span>
@@ -360,7 +413,7 @@
 
         const overlay = document.createElement('div');
         overlay.id = 'am-logger-overlay';
-        overlay.innerHTML = `
+        overlay.innerHTML = html`
             <div class="am-logger-modal" style="position:relative;">
                 <div class="am-logger-header">
                     <h2>AniMori Logger <span style="font-size:12px;opacity:0.6;font-weight:normal;">(Session Memory)</span></h2>
@@ -368,6 +421,7 @@
                     <div class="am-logger-filters">
                         <button class="am-log-filter ${activeLogFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">ALL</button>
                         <button class="am-log-filter ${activeLogFilter === 'INFO' ? 'active' : ''}" data-filter="INFO">INFO</button>
+                        <button class="am-log-filter ${activeLogFilter === 'WARN' ? 'active' : ''}" data-filter="WARN">WARN</button>
                         <button class="am-log-filter ${activeLogFilter === 'API' ? 'active' : ''}" data-filter="API">API</button>
                         <button class="am-log-filter ${activeLogFilter === 'DB' ? 'active' : ''}" data-filter="DB">DB</button>
                         <button class="am-log-filter ${activeLogFilter === 'QUEUE' ? 'active' : ''}" data-filter="QUEUE">QUEUE</button>
@@ -492,18 +546,65 @@
     let cmpLast = null; // снимок последнего скана — чтобы перерисовывать без повторной загрузки
 
     // Игнор-лист (C): MAL id, помеченные пользователем как «не показывать» (ложные расхождения).
-    function cmpGetIgnore() { try { return new Set(JSON.parse(GM_getValue('CMP_IGNORE', '[]'))); } catch (e) { return new Set(); } }
+    /**
+     * Читает игнор-лист сканера дельты (MAL id, скрытые пользователем как "не расхождение").
+     * @returns {Set<number>} Множество MAL id. Пустое множество при отсутствии/повреждении данных.
+     */
+    function cmpGetIgnore() { try { return new Set(JSON.parse(GM_getValue('CMP_IGNORE', '[]'))); } catch (e) { Logger('WARN', 'Сканер сравнения: повреждён игнор-лист CMP_IGNORE, сброшен в пустой', e); return new Set(); } }
+    /**
+     * Сохраняет игнор-лист сканера дельты в GM-хранилище.
+     * @param {Set<number>} set Множество MAL id для сохранения.
+     * @returns {void}
+     */
     function cmpSaveIgnore(set) { GM_setValue('CMP_IGNORE', JSON.stringify([...set])); }
+    /**
+     * Добавляет MAL id в игнор-лист сканера дельты.
+     * @param {number|string} id MAL id (будет приведён к Number).
+     * @returns {void}
+     */
     function cmpAddIgnore(id) { const s = cmpGetIgnore(); s.add(Number(id)); cmpSaveIgnore(s); }
+    /**
+     * Убирает MAL id из игнор-листа сканера дельты.
+     * @param {number|string} id MAL id (будет приведён к Number).
+     * @returns {void}
+     */
     function cmpRemoveIgnore(id) { const s = cmpGetIgnore(); s.delete(Number(id)); cmpSaveIgnore(s); }
 
+    /**
+     * Экранирует спецсимволы HTML в строке для безопасной вставки в шаблоны сканера дельты.
+     * @param {*} s Произвольное значение (будет приведено к строке).
+     * @returns {string} Экранированная строка (& < >).
+     */
     function cmpEsc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    /**
+     * Человекочитаемая русская метка статуса списка (Shikimori-стиль статусов).
+     * @param {?string} s Статус ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null).
+     * @returns {string} Русская метка статуса, либо '—' если статус неизвестен.
+     */
     function cmpStatusLabel(s) { return CMP_STATUS_LABEL[s] || '—'; }
+    /**
+     * Форматирует нормализованную (0..10) оценку для отображения в таблице сравнения.
+     * @param {number} v Оценка по шкале 0..10.
+     * @returns {string} Оценка с одним знаком после запятой, либо '—' если оценки нет (v <= 0).
+     */
     function cmpFmtScore(v) { return v > 0 ? (Math.round(v * 10) / 10).toString() : '—'; }
+    /**
+     * Форматирует прогресс просмотра/чтения записи для отображения в таблице сравнения.
+     * @param {CmpListEntry} e Нормализованная запись списка (AniList или Shikimori).
+     * @param {'anime'|'manga'} type Тип тайтла.
+     * @returns {string} Строка вида "N эп." (аниме) или "N гл. / M т." (манга).
+     */
     function cmpFmtProg(e, type) { return type === 'manga' ? `${e.progress} гл. / ${e.volumes} т.` : `${e.progress} эп.`; }
 
     // AniList: список пользователя (аниме/манга), ключ = idMal. Оценка запрошена как
     // POINT_100 -> нормализуем в 0..10 делением на 10 (не зависим от шкалы пользователя).
+    /**
+     * Загружает полный список пользователя AniList (аниме или манга) и нормализует его
+     * в форму, сравнимую со списком Shikimori (см. CmpAniListEntry).
+     * @param {string} userName Имя пользователя AniList.
+     * @param {'ANIME'|'MANGA'} type Тип тайтла.
+     * @returns {Promise<Map<number, CmpAniListEntry>>} Карта MAL id -> нормализованная запись.
+     */
     async function cmpFetchAniListList(userName, type) {
         const q = `query($n:String,$t:MediaType){MediaListCollection(userName:$n,type:$t){lists{entries{status score(format:POINT_100) progress progressVolumes repeat notes media{idMal title{romaji english} relations{edges{relationType node{idMal}}}}}}}}`;
         const res = await anilistQuery(q, { n: userName, t: type }, true);
@@ -530,6 +631,12 @@
     }
 
     // AniList: избранное (аниме/манга) с пагинацией. Множество idMal -> название.
+    /**
+     * Загружает избранные тайтлы (аниме или манга) пользователя AniList постранично.
+     * @param {string} userName Имя пользователя AniList.
+     * @param {'anime'|'manga'} kind Раздел избранного (поле favourites.{kind}).
+     * @returns {Promise<Map<number, string>>} Карта MAL id -> название тайтла.
+     */
     async function cmpFetchAniListFavs(userName, kind) {
         const map = new Map(); let page = 1;
         while (true) {
@@ -545,6 +652,13 @@
     }
 
     // Shikimori: список через v1 *_rates (сразу с названиями), ключ = target id (== MAL id).
+    /**
+     * Загружает полный список пользователя Shikimori (аниме или манга) через постраничный
+     * REST-эндпоинт `{type}_rates` и нормализует его в форму, сравнимую со списком AniList.
+     * @param {number|string} userId Shikimori user id.
+     * @param {'anime'|'manga'} type Тип тайтла.
+     * @returns {Promise<Map<number, CmpShikiEntry>>} Карта MAL id (== Shikimori id тайтла) -> нормализованная запись.
+     */
     async function cmpFetchShikiList(userId, type) {
         const map = new Map(); let page = 1;
         while (true) {
@@ -572,6 +686,14 @@
         return map;
     }
 
+    /**
+     * Загружает избранное Shikimori (аниме, манга, персонажи, стафф) одним запросом.
+     * Персонажи/стафф не мостятся по id (у AniList свои id) — отдаются только имена
+     * для последующего приблизительного сопоставления по имени (см. cmpNameDiff).
+     * @param {number|string} userId Shikimori user id.
+     * @returns {Promise<{anime: Map<number,string>, manga: Map<number,string>, characters: Array<{name:string,romaji:string}>, people: Array<{name:string,romaji:string}>}>}
+     *          Избранное, разложенное по категориям.
+     */
     async function cmpFetchShikiFavs(userId) {
         const r = await fetchShiki(`/api/users/${userId}/favourites`);
         const d = (r && r.data) || {};
@@ -587,6 +709,12 @@
 
     // AniList: избранные персонажи/стафф (kind: 'characters'|'staff'). id не мостится с Shiki,
     // поэтому берём только имена (full — ромадзи, native — оригинал).
+    /**
+     * Загружает избранных персонажей или стафф пользователя AniList постранично.
+     * @param {string} userName Имя пользователя AniList.
+     * @param {'characters'|'staff'} kind Раздел избранного.
+     * @returns {Promise<Array<{name: string, native: string}>>} Список имён (full/native), без id (см. cmpNameDiff).
+     */
     async function cmpFetchAniListFavPeople(userName, kind) {
         const arr = []; let page = 1;
         while (true) {
@@ -603,9 +731,21 @@
 
     // Нормализация имени для приблизительного матча: нижний регистр, ё->е, разбивка по
     // не-буквам, сортировка токенов (гасит разный порядок «Имя Фамилия»).
+    /**
+     * Нормализует имя персонажа/персонала для приблизительного матчинга Shikimori<->AniList.
+     * @param {?string} s Исходное имя (может быть null/undefined).
+     * @returns {string} Нормализованная строка (нижний регистр, ё->е, токены отсортированы).
+     */
     function cmpNormName(s) { return (s || '').toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/i).filter(Boolean).sort().join(' '); }
 
     // Сравнение избранных персонажей/стаффа по имени (приблизительно, без id-моста).
+    /**
+     * Сравнивает избранных персонажей/стафф двух площадок по нормализованному имени.
+     * @param {Array<{name:string,romaji:string}>} shikiArr Избранное Shikimori (name/romaji).
+     * @param {Array<{name:string,native:string}>} alArr Избранное AniList (name/native).
+     * @returns {{onlyShiki: Array<{title:string}>, onlyAl: Array<{title:string}>, shikiCount:number, alCount:number}}
+     *          Расхождения по спискам избранного (только на одной из площадок) + счётчики.
+     */
     function cmpNameDiff(shikiArr, alArr) {
         const alKeys = new Set(alArr.map(x => cmpNormName(x.name)).filter(Boolean));
         const shKeys = new Set(shikiArr.map(x => cmpNormName(x.romaji || x.name)).filter(Boolean));
@@ -616,6 +756,14 @@
 
     // D: глубокая проверка каталогов (батчами). Возвращает множества MAL id, которые
     // РЕАЛЬНО существуют в каталоге другой площадки (не в списке — а вообще в базе).
+    /**
+     * Глубокая проверка каталогов: для тайтлов, отсутствующих в списке одной площадки,
+     * проверяет, существуют ли они вообще в каталоге другой площадки (батчами по 50).
+     * @param {{anime: number[], manga: number[]}} onlyShiki MAL id, которые есть только в списке Shikimori.
+     * @param {{anime: number[], manga: number[]}} onlyAl MAL id, которые есть только в списке AniList.
+     * @param {(text: string) => void} [setStatus] Колбэк для отображения текстового статуса прогресса.
+     * @returns {Promise<{alHas: Set<number>, shikiHas: Set<number>}>} Множества MAL id, реально найденных в каталоге AniList/Shikimori.
+     */
     async function cmpDeepCheck(onlyShiki, onlyAl, setStatus) {
         const alHas = new Set(), shikiHas = new Set();
         if (setStatus) setStatus('Глубокая проверка: каталог AniList...');
@@ -641,6 +789,12 @@
         return { alHas, shikiHas };
     }
 
+    /**
+     * Считает агрегированную статистику по нормализованному списку (кол-во по статусам,
+     * средняя оценка среди оценённых записей).
+     * @param {Map<number, CmpListEntry>} map Нормализованный список (AniList или Shikimori).
+     * @returns {{total:number, byStatus: Record<string, number>, mean: number}} Сводная статистика.
+     */
     function cmpStats(map) {
         const st = {}; CMP_STATUS_ORDER.forEach(s => st[s] = 0);
         let scored = 0, sum = 0;
@@ -652,6 +806,23 @@
     }
 
     // Расхождения по одному типу (anime|manga). Возвращает ведёрки со списками.
+    /**
+     * Строит подробный дифф между списками Shikimori и AniList для одного типа тайтла.
+     * @param {Map<number, CmpShikiEntry>} shiki Нормализованный список Shikimori.
+     * @param {Map<number, CmpAniListEntry>} al Нормализованный список AniList.
+     * @param {'anime'|'manga'} type Тип тайтла.
+     * @returns {{
+     *   onlyShiki: Array<{id:number,title:string,info:string}>,
+     *   onlyShikiRel: Array<{id:number,title:string,info:string}>,
+     *   onlyAl: Array<{id:number,title:string,info:string}>,
+     *   onlyAlRel: Array<{id:number,title:string,info:string}>,
+     *   status: Array<{id:number,title:string,shiki:string,al:string}>,
+     *   score: Array<{id:number,title:string,shiki:string,al:string}>,
+     *   progress: Array<{id:number,title:string,shiki:string,al:string}>,
+     *   rewatch: Array<{id:number,title:string,shiki:number,al:number}>,
+     *   notes: Array<{id:number,title:string,shiki:string,al:string}>
+     * }} Ведёрки расхождений по категориям.
+     */
     function cmpDiff(shiki, al, type) {
         // Множество idMal, на которые ссылаются связи записей AniList (для детекта «связанных»).
         const alRelated = new Set();
@@ -683,6 +854,13 @@
         return out;
     }
 
+    /**
+     * Сравнивает избранное (аниме или манга, по id/MAL id) двух площадок.
+     * @param {Map<number,string>} shikiFav Избранное Shikimori (id -> название).
+     * @param {Map<number,string>} alFav Избранное AniList (idMal -> название).
+     * @returns {{onlyShiki: Array<{id:number,title:string}>, onlyAl: Array<{id:number,title:string}>, shikiCount:number, alCount:number}}
+     *          Расхождения избранного + счётчики.
+     */
     function cmpFavDiff(shikiFav, alFav) {
         const ids = new Set([...shikiFav.keys(), ...alFav.keys()]);
         const onlyShiki = [], onlyAl = [];
@@ -694,6 +872,12 @@
     }
 
     // Резолв Shikimori user id по логину (ник) или числовому id.
+    /**
+     * Резолвит Shikimori user id по логину (нику) или принимает числовой id как есть.
+     * @param {string} login Логин Shikimori или числовой id (строкой).
+     * @returns {Promise<number>} Numeric user id.
+     * @throws {Error} Если пользователь не найден.
+     */
     async function cmpResolveShikiUser(login) {
         const isNum = /^\d+$/.test(login);
         const path = isNum ? `/api/users/${login}` : `/api/users/${encodeURIComponent(login)}?is_nickname=1`;
@@ -703,6 +887,13 @@
     }
 
     // --- Рендер ---
+    /**
+     * Рендерит сводную таблицу статистики (по статусам + средняя оценка) для одного типа тайтла.
+     * @param {string} label Заголовок таблицы (например 'Аниме'/'Манга').
+     * @param {{total:number, byStatus: Record<string, number>, mean: number}} sh Статистика Shikimori (см. cmpStats).
+     * @param {{total:number, byStatus: Record<string, number>, mean: number}} al Статистика AniList (см. cmpStats).
+     * @returns {string} Готовый HTML-фрагмент таблицы (значения экранированы через cmpEsc/числа).
+     */
     function cmpRenderSummary(label, sh, al) {
         const rows = CMP_STATUS_ORDER.map(s =>
             `<tr><td>${CMP_STATUS_LABEL[s]}</td><td>${sh.byStatus[s]}</td><td>${al.byStatus[s]}</td><td style="color:rgb(var(--color-text-light));">${al.byStatus[s] - sh.byStatus[s] > 0 ? '+' : ''}${al.byStatus[s] - sh.byStatus[s] || ''}</td></tr>`
@@ -715,6 +906,13 @@
             </tbody></table>`;
     }
 
+    /**
+     * Рендерит подробный HTML-блок расхождений (dA/dM из cmpDiff) со свёрнутыми секциями.
+     * @param {ReturnType<typeof cmpDiff>} diff Дифф одного типа тайтла (см. cmpDiff).
+     * @param {Set<number>} ignore Игнор-лист MAL id (см. cmpGetIgnore) — такие строки не показываются.
+     * @param {?{alHas: Set<number>, shikiHas: Set<number>}} catalog Результат глубокой проверки (см. cmpDeepCheck) либо null.
+     * @returns {string} Готовый HTML-фрагмент (значения экранированы через cmpEsc).
+     */
     function cmpRenderDiff(diff, ignore, catalog) {
         const notIgn = arr => arr.filter(x => !ignore.has(Number(x.id)));
         const ignBtn = id => `<span class="amk-x cmp-ignore" data-id="${id}" title="Скрыть (в игнор)">✕</span>`;
@@ -752,6 +950,13 @@
         return h;
     }
 
+    /**
+     * Рендерит HTML-блок расхождений избранного (аниме+манга) с учётом игнор-листа.
+     * @param {ReturnType<typeof cmpFavDiff>} favA Расхождения избранного аниме.
+     * @param {ReturnType<typeof cmpFavDiff>} favM Расхождения избранного манги.
+     * @param {Set<number>} ignore Игнор-лист MAL id.
+     * @returns {string} Готовый HTML-фрагмент.
+     */
     function cmpRenderFavs(favA, favM, ignore) {
         const notIgn = arr => arr.filter(x => !ignore.has(Number(x.id)));
         const ignBtn = id => `<span class="amk-x cmp-ignore" data-id="${id}" title="Скрыть (в игнор)">✕</span>`;
@@ -771,6 +976,12 @@
     }
 
     // Избранные персонажи/стафф — сравнение по имени (без id, приблизительно; без игнора).
+    /**
+     * Рендерит HTML-блок расхождений избранных персонажей/стаффа (сравнение по имени).
+     * @param {string} label Заголовок блока (например 'Избранные персонажи').
+     * @param {ReturnType<typeof cmpNameDiff>} diff Результат cmpNameDiff.
+     * @returns {string} Готовый HTML-фрагмент.
+     */
     function cmpRenderNameFavs(label, diff) {
         const sec = (l, arr) => {
             if (!arr.length) return '';
@@ -786,6 +997,12 @@
 
     // Пересчитывает дифф из снимка cmpLast и рендерит (с учётом игнор-листа). Вызывается
     // и после скана, и после изменения игнора — без повторной загрузки данных.
+    /**
+     * Пересчитывает дифф из снимка последнего скана (cmpLast) и рендерит результат в DOM,
+     * учитывая актуальный игнор-лист. Не делает сетевых запросов.
+     * @param {HTMLElement} resultEl Контейнер для рендера результата сравнения.
+     * @returns {void}
+     */
     function cmpRender(resultEl) {
         if (!cmpLast) return;
         const ignore = cmpGetIgnore();
@@ -810,23 +1027,34 @@
             ? `<details class="amk-collapse"><summary>Игнорируемые <span class="amk-count">(${ignArr.length})</span></summary><div class="amk-collapse-body">${ignArr.map(id => `<div class="amk-diffrow"><span class="amk-name">${cmpEsc(titleOf(id))}</span><span class="cmp-unignore amk-x" data-id="${id}" title="Вернуть" style="color:rgb(var(--color-blue));opacity:.85;">↩</span></div>`).join('')}</div></details>`
             : '';
 
-        resultEl.innerHTML =
-            `<div style="display:flex;gap:20px;flex-wrap:wrap;">
-                <div style="flex:1;min-width:280px;">${cmpRenderSummary('Аниме', stA.sh, stA.al)}</div>
-                <div style="flex:1;min-width:280px;">${cmpRenderSummary('Манга', stM.sh, stM.al)}</div>
+        // Под-HTML уже экранирован через cmpEsc() — доверенный, оборачиваем в rawHTML().
+        resultEl.innerHTML = html`<div style="display:flex;gap:20px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:280px;">${rawHTML(cmpRenderSummary('Аниме', stA.sh, stA.al))}</div>
+                <div style="flex:1;min-width:280px;">${rawHTML(cmpRenderSummary('Манга', stM.sh, stM.al))}</div>
              </div>
-             <div style="margin-top:6px;">${cmpRenderFavs(favA, favM, ignore)}</div>
-             ${cmpRenderNameFavs('Избранные персонажи', favChar)}
-             ${cmpRenderNameFavs('Избранный стафф', favStaff)}
-             <h3 style="margin:16px 0 4px;color:rgb(var(--color-text));">Аниме</h3>${cmpRenderDiff(dA, ignore, catalog)}
-             <h3 style="margin:16px 0 4px;color:rgb(var(--color-text));">Манга</h3>${cmpRenderDiff(dM, ignore, catalog)}
-             ${ignHtml}
+             <div style="margin-top:6px;">${rawHTML(cmpRenderFavs(favA, favM, ignore))}</div>
+             ${rawHTML(cmpRenderNameFavs('Избранные персонажи', favChar))}
+             ${rawHTML(cmpRenderNameFavs('Избранный стафф', favStaff))}
+             <h3 style="margin:16px 0 4px;color:rgb(var(--color-text));">Аниме</h3>${rawHTML(cmpRenderDiff(dA, ignore, catalog))}
+             <h3 style="margin:16px 0 4px;color:rgb(var(--color-text));">Манга</h3>${rawHTML(cmpRenderDiff(dM, ignore, catalog))}
+             ${rawHTML(ignHtml)}
              <div style="opacity:.5;font-size:11px;margin-top:14px;line-height:1.5;">«В списке только на одной площадке» — не ошибка синка, а различие каталогов/списков. «Связано с уже отслеживаемым» — вероятно деление на сезоны или сиквелы (по связям AniList). Крестик ✕ — скрыть строку (игнор, запоминается). Даты не сравниваются. Оценки нормализованы к 10-балльной. Сопоставление по MAL id.</div>`;
 
         resultEl.querySelectorAll('.cmp-ignore').forEach(el => el.onclick = () => { cmpAddIgnore(el.dataset.id); cmpRender(resultEl); });
         resultEl.querySelectorAll('.cmp-unignore').forEach(el => el.onclick = () => { cmpRemoveIgnore(el.dataset.id); cmpRender(resultEl); });
     }
 
+    /**
+     * Запускает полный скан сравнения списков (Shikimori <-> AniList): резолвит пользователей,
+     * загружает списки/избранное, опционально делает глубокую проверку каталогов, сохраняет
+     * снимок в cmpLast и рендерит результат. Ошибки не бросает наружу — пишет их в statusEl/лог.
+     * @param {string} shikiLogin Логин или id пользователя Shikimori.
+     * @param {string} alName Имя пользователя AniList (если пусто — берётся из Viewer по токену).
+     * @param {?HTMLElement} statusEl Элемент для текстового статуса прогресса (может быть null).
+     * @param {HTMLElement} resultEl Контейнер для рендера результата.
+     * @param {boolean} deepCheck Включить глубокую проверку каталогов (см. cmpDeepCheck).
+     * @returns {Promise<void>}
+     */
     async function cmpRunScan(shikiLogin, alName, statusEl, resultEl, deepCheck) {
         const setStatus = t => { if (statusEl) statusEl.textContent = t; };
         try {
@@ -874,13 +1102,19 @@
         }
     }
 
+    /**
+     * Открывает модалку сканера сравнения списков Shikimori/AniList (если ещё не открыта),
+     * биндит обработчики и запускает предзаполнение полей (логин Shiki из GM-хранилища,
+     * имя AniList по токену — без блокировки открытия модалки).
+     * @returns {Promise<void>}
+     */
     async function openCompareModal() {
         if (document.getElementById('am-cmp-overlay')) return;
         const overlay = document.createElement('div');
         overlay.id = 'am-cmp-overlay';
         overlay.className = 'amk-overlay';
         overlay.style.display = 'flex';
-        overlay.innerHTML = `
+        overlay.innerHTML = html`
             <div class="amk-modal amk-wide">
                 <div class="amk-head">
                     <h2 class="amk-title"><span class="amk-dot"></span><span style="color:rgb(var(--color-pink));">Shikimori</span>&nbsp;⇄&nbsp;<span style="color:rgb(var(--color-blue));">AniList</span> <span class="amk-sub">сравнение списков</span></h2>
@@ -930,6 +1164,31 @@
     // 2. БАЗА ДАННЫХ INDEXEDDB (Кэширование)
     // ==========================================
 
+    /**
+     * Версионированные миграции схемы IndexedDB. Каждый ключ — номер версии,
+     * значение — функция-мигратор `(db, tx) => {...}` от версии (N-1) к N.
+     * Выполняются последовательно от `oldVersion+1` до `db.version`. Каждый шаг должен
+     * быть идемпотентным (проверять `objectStoreNames.contains(...)`).
+     *
+     * Чтобы добавить миграцию N+1: увеличить DB_VERSION, добавить ключ `[N+1]: ...`,
+     * не трогать существующие шаги.
+     *
+     * Историю версий 1→5 в проекте раньше не разделяли по шагам, поэтому вся текущая
+     * схема консолидирована в шаг 5. Будущие изменения — начиная с 6.
+     */
+    const DB_MIGRATIONS = {
+        5: (db, tx) => {
+            if (!db.objectStoreNames.contains('shikiCache')) db.createObjectStore('shikiCache', { keyPath: 'key' });
+            if (!db.objectStoreNames.contains('malCache')) db.createObjectStore('malCache', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('franchiseCache')) db.createObjectStore('franchiseCache', { keyPath: 'id' });
+        }
+    };
+
+    /**
+     * Открывает (и лениво кэширует в globalDbInstance) соединение с IndexedDB, прогоняя
+     * недостающие шаги DB_MIGRATIONS при апгрейде версии схемы.
+     * @returns {Promise<?IDBDatabase>} Экземпляр базы данных, либо null при ошибке открытия.
+     */
     async function openDB() {
         if (globalDbInstance) return globalDbInstance;
         return new Promise((resolve) => {
@@ -937,11 +1196,21 @@
             const req = indexedDB.open(DB_NAME, DB_VERSION);
 
             req.onupgradeneeded = (e) => {
-                Logger('DB', `Обновление версии БД до ${DB_VERSION}`);
                 const db = e.target.result;
-                if (!db.objectStoreNames.contains('shikiCache')) db.createObjectStore('shikiCache', { keyPath: 'key' });
-                if (!db.objectStoreNames.contains('malCache')) db.createObjectStore('malCache', { keyPath: 'id' });
-                if (!db.objectStoreNames.contains('franchiseCache')) db.createObjectStore('franchiseCache', { keyPath: 'id' });
+                const tx = e.target.transaction;
+                const fromVersion = e.oldVersion || 0;
+                Logger('DB', `Миграция БД: ${fromVersion} → ${DB_VERSION}`);
+
+                for (let v = fromVersion + 1; v <= DB_VERSION; v++) {
+                    const migrate = DB_MIGRATIONS[v];
+                    if (!migrate) continue;
+                    try {
+                        migrate(db, tx);
+                        Logger('DB', `Миграция БД: шаг ${v} выполнен успешно`);
+                    } catch (err) {
+                        Logger('ERROR', `Миграция БД: сбой на шаге ${v}`, err);
+                    }
+                }
             };
 
             req.onsuccess = () => {
@@ -956,6 +1225,18 @@
         });
     }
 
+    /**
+     * Читает одну запись из указанного object store IndexedDB по ключу.
+     * @param {'shikiCache'|'malCache'|'franchiseCache'} store Имя object store.
+     * @param {IDBValidKey} key Ключ записи (для shikiCache — строка `key`, для malCache/franchiseCache — числовой `id`).
+     * @returns {Promise<?(ShikiCacheRecord|MalCacheRecord|FranchiseCacheRecord)>} Найденная запись либо null (не найдено/ошибка).
+     */
+    /**
+     * Читает одну запись по ключу из указанного object store IndexedDB.
+     * @param {'shikiCache'|'malCache'|'franchiseCache'} store Имя object store.
+     * @param {string|number} key Значение keyPath стора (`key` для shikiCache, `id` для malCache/franchiseCache).
+     * @returns {Promise<?(ShikiCacheRecord|MalCacheRecord|FranchiseCacheRecord)>} Найденная запись, либо null если не найдена/при ошибке.
+     */
     async function dbGet(store, key) {
         try {
             const db = await openDB();
@@ -971,6 +1252,12 @@
         }
     }
 
+    /**
+     * Записывает (put — вставка или полная перезапись) одну запись в указанный object store IndexedDB.
+     * @param {'shikiCache'|'malCache'|'franchiseCache'} store Имя object store.
+     * @param {ShikiCacheRecord|MalCacheRecord|FranchiseCacheRecord} data Записываемый объект (должен содержать keyPath стора: `key` для shikiCache, `id` для malCache/franchiseCache).
+     * @returns {Promise<void>}
+     */
     async function dbSet(store, data) {
         try {
             const db = await openDB();
@@ -986,6 +1273,10 @@
         }
     }
 
+    /**
+     * Полностью очищает все object store кэша (shikiCache, malCache, franchiseCache).
+     * @returns {Promise<void>}
+     */
     async function clearCache() {
         Logger('INFO', 'Запущен ручной сброс кэша IndexedDB');
         const db = await openDB();
@@ -1000,6 +1291,11 @@
     }
 
     // Фоновый сборщик мусора (удаляет старые записи из БД)
+    /**
+     * Фоновый сборщик мусора: проходит курсором по store shikiCache и удаляет записи
+     * старше CACHE_TIME (по полю `ts`). Ничего не возвращает вызывающей стороне (fire-and-forget).
+     * @returns {Promise<void>}
+     */
     async function runGarbageCollector() {
         try {
             const db = await openDB();
@@ -1026,6 +1322,12 @@
         }
     }
 
+    /**
+     * Собирает диагностический снимок состояния БД/кэша для инспектора логгера
+     * (кол-во записей по типам ключей shikiCache, кол-во malCache, оценка занятого места).
+     * @returns {Promise<{media:number, characters:number, staff:number, themes:number, malMappings:number, totalShikiRecords:number, estimatedSize:string} | {error:string}>}
+     *          Сводная статистика, либо объект с полем error при сбое.
+     */
     async function getDbStats() {
         try {
             const db = await openDB();
@@ -1038,7 +1340,7 @@
                     const est = await navigator.storage.estimate();
                     estimatedSize = (est.usage / 1024 / 1024).toFixed(2) + ' MB';
                 }
-            } catch(e) {}
+            } catch(e) { Logger('WARN', 'getDbStats: navigator.storage.estimate() недоступен', e); }
 
             // 2. Открываем транзакцию
             return new Promise((resolve) => {
@@ -1069,6 +1371,7 @@
                 tx.onerror = () => resolve({ error: 'Ошибка чтения метрик БД' });
             });
         } catch (e) {
+            Logger('ERROR', 'Сбой getDbStats', e);
             return { error: e.message };
         }
     }
@@ -1077,6 +1380,123 @@
     // 3. ОБЩИЕ ФУНКЦИИ API И АВТОРИЗАЦИИ
     // ==========================================
 
+    // Типы данных (JSDoc, без TypeScript build step)
+    // -------------------------------------------------------------------------
+    // Типы данных сканера дельты и кэша IndexedDB (JSDoc, для автодополнения в редакторе).
+
+    /**
+     * @typedef {Object} AniListMediaTitle
+     * @property {?string} [romaji] Название ромадзи.
+     * @property {?string} [english] Английское название.
+     */
+
+    /**
+     * @typedef {Object} AniListRelationEdge
+     * @property {string} relationType Тип связи ('SEQUEL', 'PREQUEL', 'PARENT', ...).
+     * @property {{idMal: ?number}} node Связанный тайтл.
+     */
+
+    /**
+     * Урезанный Media из AniList GraphQL (MediaListCollection.entries[].media).
+     * @typedef {Object} AniListMediaLite
+     * @property {?number} idMal MyAnimeList ID.
+     * @property {AniListMediaTitle} [title]
+     * @property {{edges: AniListRelationEdge[]}} [relations]
+     */
+
+    /**
+     * Полная запись Media из AniList GraphQL, используется при рендере виджетов страницы тайтла.
+     * @typedef {Object} AniListMedia
+     * @property {number} id AniList ID тайтла.
+     * @property {'ANIME'|'MANGA'} type
+     * @property {?number} idMal MyAnimeList ID.
+     * @property {?number} [seasonYear]
+     * @property {?number} [averageScore] Шкала 0..100.
+     * @property {AniListMediaTitle} [title]
+     * @property {{status: ?string, progress?: number}} [mediaListEntry]
+     */
+
+    /**
+     * Запись списка AniList, нормализованная сканером дельты (ключ карты — malId).
+     * @typedef {Object} CmpAniListEntry
+     * @property {number} malId
+     * @property {string} title
+     * @property {?string} status Shikimori-стиль ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null).
+     * @property {number} score10 Оценка 0..10.
+     * @property {number} progress
+     * @property {number} volumes
+     * @property {number} rewatches
+     * @property {string} notes
+     * @property {number[]} relations idMal связанных тайтлов.
+     */
+
+    /**
+     * Урезанный тайтл Shikimori внутри ответа `${type}_rates`.
+     * @typedef {Object} ShikiMediaLite
+     * @property {number} id Равен MyAnimeList ID.
+     * @property {?string} [russian]
+     * @property {?string} [name]
+     */
+
+    /**
+     * Карточка тайтла Shikimori (GET /api/animes/:id или /api/mangas/:id), только используемые поля.
+     * @typedef {Object} ShikiMedia
+     * @property {number} id
+     * @property {?string} [russian]
+     * @property {?string} [name]
+     * @property {?string} [url]
+     * @property {?string} [domain] Зеркало Shikimori.
+     * @property {?string} [description]
+     * @property {?number} [score] Шкала 0..10.
+     * @property {Array<{name: string, value: number}>} [rates_scores_stats] Гистограмма оценок.
+     */
+
+    /**
+     * Запись списка Shikimori, нормализованная сканером дельты (ключ карты — malId).
+     * @typedef {Object} CmpShikiEntry
+     * @property {number} malId
+     * @property {string} title
+     * @property {?string} status ('watching'|'rewatching'|'planned'|'completed'|'on_hold'|'dropped'|null).
+     * @property {number} score10
+     * @property {number} progress
+     * @property {number} volumes
+     * @property {number} rewatches
+     * @property {string} notes
+     */
+
+    /** @typedef {CmpAniListEntry|CmpShikiEntry} CmpListEntry Нормализованная запись, независимо от источника. */
+
+    /**
+     * Запись в IndexedDB store `shikiCache` (keyPath: 'key'). Используется для карточек тайтлов,
+     * персонажей, персонала и музыкальных тем — форма одна, различается префикс ключа и `data`.
+     * @typedef {Object} ShikiCacheRecord
+     * @property {string} key Составной ключ вида "ПРЕФИКС_id" (например "FULL_123").
+     * @property {*} data Полезная нагрузка (зависит от префикса).
+     * @property {number} ts Unix-таймстамп записи (для протухания по CACHE_TIME).
+     */
+
+    /**
+     * Запись в IndexedDB store `malCache` (keyPath: 'id') — кэш AniList ID -> AniListMedia.
+     * @typedef {Object} MalCacheRecord
+     * @property {number} id AniList Media ID.
+     * @property {AniListMedia} data
+     */
+
+    /**
+     * Запись в IndexedDB store `franchiseCache` (keyPath: 'id'). Стор зарезервирован под
+     * будущее кэширование дерева франшизы, пока нигде явно не заполняется.
+     * @typedef {Object} FranchiseCacheRecord
+     * @property {number} id
+     * @property {*} data
+     * @property {number} [ts]
+     */
+
+
+    /**
+     * Возвращает токен доступа AniList: либо сохранённый пользователем в настройках скрипта,
+     * либо (только на anilist.co) извлечённый из Vuex-хранилища сайта, если пользователь залогинен.
+     * @returns {?string} Токен AniList (Bearer), либо null если токена нет нигде.
+     */
     function getAlToken() {
         let token = GM_getValue("AL_TOKEN");
         if (token) return token;
@@ -1091,6 +1511,14 @@
         return null;
     }
 
+    /**
+     * Выполняет GraphQL-запрос к AniList API (через GM_xmlhttpRequest), с учётом паузы при
+     * предыдущем 429 и автоматическим повтором запроса после rate-limit паузы.
+     * @param {string} query GraphQL-запрос.
+     * @param {Object<string, *>} variables Переменные GraphQL-запроса.
+     * @param {boolean} [useAuth=false] Добавлять ли заголовок Authorization (см. getAlToken()).
+     * @returns {Promise<{data?: *, errors?: *}>} Разобранный JSON-ответ AniList GraphQL.
+     */
     async function anilistQuery(query, variables, useAuth = false) {
         if (Date.now() < alRateLimitPause) {
             await new Promise(r => setTimeout(r, alRateLimitPause - Date.now() + Math.floor(Math.random() * 500)));
@@ -1138,6 +1566,13 @@
     }
 
     // Запрос к Shikimori с fallback перебором зеркал
+    /**
+     * Выполняет GET-запрос к Shikimori REST API, перебирая зеркала из SHIKI_DOMAINS
+     * при сбое/недоступности, с ретраем при 429 (rate limit).
+     * @param {string} path Путь запроса (например `/api/animes/123`), без домена.
+     * @returns {Promise<{data: *, domain: ?string}>} Разобранный JSON-ответ и домен зеркала,
+     *          с которого получен ответ (data === null при 404 или полном сбое всех зеркал).
+     */
     async function fetchShiki(path) {
         if (Date.now() < shikiRateLimitPause) {
             await new Promise(r => setTimeout(r, shikiRateLimitPause - Date.now() + Math.floor(Math.random() * 500)));
@@ -1175,6 +1610,12 @@
     }
 
     // Запрос музыкальных тем с AnimeThemes API
+    /**
+     * Загружает список опенингов/эндингов аниме с AnimeThemes.moe (с кэшированием
+     * в IndexedDB store shikiCache под ключом `THEMES_<malId>`).
+     * @param {?number} malId MyAnimeList ID аниме.
+     * @returns {Promise<?{openings: string[], endings: string[]}>} Списки строк вида `"1: \"Название\""`, либо null при отсутствии malId/ошибке.
+     */
     async function fetchMalThemes(malId) {
         if (!malId) return null;
         const cacheKey = `THEMES_${malId}`;
@@ -1234,6 +1675,15 @@
     }
 
     // Продвинутый поиск персоны (Сейю/Персонал) на Shiki
+    /**
+     * Ищет персону (сейю/персонал) на Shikimori по имени: сначала REST search (прямой и
+     * реверс порядка слов), затем GraphQL fallback, затем догружает детали (описание/url).
+     * @param {string} endpointStr REST/GraphQL эндпоинт Shikimori ('people' и т.п.).
+     * @param {string} searchName Имя для поиска (обычно ромадзи из AniList).
+     * @param {string} [nativeName] Оригинальное имя (для сверки по japanese-полю).
+     * @returns {Promise<{status: number, data: ?{id:number, russian:?string, description:?string, url?:string, domain?:string}}>}
+     *          HTTP-подобный статус (200/404/429) и найденные данные персоны либо null.
+     */
     async function fetchShikiPersonREST(endpointStr, searchName, nativeName) {
         if (!searchName) return { status: 404, data: null };
         let cleanStr = searchName.replace(/_/g, ' ').replace(/-/g, ' ').trim();
@@ -1304,12 +1754,22 @@
                         return { status: 200, data: { id: item.id, russian: item.russian, description: null, domain } };
                     }
                 }
-            } catch (e) { if (e.status === 429) return { status: 429 }; }
+            } catch (e) {
+                if (e.status === 429) return { status: 429 };
+                Logger('ERROR', `Сбой fetchShikiPersonREST для "${cleanStr}" (${domain})`, e);
+            }
         }
         Logger('API', `Персона не найдена: ${cleanStr}`);
         return { status: finalStatus, data: null };
     }
 
+    /**
+     * Резолвит персонажа/персону Shikimori через роли в общих с AniList тайтлах (по MAL id),
+     * когда прямой поиск по имени (fetchShikiPersonREST) не дал результата.
+     * @param {{name: {full?: string}, media?: {nodes: Array<{idMal:?number}>}, staffMedia?: {nodes: Array<{idMal:?number}>}}} personData Данные персоны из AniList (character/staff) с медиа-связями.
+     * @param {'characters'|'staff'} type Тип персоны (определяет, какое поле связей использовать: media/staffMedia).
+     * @returns {Promise<?Object>} Найденная запись персонажа/человека Shikimori (сырой объект из /api/animes/:id/roles), либо null.
+     */
     async function resolveShikiPersonByMedia(personData, type) {
         let mediaNodes = (type === 'characters' ? personData.media : personData.staffMedia)?.nodes ||[];
         let malIds = mediaNodes.map(m => m.idMal).filter(id => id);
@@ -1432,7 +1892,7 @@
 
                     if (data.length < 100) break;
                     page++; await new Promise(r => setTimeout(r, 350));
-                } catch(e) { break; }
+                } catch(e) { Logger('ERROR', `fetchShikiHistoryDates: сбой на странице ${page}, обработка прервана`, e); break; }
             }
 
             const finalMap = {};
@@ -1448,7 +1908,7 @@
         async function fetchShikimoriFavorites(usernameOrId) {
             const endpoints =[`/api/users/${usernameOrId}/favorites`, `/api/users/${usernameOrId}/favourites`];
             for (const ep of endpoints) {
-                try { const res = await fetch(window.location.origin + ep); if (res.ok) return await res.json(); } catch(e) { }
+                try { const res = await fetch(window.location.origin + ep); if (res.ok) return await res.json(); } catch(e) { Logger('WARN', `fetchShikimoriFavorites: сбой запроса ${ep}`, e); }
             }
             return null;
         }
@@ -1505,7 +1965,7 @@
             try {
                 const res = await anilistQuery(query, { s: name });
                 if (res?.data?.Page[field]?.length > 0) return res.data.Page[field][0].id;
-            } catch(e) {}
+            } catch(e) { Logger('WARN', `getAnilistIdByName: сбой поиска "${name}" (${type})`, e); }
             return null;
         }
 
@@ -1576,7 +2036,7 @@
                 }
                 const mutation = `mutation(${mutationVars.join(',')}){SaveMediaListEntry(${mutationArgs.join(',')}){id}}`;
 
-                try { await anilistQuery(mutation, variables, true); } catch(e) {}
+                try { await anilistQuery(mutation, variables, true); } catch(e) { Logger('ERROR', `syncShikiToAlList: сбой SaveMediaListEntry (mediaId=${alId}, ${type})`, e); }
                 await new Promise(r => setTimeout(r, 700)); // Лимит AniList (90/мин)
             }
         }
@@ -1597,7 +2057,7 @@
                         if (btn) btn.textContent = `Shiki ➜ AL (Fav ${alType}): ${processedCount}/${arr.length}`;
                         const alId = idMap[item.id];
                         if (!alId || exSet.has(alId)) { if (processedCount % 50 === 0) await new Promise(r => setTimeout(r, 10)); continue; }
-                        try { await anilistQuery(mutation, { id: alId }, true); } catch(e) {}
+                        try { await anilistQuery(mutation, { id: alId }, true); } catch(e) { Logger('ERROR', `syncShikiToAlFavorites: сбой ToggleFavourite (id=${alId}, ${alType})`, e); }
                         await new Promise(r => setTimeout(r, 700));
                     }
                 } else {
@@ -1606,7 +2066,7 @@
                         if (btn) btn.textContent = `Shiki ➜ AL (Fav ${alType}): ${processedCount}/${arr.length}`;
                         const alId = await getAnilistIdByName(item.name, alType);
                         if (!alId || exSet.has(alId)) { await new Promise(r => setTimeout(r, 600)); continue; }
-                        try { await anilistQuery(mutation, { id: alId }, true); } catch(e) {}
+                        try { await anilistQuery(mutation, { id: alId }, true); } catch(e) { Logger('ERROR', `syncShikiToAlFavorites: сбой ToggleFavourite по имени (id=${alId}, ${alType})`, e); }
                         await new Promise(r => setTimeout(r, 700));
                     }
                 }
@@ -1738,6 +2198,7 @@
                     }
                     alert("Экспорт успешно завершен!");
                 } catch (e) {
+                    Logger('ERROR', 'Экспорт Shikimori → AniList: ошибка выполнения', e);
                     alert("Ошибка: " + (e.message || e));
                 } finally {
                     btn.disabled = false;
@@ -1773,9 +2234,10 @@
         function cleanShikiBB(text, url) {
             if (!text) return "";
             let safeText = escapeHTML(text);
-            const html = safeText.replace(/\[i\](.*?)\[\/i\]/gi, '<i>$1</i>').replace(/\[b\](.*?)\[\/b\]/gi, '<b>$1</b>').replace(/\[u\](.*?)\[\/u\]/gi, '<u>$1</u>').replace(/\[\w+=\d+\](.*?)\[\/\w+\]/gi, '$1').replace(/\[\w+(=.*?)?\]/gi, '').replace(/\[\/\w+\]/gi, '').replace(/\n/g, '<br>');
+            // bbHtml, а не html — не затеняем глобальный html`` хелпер.
+            const bbHtml = safeText.replace(/\[i\](.*?)\[\/i\]/gi, '<i>$1</i>').replace(/\[b\](.*?)\[\/b\]/gi, '<b>$1</b>').replace(/\[u\](.*?)\[\/u\]/gi, '<u>$1</u>').replace(/\[\w+=\d+\](.*?)\[\/\w+\]/gi, '$1').replace(/\[\w+(=.*?)?\]/gi, '').replace(/\[\/\w+\]/gi, '').replace(/\n/g, '<br>');
             const safeUrl = escapeHTML(url);
-            return html + `<br><br><small style="opacity:0.75;font-size:0.85em;">Описание предоставлено <a href="${safeUrl}" target="_blank" style="color:#3dbbee; font-weight:bold;">Shikimori</a></small>`;
+            return bbHtml + `<br><br><small style="opacity:0.75;font-size:0.85em;">Описание предоставлено <a href="${safeUrl}" target="_blank" style="color:#3dbbee; font-weight:bold;">Shikimori</a></small>`;
         }
 
         function translateAdvanced(text) {
@@ -1922,7 +2384,7 @@
                             const trValue = translateAdvanced(val);
                             if (trValue && trValue !== val) finalVal = trValue;
                         }
-                    } catch (e) {}
+                    } catch (e) { Logger('WARN', 'setupVueInputInterceptor: сбой перевода значения инпута', e); }
                     return originalSet.call(this, finalVal);
                 }
             });
@@ -2218,7 +2680,8 @@
                     else if (item.el.classList && item.el.classList.contains('description') && data.desc) {
                         if (!item.el.querySelector('.ru-desc')) {
                             const origHTML = item.el.innerHTML;
-                            item.el.innerHTML = `<div class="ru-desc" style="margin-bottom:20px;">${data.desc}</div><details style="opacity:0.85;font-size:0.9em;background:rgba(128,128,128,0.15);padding:10px;border-radius:5px;"><summary style="cursor:pointer;color:#3dbbee;font-weight:bold;outline:none;">Оригинальное описание (AniList)</summary><div style="margin-top:10px;">${origHTML}</div></details>`;
+                            // data.desc (cleanShikiBB) и origHTML (уже отрендеренный DOM) — оба доверенные HTML.
+                            item.el.innerHTML = html`<div class="ru-desc" style="margin-bottom:20px;">${rawHTML(data.desc)}</div><details style="opacity:0.85;font-size:0.9em;background:rgba(128,128,128,0.15);padding:10px;border-radius:5px;"><summary style="cursor:pointer;color:#3dbbee;font-weight:bold;outline:none;">Оригинальное описание (AniList)</summary><div style="margin-top:10px;">${rawHTML(origHTML)}</div></details>`;
                         }
                     }
                     else {
@@ -2523,7 +2986,7 @@
                 alScoreText = (malData.averageScore / 10).toFixed(2);
             }
 
-            ratesBox.innerHTML = `
+            ratesBox.innerHTML = html`
                 <div class="rating-item"><a href="${shikiLink}" target="_blank" class="rating-badge shiki-badge" style="text-decoration:none;">SHIKIMORI</a><div class="rating-value">${pureScore}</div></div>
                 <div class="rating-item"><a href="${malLink}" target="_blank" class="rating-badge mal-badge" style="text-decoration:none;">MYANIMELIST</a><div class="rating-value">${shikiData.score || 'N/A'}</div></div>
                 <div class="rating-item"><span class="rating-badge al-badge" style="text-decoration:none; cursor:default;" title="Официальная средняя оценка AniList">ANILIST</span><div class="rating-value al-score-val" style="font-size: 1.4rem;">${alScoreText}</div></div>
@@ -2598,8 +3061,9 @@
 
                 const serviceToggle = document.createElement('div');
                 serviceToggle.className = 'am-service-toggle';
+                // svcIcons[v] — доверенная SVG-разметка, поэтому rawHTML().
                 serviceToggle.innerHTML = ['vk', 'yt', 'spotify', 'sc'].map(v =>
-                    `<div class="am-service-btn ${activeMusicService === v ? 'active' : ''}" data-val="${v}" title="${svcTitles[v]}" aria-label="${svcTitles[v]}">${svcIcons[v]}</div>`
+                    html`<div class="am-service-btn ${activeMusicService === v ? 'active' : ''}" data-val="${v}" title="${svcTitles[v]}" aria-label="${svcTitles[v]}">${rawHTML(svcIcons[v])}</div>`
                 ).join('');
 
                 headerFlex.appendChild(titleEl); headerFlex.appendChild(serviceToggle);
@@ -2701,7 +3165,7 @@
                 btn.style.display = 'flex';
                 if (!document.getElementById('ru-player-overlay')) {
                     const overlay = document.createElement('div'); overlay.id = 'ru-player-overlay';
-                    overlay.innerHTML = `<div id="ru-player-close">&times;</div><div id="ru-info-panel"><div style="color:rgb(var(--color-blue));font-weight:bold;font-size:16px;text-transform:uppercase;letter-spacing:1px;text-align:center;" id="info-anime-title">Загрузка...</div></div><div id="ru-translations-panel" style="display:none;"></div><div id="ru-player-container"><iframe id="ru-p-iframe" allowfullscreen allow="autoplay; fullscreen"></iframe></div><div id="ru-episodes-panel" style="display:none;"></div>`;
+                    overlay.innerHTML = html`<div id="ru-player-close">&times;</div><div id="ru-info-panel"><div style="color:rgb(var(--color-blue));font-weight:bold;font-size:16px;text-transform:uppercase;letter-spacing:1px;text-align:center;" id="info-anime-title">Загрузка...</div></div><div id="ru-translations-panel" style="display:none;"></div><div id="ru-player-container"><iframe id="ru-p-iframe" allowfullscreen allow="autoplay; fullscreen"></iframe></div><div id="ru-episodes-panel" style="display:none;"></div>`;
                     document.body.appendChild(overlay);
                     const closeOverlay = () => { overlay.style.display = 'none'; document.getElementById('ru-p-iframe').src = ''; };
                     document.getElementById('ru-player-close').onclick = closeOverlay;
@@ -2857,7 +3321,7 @@
                                     };
                                     window.addEventListener('message', window.__amKodikSync);
                                 } else { fallbackPlayer(); }
-                            } catch(e) { fallbackPlayer('API Error'); }
+                            } catch(e) { Logger('ERROR', 'Kodik API: сбой парсинга ответа search', e); fallbackPlayer('API Error'); }
                         },
                         onerror: () => { fallbackPlayer('Network Error'); }
                     });
@@ -2885,7 +3349,7 @@
             if (query === activeQuery) return;
 
             activeQuery = query; document.body.classList.add('am-ru-search-active'); clearTimeout(searchTimeout);
-            cachedHtml = `<div class="am-ru-loading">Ищем на Shikimori... 🔍</div>`; renderCustomResults(cachedHtml);
+            cachedHtml = html`<div class="am-ru-loading">Ищем на Shikimori... 🔍</div>`; renderCustomResults(cachedHtml);
             searchTimeout = setTimeout(() => performRussianSearch(query), 600);
         });
 
@@ -2900,7 +3364,7 @@
 
                 const shikiAnime = animeRes.data || []; const shikiManga = mangaRes.data ||[];
                 if (shikiAnime.length === 0 && shikiManga.length === 0) {
-                    cachedHtml = `<div class="am-ru-empty">Ничего не найдено ¯\\_(ツ)_/¯</div>`; renderCustomResults(cachedHtml); return;
+                    cachedHtml = html`<div class="am-ru-empty">Ничего не найдено ¯\\_(ツ)_/¯</div>`; renderCustomResults(cachedHtml); return;
                 }
 
                 const malIds =[...shikiAnime.map(i => i.id), ...shikiManga.map(i => i.id)];
@@ -2911,27 +3375,27 @@
                 const alData = alRes?.data?.Page?.media ||[]; const alMap = {};
                 alData.forEach(item => { alMap[`${item.type}_${item.idMal}`] = item; });
 
-                let html = '';
+                let resultHtml = '';
                 const generateCol = (title, items, typeStr) => {
                     if (items.length === 0) return '';
-                    let colHtml = `<div class="result-col animori-custom-result-col"><h3 class="title">${escapeHTML(title)}</h3>`;
+                    let colHtml = html`<div class="result-col animori-custom-result-col"><h3 class="title">${title}</h3>`;
                     items.forEach(item => {
                         const alItem = alMap[`${typeStr.toUpperCase()}_${item.id}`]; if (!alItem) return;
                         const year = alItem.seasonYear || (item.aired_on ? new Date(item.aired_on).getFullYear() : '???');
                         const format = (alItem.format || typeStr).replace(/_/g, ' ');
-                        const coverSafe = encodeURI(alItem.coverImage.medium).replace(/'/g, "%27");
-                        colHtml += `<div class="result"><div><a href="/${escapeHTML(alItem.type).toLowerCase()}/${escapeHTML(alItem.id)}" class=""><div class="image" style="background-image: url('${coverSafe}');"></div><div class="name">${escapeHTML(item.russian || item.name)}<div class="info"><span>${escapeHTML(year)}</span> <span>${escapeHTML(format)}</span></div></div></a></div></div>`;
+                        const coverSafe = rawHTML(encodeURI(alItem.coverImage.medium).replace(/'/g, "%27"));
+                        colHtml += html`<div class="result"><div><a href="/${String(alItem.type).toLowerCase()}/${alItem.id}" class=""><div class="image" style="background-image: url('${coverSafe}');"></div><div class="name">${item.russian || item.name}<div class="info"><span>${year}</span> <span>${format}</span></div></div></a></div></div>`;
                     });
-                    colHtml += `</div>`; return colHtml;
+                    colHtml += html`</div>`; return colHtml;
                 };
 
-                html += generateCol('Аниме (RU)', shikiAnime, 'Anime'); html += generateCol('Манга (RU)', shikiManga, 'Manga');
-                if (html === '') html = `<div class="am-ru-empty">Совпадений на AniList не найдено</div>`;
-                cachedHtml = html; renderCustomResults(html);
+                resultHtml += generateCol('Аниме (RU)', shikiAnime, 'Anime'); resultHtml += generateCol('Манга (RU)', shikiManga, 'Manga');
+                if (resultHtml === '') resultHtml = html`<div class="am-ru-empty">Совпадений на AniList не найдено</div>`;
+                cachedHtml = resultHtml; renderCustomResults(resultHtml);
 
             } catch (e) {
                 if (activeQuery !== query) return;
-                cachedHtml = `<div class="am-ru-empty">Ошибка соединения с базе</div>`; renderCustomResults(cachedHtml);
+                cachedHtml = html`<div class="am-ru-empty">Ошибка соединения с базе</div>`; renderCustomResults(cachedHtml);
                 Logger('ERROR', 'Ошибка русского поиска', e);
             }
         }
@@ -2952,7 +3416,8 @@
             }
 
             document.querySelectorAll('.am-ru-injected-container').forEach(el => el.remove());
-            const wrapper = document.createElement('div'); wrapper.className = 'am-ru-injected-container'; wrapper.innerHTML = htmlContent;
+            // htmlContent уже готовый доверенный HTML.
+            const wrapper = document.createElement('div'); wrapper.className = 'am-ru-injected-container'; wrapper.innerHTML = html`${rawHTML(htmlContent)}`;
             resultsContainer.appendChild(wrapper);
         }
 
@@ -3118,6 +3583,9 @@
             .am-log-details { padding:10px 12px; background:rgba(var(--color-background),0.4); border-top:1px solid rgba(var(--color-text-light),0.08); border-radius:0 0 8px 8px; font-family:inherit; font-size:11.5px; line-height:1.4; }
             .am-log-details details summary::-webkit-details-marker { display:none; }
             .type-info .am-log-badge { background:rgba(var(--color-blue),0.15); color:rgb(var(--color-blue)); border:1px solid rgba(var(--color-blue),0.3); } .type-api .am-log-badge { background:rgba(var(--color-purple),0.15); color:rgb(var(--color-purple)); border:1px solid rgba(var(--color-purple),0.3); } .type-db .am-log-badge { background:rgba(var(--color-green),0.15); color:rgb(var(--color-green)); border:1px solid rgba(var(--color-green),0.3); } .type-queue .am-log-badge { background:rgba(var(--color-orange),0.15); color:rgb(var(--color-orange)); border:1px solid rgba(var(--color-orange),0.3); } .type-error .am-log-badge { background:rgba(var(--color-red),0.15); color:rgb(var(--color-red)); border:1px solid rgba(var(--color-red),0.3); } .type-error { border-color:rgba(var(--color-red),0.2); background:rgba(var(--color-red),0.05); }
+            /* WARN — предупреждение (не критично, но требует внимания): жёлтый оттенок, т.к. в теме сайта нет отдельной CSS-переменной под "жёлтый" (--color-orange уже занят под QUEUE). DEBUG — служебная диагностика: приглушённый нейтральный цвет текста. */
+            .type-warn .am-log-badge { background:rgba(250,204,21,0.15); color:rgb(250,204,21); border:1px solid rgba(250,204,21,0.35); } .type-warn { border-color:rgba(250,204,21,0.2); background:rgba(250,204,21,0.05); }
+            .type-debug .am-log-badge { background:rgba(var(--color-text-light),0.12); color:rgb(var(--color-text-light)); border:1px solid rgba(var(--color-text-light),0.3); }
             .am-log-path { color:rgb(var(--color-text-light)); font-size:10px; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; background:rgba(var(--color-text-light),0.08); padding:2px 4px; border-radius:4px; cursor:default; }
             .am-log-btn-stack { font-size:10px; color:rgb(var(--color-red)); cursor:pointer; transition:.2s; user-select:none; font-weight:700; background:rgba(var(--color-red),0.1); padding:2px 4px; border-radius:4px; border:1px solid rgba(var(--color-red),0.3); }
             .am-log-btn-stack:hover { background:rgba(var(--color-red),0.24); }
@@ -3139,10 +3607,10 @@
             // Кнопка Сравнения списков (сканер дельты Shikimori <-> AniList)
             const btnCmp = document.createElement('button'); btnCmp.id = 'am-cmp-btn'; btnCmp.className = 'am-premium-btn'; btnCmp.innerHTML = '⇄'; btnCmp.title = 'Сравнить списки Shikimori и AniList (AniMori)'; btnCmp.onclick = openCompareModal; actionsRoot.appendChild(btnCmp);
 
-            // Рендер настроек — модалка на UI-ките (id инпутов сохранены для биндингов).
-            const sw = (id, on, extra = '') => `<label class="amk-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${extra}><span class="amk-track"></span><span class="amk-thumb"></span></label>`;
+            // sw() — доверенный HTML переключателя, оборачиваем в rawHTML().
+            const sw = (id, on, extra = '') => rawHTML(`<label class="amk-switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${extra}><span class="amk-track"></span><span class="amk-thumb"></span></label>`);
             const panel = document.createElement('div'); panel.id = 'am-panel';
-            panel.innerHTML = `
+            panel.innerHTML = html`
                 <div class="amk-modal">
                     <div class="amk-head">
                         <h2 class="amk-title"><span class="amk-dot"></span>AniMori <span class="amk-sub">настройки</span></h2>
