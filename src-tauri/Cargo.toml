@@ -1,6 +1,6 @@
 [package]
 name = "animori"
-version = "2.0.2"
+version = "3.0.0"
 description = "AniMori — Toolkit for AniList, desktop shell"
 authors = ["foulnike"]
 license = "MIT"
