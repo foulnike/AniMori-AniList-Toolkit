@@ -32,7 +32,23 @@ export default defineConfig(({ mode }) => {
   // без хешей в имени.
   const isTauri = mode === 'tauri'
 
+  // Пункт 1.5: третий режим — своё приложение.
+  //
+  // Отличие от двух прежних принципиальное: там мы входили в чужую страницу
+  // одним файлом скрипта, здесь собирается обычное веб-приложение со своим
+  // index.html. Поэтому у режима свой корень (src/app) и свой выход (dist/app).
+  //
+  // Разметка лежит в src/app, а не в корне репозитория, специально: корневой
+  // index.html Vite подхватывает сам в любом режиме, и он бы влез в сборки скрипта.
+  const isApp = mode === 'app'
+
+  // Мост и блокировщик выбираются по среде, а не по продукту: и десктопный
+  // скрипт, и своё приложение живут внутри окна Tauri, где есть наш канал и права.
+  const isDesktop = isTauri || isApp
+
   return {
+    // В режиме app корень сборки — src/app: там лежит его index.html.
+    ...(isApp ? { root: fileURLToPath(new URL('./src/app', import.meta.url)) } : {}),
     resolve: {
       alias: {
         // Пункт 3.4: выбор реализации Bridge на этапе сборки.
@@ -46,7 +62,9 @@ export default defineConfig(({ mode }) => {
         // Пересечения всё равно нет: '@' срабатывает лишь на точном '@' или префиксе '@/'.
         '@bridge-impl': fileURLToPath(
           new URL(
-            isTauri ? './src/shared/bridge/TauriBridge.ts' : './src/shared/bridge/MonkeyBridge.ts',
+            isDesktop
+              ? './src/shared/bridge/TauriBridge.ts'
+              : './src/shared/bridge/MonkeyBridge.ts',
             import.meta.url,
           ),
         ),
@@ -61,7 +79,9 @@ export default defineConfig(({ mode }) => {
         // Ключ так же обязан идти до '@'.
         '@adblock-impl': fileURLToPath(
           new URL(
-            isTauri ? './src/shared/adblock/impl.desktop.ts' : './src/shared/adblock/impl.noop.ts',
+            isDesktop
+              ? './src/shared/adblock/impl.desktop.ts'
+              : './src/shared/adblock/impl.noop.ts',
             import.meta.url,
           ),
         ),
@@ -73,6 +93,11 @@ export default defineConfig(({ mode }) => {
         //
         // Порядок ключей обязателен: побеждает первое совпадение, поэтому точные пути
         // идут раньше общих, а '@' остаётся последним.
+        //
+        // Те же соответствия живут в tsconfig.json (всё дерево) и в tsconfig.shared.json
+        // (только ядро, пункт 1.5). Новый алиас ядра надо прописать во всех трёх файлах:
+        // расхождение даёт самый неприятный сорт отказа — сборка идёт, а проверка
+        // типов падает, или наоборот.
         //
         // Жизненный цикл — единственный, кто сменил слой: он знает про роуты и корни
         // чужого SPA, поэтому уехал к скрипту, а не остался в ядре.
@@ -92,7 +117,9 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       // Этап 3-4: выбор реализации Bridge на этапе сборки.
-      __ANIMORI_PLATFORM__: JSON.stringify(isTauri ? 'tauri' : 'userscript'),
+      // Пункт 1.5: третье значение 'app' — своё приложение. Оно тоже живёт в окне
+      // Tauri, но отличается от скрипта внутри окна: чужой разметки вокруг нет.
+      __ANIMORI_PLATFORM__: JSON.stringify(isApp ? 'app' : isTauri ? 'tauri' : 'userscript'),
       // Пункт 5.3.5: номер версии нужен рантайму для заголовка User-Agent
       // нашего канала (src/shared/bridge/TauriBridge.ts). Берётся из того же package.json,
       // что и версия в шапке юзерскрипта: второй источник номера заводить нельзя,
@@ -112,7 +139,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       // vue() строго до monkey(): к monkey код должен прийти уже без SFC.
       vue(),
-      ...(isTauri
+      ...(isDesktop
         ? []
         : [
             monkey({
@@ -166,9 +193,13 @@ export default defineConfig(({ mode }) => {
           ]),
     ],
     build: {
-      outDir: 'dist',
+      // У приложения своя папка выдачи: там лежит index.html с хешированными
+      // файлами, и мешать их с двумя жёстко названными файлами скрипта незачем.
+      // Путь абсолютный: в режиме app корень сборки — src/app, и относительный
+      // 'dist' уехал бы внутрь исходников.
+      outDir: isApp ? fileURLToPath(new URL('./dist/app', import.meta.url)) : 'dist',
       // Сборка tauri не чистит dist: в CI она идёт второй и рядом лежит уже собранный
-      // animori.user.js для GreasyFork.
+      // animori.user.js для GreasyFork. Сборка app чистит только свою подпапку.
       emptyOutDir: !isTauri,
       minify: false,
       target: 'esnext',
