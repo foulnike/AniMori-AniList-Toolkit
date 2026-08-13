@@ -1,7 +1,9 @@
 /// <reference types="vite/client" />
 
 // Платформа сборки (см. define в vite.config.ts).
-declare const __ANIMORI_PLATFORM__: 'userscript' | 'tauri'
+// Пункт 1.5: три цели — скрипт в браузере, скрипт внутри окна Tauri
+// и своё приложение со своей разметкой.
+declare const __ANIMORI_PLATFORM__: 'userscript' | 'tauri' | 'app'
 
 // Номер версии из package.json (см. define в vite.config.ts).
 // Пункт 5.3.5: нужен рантайму для заголовка User-Agent нашего канала.
