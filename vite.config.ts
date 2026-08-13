@@ -22,7 +22,7 @@ const { version } = JSON.parse(
 // кроме version — он теперь приезжает из package.json.
 // Не добавляй @match/@grant/@connect "на всякий случай": лишние права ломают ревю GreasyFork.
 export default defineConfig(({ mode }) => {
-  // Пункт 4.6: два таргета из одного входа src/main.ts.
+  // Пункт 4.6: два таргета из одного входа src/userscript/main.ts.
   //
   // Режим userscript: vite-plugin-monkey добавляет шапку и сам инжектирует CSS.
   // Режим tauri: плагин monkey отключён целиком — шапка юзерскрипта и его
@@ -46,7 +46,9 @@ export default defineConfig(({ mode }) => {
         // Пересечения всё равно нет: '@' срабатывает лишь на точном '@' или префиксе '@/'.
         '@bridge-impl': fileURLToPath(
           new URL(
-            isTauri ? './src/bridge/TauriBridge.ts' : './src/bridge/MonkeyBridge.ts',
+            isTauri
+              ? './src/shared/bridge/TauriBridge.ts'
+              : './src/shared/bridge/MonkeyBridge.ts',
             import.meta.url,
           ),
         ),
@@ -62,11 +64,33 @@ export default defineConfig(({ mode }) => {
         '@adblock-impl': fileURLToPath(
           new URL(
             isTauri
-              ? './src/features/adblock/impl.desktop.ts'
-              : './src/features/adblock/impl.noop.ts',
+              ? './src/shared/adblock/impl.desktop.ts'
+              : './src/shared/adblock/impl.noop.ts',
             import.meta.url,
           ),
         ),
+        // Пункт 1.3: дерево разделено на ядро (shared), надстройку над сайтом
+        // (userscript) и своё приложение (app). Имена модулей при переезде не менялись,
+        // сменилось только их место, поэтому старые имена сведены на новые каталоги
+        // здесь. Иначе правка коснулась бы импортов во всех 63 файлах без пользы для
+        // читателя, а история переезда утонула бы в шуме.
+        //
+        // Порядок ключей обязателен: побеждает первое совпадение, поэтому точные пути
+        // идут раньше общих, а '@' остаётся последним.
+        //
+        // Жизненный цикл — единственный, кто сменил слой: он знает про роуты и корни
+        // чужого SPA, поэтому уехал к скрипту, а не остался в ядре.
+        '@/core/lifecycle': fileURLToPath(
+          new URL('./src/userscript/lifecycle.ts', import.meta.url),
+        ),
+        // Блокировщик работает через мост и сетевые правила, поэтому он в ядре,
+        // хотя исторически лежал среди features.
+        '@/features/adblock': fileURLToPath(new URL('./src/shared/adblock', import.meta.url)),
+        '@/api': fileURLToPath(new URL('./src/shared/api', import.meta.url)),
+        '@/bridge': fileURLToPath(new URL('./src/shared/bridge', import.meta.url)),
+        '@/core': fileURLToPath(new URL('./src/shared/core', import.meta.url)),
+        '@/utils': fileURLToPath(new URL('./src/shared/utils', import.meta.url)),
+        '@/features': fileURLToPath(new URL('./src/userscript/features', import.meta.url)),
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
@@ -74,7 +98,7 @@ export default defineConfig(({ mode }) => {
       // Этап 3-4: выбор реализации Bridge на этапе сборки.
       __ANIMORI_PLATFORM__: JSON.stringify(isTauri ? 'tauri' : 'userscript'),
       // Пункт 5.3.5: номер версии нужен рантайму для заголовка User-Agent
-      // нашего канала (src/bridge/TauriBridge.ts). Берётся из того же package.json,
+      // нашего канала (src/shared/bridge/TauriBridge.ts). Берётся из того же package.json,
       // что и версия в шапке юзерскрипта: второй источник номера заводить нельзя,
       // см. комментарий в шапке файла.
       __ANIMORI_VERSION__: JSON.stringify(version),
@@ -96,7 +120,7 @@ export default defineConfig(({ mode }) => {
         ? []
         : [
             monkey({
-              entry: 'src/main.ts',
+              entry: 'src/userscript/main.ts',
               userscript: {
                 // Пункт 4 naming guidelines AniList: чужой проект с их именем в названии
                 // обязан нести пометку «UNOFFICIAL» либо оборот «for AniList».
@@ -157,7 +181,7 @@ export default defineConfig(({ mode }) => {
             // Не lib-режим: нужен ровно один самодостаточный IIFE без экспортов,
             // который можно отдать WebView строкой.
             rollupOptions: {
-              input: fileURLToPath(new URL('./src/main.ts', import.meta.url)),
+              input: fileURLToPath(new URL('./src/userscript/main.ts', import.meta.url)),
               output: {
                 format: 'iife' as const,
                 inlineDynamicImports: true,
