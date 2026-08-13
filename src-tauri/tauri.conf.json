@@ -4,10 +4,10 @@
   "version": "../package.json",
   "identifier": "com.foulnike.animori",
   "build": {
-    "frontendDist": "../dist",
-    "beforeBuildCommand": "npm run build:tauri",
+    "frontendDist": "../dist/app",
+    "beforeBuildCommand": "npm run build:app && npm run build:tauri",
     "beforeDevCommand": {
-      "script": "npm run build:tauri",
+      "script": "npm run build:app && npm run build:tauri",
       "wait": true
     }
   },
