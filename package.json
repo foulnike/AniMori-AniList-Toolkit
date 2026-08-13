@@ -8,12 +8,14 @@
   "author": "foulnike",
   "scripts": {
     "dev": "vite --mode userscript",
-    "build": "vue-tsc --noEmit && vite build --mode userscript",
+    "build": "npm run typecheck:all && vite build --mode userscript",
     "build:userscript": "vite build --mode userscript",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
+    "typecheck:shared": "vue-tsc --noEmit -p tsconfig.shared.json",
+    "typecheck:all": "npm run typecheck:shared && vue-tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,vue,scss}\" \"*.{ts,json,md}\"",
-    "build:tauri": "vue-tsc --noEmit && vite build --mode tauri",
+    "build:tauri": "npm run typecheck:all && vite build --mode tauri",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
