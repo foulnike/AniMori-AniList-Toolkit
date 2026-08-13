@@ -1,37 +1,40 @@
 /** AniMori userscript entry point. */
 
 import './style.scss'
-// Через псевдопуть, а не из features/adblock: прямой импорт оставил бы оба модуля
+// Через псевдопуть, а не из shared/adblock: прямой импорт оставил бы оба модуля
 // в графе юзерскрипта вопреки алиасу.
 import { destroyAdblock, destroyNetProbe, initAdblock, initNetProbe } from '@adblock-impl'
-import { loadInterfaceDictionary } from './api/dictionary'
-import { loadAlToken } from './api/anilist'
-import { amSetAccent } from './core/accent'
-import { IS_ANILIST, IS_SHIKI } from './core/constants'
-import { loadCustomLinks } from './core/custom-links'
-import { openDB, runGarbageCollector } from './core/db'
-import { loadUserDict, rebuildDictionary, setRemoteDict } from './core/dictionary'
-import { initLifecycle, registerRouteTask, registerShutdownTask } from './core/lifecycle'
-import { loadSettings, settings } from './core/settings'
-import { initExporter } from './features/exporter'
-import { initMedia, refreshMediaPage, registerMediaWidget } from './features/media'
-import { extLinksWidget } from './features/media/extlinks'
-import { franchiseWidget } from './features/media/franchise'
-import { playerWidget } from './features/media/player'
-import { ratingsWidget } from './features/media/ratings'
-import { themesWidget } from './features/media/themes'
-import { initScannerUI } from './features/scanner'
-import { initSearch } from './features/search'
-import { initTranslator, resetTranslatorRetries } from './features/translator'
-import { initActionBar } from './features/ui/actions'
-import { initLinks } from './features/ui/links'
-import { initLoggerUI } from './features/ui/logger-ui'
-import { initNavPanel } from './features/ui/nav'
-import { initNetToast } from './features/ui/net-toast'
-import { initSettingsUI } from './features/ui/settings'
-import { installGlobalErrorHandlers, Logger } from './utils/logger'
-import { sweepPhantomRoots, unmountAll, unmountPageScoped } from './utils/vue-mounter'
-import { Bridge } from './bridge'
+import { loadInterfaceDictionary } from '@/api/dictionary'
+import { loadAlToken } from '@/api/anilist'
+import { amSetAccent } from '@/core/accent'
+import { IS_ANILIST, IS_SHIKI } from '@/core/constants'
+import { loadCustomLinks } from '@/core/custom-links'
+import { openDB, runGarbageCollector } from '@/core/db'
+import { loadUserDict, rebuildDictionary, setRemoteDict } from '@/core/dictionary'
+import { loadSettings, settings } from '@/core/settings'
+import { initExporter } from '@/features/exporter'
+import { initMedia, refreshMediaPage, registerMediaWidget } from '@/features/media'
+import { extLinksWidget } from '@/features/media/extlinks'
+import { franchiseWidget } from '@/features/media/franchise'
+import { playerWidget } from '@/features/media/player'
+import { ratingsWidget } from '@/features/media/ratings'
+import { themesWidget } from '@/features/media/themes'
+import { initScannerUI } from '@/features/scanner'
+import { initSearch } from '@/features/search'
+import { initTranslator, resetTranslatorRetries } from '@/features/translator'
+import { initActionBar } from '@/features/ui/actions'
+import { initLinks } from '@/features/ui/links'
+import { initLoggerUI } from '@/features/ui/logger-ui'
+import { initNavPanel } from '@/features/ui/nav'
+import { initNetToast } from '@/features/ui/net-toast'
+import { initSettingsUI } from '@/features/ui/settings'
+import { installGlobalErrorHandlers, Logger } from '@/utils/logger'
+import { sweepPhantomRoots, unmountAll, unmountPageScoped } from '@/utils/vue-mounter'
+import { Bridge } from '@/bridge'
+
+// Сосед по слою, а не ядро: реестр задач знает про роуты и корни чужого SPA,
+// поэтому при разделении дерева он остался рядом с точкой входа.
+import { initLifecycle, registerRouteTask, registerShutdownTask } from './lifecycle'
 
 /** Задержка сборщика мусора: не конкурировать с отрисовкой первой страницы. */
 const GC_DELAY_MS = 15000
@@ -80,8 +83,8 @@ async function step(name: string, run: () => unknown): Promise<void> {
 }
 
 /**
- * Привязка подсистем к SPA-навигации. Здесь, а не в core/lifecycle.ts: ядро не знает
- * о features, иначе граф зависимостей стал бы круговым.
+ * Привязка подсистем к SPA-навигации. Здесь, а не в lifecycle.ts: реестр задач
+ * не знает о features, иначе граф зависимостей стал бы круговым.
  * Порядок важен: снять старое → убрать фантомы → собрать новое.
  */
 function wireLifecycle(): void {
