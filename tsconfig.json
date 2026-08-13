@@ -27,16 +27,30 @@
 
     "baseUrl": ".",
     "paths": {
+      // Пункт 1.3: те же соответствия старых имён новым каталогам, что в resolve.alias
+      // внутри vite.config.ts. Править надо сразу в двух файлах: расхождение даёт
+      // самый неприятный сорт отказа — сборка идёт, а проверка типов падает, или наоборот.
+      // Здесь порядок строк ни на что не влияет: выигрывает самый точный шаблон,
+      // но порядок повторяет конфиг сборки, чтобы сверка шла глазами.
+      "@/core/lifecycle": ["src/userscript/lifecycle"],
+      "@/features/adblock": ["src/shared/adblock/index"],
+      "@/features/adblock/*": ["src/shared/adblock/*"],
+      "@/api/*": ["src/shared/api/*"],
+      "@/bridge": ["src/shared/bridge/index"],
+      "@/bridge/*": ["src/shared/bridge/*"],
+      "@/core/*": ["src/shared/core/*"],
+      "@/utils/*": ["src/shared/utils/*"],
+      "@/features/*": ["src/userscript/features/*"],
       "@/*": ["src/*"],
       // Этап 3.4: реальную цель '@bridge-impl' выбирает resolve.alias в vite.config.ts
       // по mode сборки. Тайпчекеру нужна одна фиксированная цель; берётся мост
       // юзерскрипта как реализация по умолчанию. Обе реализации объявлены как IBridge
       // и проверяются по отдельности, поэтому выбор цели на проверку не влияет.
-      "@bridge-impl": ["src/bridge/MonkeyBridge"],
+      "@bridge-impl": ["src/shared/bridge/MonkeyBridge"],
       // Пункт 2.10: то же самое для блокировщика рекламы. Целью взята десктопная
       // реализация — у неё полные сигнатуры. Заглушки из impl.noop.ts входят в include
       // и проверяются сами по себе, поэтому расхождение сигнатур не проскочит.
-      "@adblock-impl": ["src/features/adblock/impl.desktop"]
+      "@adblock-impl": ["src/shared/adblock/impl.desktop"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"],
