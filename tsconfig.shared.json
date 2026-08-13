@@ -1,0 +1,33 @@
+{
+  // Пункт 1.5: сторож границы ядра. Запускается как typecheck:shared.
+  //
+  // Смысл один: в этой проверке кода надстроек не существует вообще.
+  // Если файл из src/shared потянется в userscript или app — хоть алиасом,
+  // хоть относительным путём — модуль не найдётся и проверка упадёт.
+  // Общая проверка (typecheck) такую стрелку пропускает: там видно всё дерево.
+  //
+  // Правило двух файлов из пункта 1.3 теперь касается трёх: новый алиас ядра
+  // нужно прописать в vite.config.ts, tsconfig.json и здесь.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    // Список умышленно короче общего: только алиасы, ведущие в src/shared.
+    // Нет ни @/features/*, ни @/core/lifecycle, ни общего @/* — именно они
+    // раньше позволяли ядру дотянуться до надстройки незаметно.
+    "paths": {
+      "@/features/adblock": ["src/shared/adblock/index"],
+      "@/features/adblock/*": ["src/shared/adblock/*"],
+      "@/api/*": ["src/shared/api/*"],
+      "@/bridge": ["src/shared/bridge/index"],
+      "@/bridge/*": ["src/shared/bridge/*"],
+      "@/core/*": ["src/shared/core/*"],
+      "@/utils/*": ["src/shared/utils/*"],
+      "@bridge-impl": ["src/shared/bridge/MonkeyBridge"],
+      "@adblock-impl": ["src/shared/adblock/impl.desktop"]
+    }
+  },
+  // vite-env.d.ts нужен ради объявлений подставляемых сборкой значений:
+  // это описание типов, а не код надстройки.
+  "include": ["src/shared/**/*.ts", "src/shared/**/*.d.ts", "src/vite-env.d.ts"],
+  "exclude": ["node_modules", "dist", "src-tauri", "src/userscript", "src/app"]
+}
