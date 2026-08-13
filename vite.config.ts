@@ -4,22 +4,36 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import monkey from 'vite-plugin-monkey'
 
-// Единый источник номера версии — package.json.
+// Пункт 1.6: единый источник обоих номеров версии — versions.json.
 //
-// Раньше номер был прописан здесь строкой, и при выпуске его приходилось
-// поднимать в двух местах. Пропуск одного из них стоит дорого: Tauri берёт
-// версию из package.json и приложение обновится, а GreasyFork смотрит только на
-// шапку скрипта — со старым номером он решит, что обновлять нечего, и люди
-// останутся на прежней сборке молча.
+// Продуктов теперь два, и идут они врознь: скрипт остаётся в линейке 2.x
+// и получает только исправления, приложение живёт своей историей с 3.0.0.
+// Общий номер солгал бы обоим: правка в скрипте гнала бы номер
+// приложению, и люди получали бы обновление без единого изменения в нём.
 //
 // Чтение файла, а не import его JSON: импорт потребовал бы resolveJsonModule
-// и тянул бы package.json в область проверки типов всего проекта.
-const { version } = JSON.parse(
-  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf-8'),
-) as { version: string }
+// и тянул бы эти файлы в область проверки типов всего проекта.
+const readJson = (name: string) =>
+  JSON.parse(readFileSync(fileURLToPath(new URL(name, import.meta.url)), 'utf-8'))
+
+const versions = readJson('./versions.json') as { userscript: string; app: string }
+const { version: packageVersion } = readJson('./package.json') as { version: string }
+
+// Сторож номера приложения.
+//
+// Номер приложения обязан совпадать с package.json: именно оттуда его берёт
+// Tauri (src-tauri/tauri.conf.json, "version": "../package.json"), а по этому номеру
+// обновляются уже установленные копии. Отставший там номер не ломает сборку,
+// а тихо отменяет обновление у людей — самый дорогой сорт ошибки, поэтому
+// проверка здесь и с отказом сразу.
+if (versions.app !== packageVersion) {
+  throw new Error(
+    `AniMori: номер приложения расходится: versions.json — ${versions.app}, package.json — ${packageVersion}`,
+  )
+}
 
 // Метаданные ниже перенесены 1:1 из шапки монолита animori.user.js (строки 1-25),
-// кроме version — он теперь приезжает из package.json.
+// кроме version — он теперь приезжает из versions.json.
 // Не добавляй @match/@grant/@connect "на всякий случай": лишние права ломают ревю GreasyFork.
 export default defineConfig(({ mode }) => {
   // Пункт 4.6: два таргета из одного входа src/userscript/main.ts.
@@ -45,6 +59,10 @@ export default defineConfig(({ mode }) => {
   // Мост и блокировщик выбираются по среде, а не по продукту: и десктопный
   // скрипт, и своё приложение живут внутри окна Tauri, где есть наш канал и права.
   const isDesktop = isTauri || isApp
+
+  // Пункт 1.6: номер берётся по продукту, а не по среде. Скрипт в окне Tauri —
+  // тот же скрипт, поэтому в режимах userscript и tauri номер один и тот же.
+  const version = isApp ? versions.app : versions.userscript
 
   return {
     // В режиме app корень сборки — src/app: там лежит его index.html.
@@ -121,9 +139,8 @@ export default defineConfig(({ mode }) => {
       // Tauri, но отличается от скрипта внутри окна: чужой разметки вокруг нет.
       __ANIMORI_PLATFORM__: JSON.stringify(isApp ? 'app' : isTauri ? 'tauri' : 'userscript'),
       // Пункт 5.3.5: номер версии нужен рантайму для заголовка User-Agent
-      // нашего канала (src/shared/bridge/TauriBridge.ts). Берётся из того же package.json,
-      // что и версия в шапке юзерскрипта: второй источник номера заводить нельзя,
-      // см. комментарий в шапке файла.
+      // нашего канала (src/shared/bridge/TauriBridge.ts) и для экранов приложения.
+      // Пункт 1.6: здесь уже номер того продукта, который собирается.
       __ANIMORI_VERSION__: JSON.stringify(version),
       // Этап 2: флаги сборки Vue. Без них рантаим сыплет предупреждения в консоль.
       // Options API нигде не используется — только Composition API, поэтому false.
