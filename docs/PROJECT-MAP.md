@@ -1,6 +1,6 @@
 # Карта проекта AniMori
 
-Ветка `script&windows-dev`. Здесь структура и связи кода, а не история
+Ветка `app-3.0-dev`. Здесь структура и связи кода, а не история
 разработки: решения и их причины — в `docs/DECISIONS.md`, ход работ —
 в `docs/<версия>/PLAN.md`, подробности — в телах коммитов.
 
@@ -26,6 +26,9 @@ AniMori — надстройка над anilist.co для русскоязычн
 интерфейса и карточек, русский поиск, встроенный плеер, виджеты медиа-страницы,
 перенос списков с Shikimori и их сравнение.
 
+В ветке 3.0 к этому добавляется второй продукт: собственный клиент AniList
+на своих экранах. Скрипт и приложение стоят на общем ядре.
+
 Одна кодовая база собирается в два продукта.
 
 |                   | Юзерскрипт                          | Десктоп                            |
@@ -41,8 +44,9 @@ AniMori — надстройка над anilist.co для русскоязычн
 иначе в браузерный бандл уехали бы пакеты `@tauri-apps/*`, неработоспособные
 вне окна приложения.
 
-Ветки: `main` — релиз; `script&windows-dev` — рабочая; `linux-dev` и `android-dev` —
-заготовки портов, клоны `main`, работа не начата.
+Ветки: `main` — релиз; `app-3.0-dev` — рабочая; `script&windows-dev` — линия 2.x,
+только исправления; `linux-dev` и `android-dev` — заготовки портов, клоны `main`,
+работа не начата.
 
 ---
 
@@ -56,7 +60,7 @@ AniMori — надстройка над anilist.co для русскоязычн
 dictionary.json                 словарь интерфейса, тянется с raw.githubusercontent
 docs/                           карты, стиль, правила документации, реестр решений
 docs/<версия>/                  PLAN.md, CONTEXT.md и свой DECISIONS.md
-src/                            общий фронтенд обеих сборок
+src/                            общий фронтенд: ядро, скрипт, приложение
 src-tauri/                      оболочка на Rust
 vite.config.ts                  два режима сборки, алиасы, шапка юзерскрипта
 tsconfig.json                   strict, алиасы для тайпчека
@@ -74,48 +78,77 @@ GitHub берёт их только из ветки по умолчанию, т�
 
 ### src/
 
+Три слоя. `shared/` не знает ничьей разметки, `userscript/` — надстройка над
+чужим сайтом, `app/` — свои экраны.
+
 ```
-main.ts        точка входа: порядок старта и привязка к SPA
-style.scss     все стили проекта одним файлом
 vite-env.d.ts  типы глобалов сборки, в том числе __ANIMORI_VERSION__
 
-api/        внешние сервисы
-  anilist.ts, shikimori.ts, shikimori-people.ts, shikimori-user.ts,
-  anime365.ts, animethemes.ts, dictionary.ts, titles.ts, rate-limit.ts
-
-bridge/     абстракция платформы
-  IBridge.ts              контракт: storage, http, clipboard, shell, proxyDiagnostics
-  TauriBridge.ts, MonkeyBridge.ts, TauriProxyDiagnostics.ts
-  index.ts                единственная точка импорта: '@/bridge'
-
-core/       ядро, ничего не знает о features/
-  db.ts           IndexedDB, кэши, сборщик мусора
-  settings.ts     все настройки и чтение их через мост
-  lifecycle.ts    реестр задач на смену роута и разбор
-  net-health.ts   учёт доступности источников
-  proxy.ts        разбор и сборка настроек прокси
-  dictionary.ts   сборка итогового словаря
-  constants.ts    домены, TTL, регулярки перевода
-  types.ts, custom-links.ts, accent.ts
-
-features/   прикладные возможности
+shared/     общее ядро обоих продуктов
+  api/        внешние сервисы
+    anilist.ts, shikimori.ts, shikimori-people.ts, shikimori-user.ts,
+    anime365.ts, animethemes.ts, dictionary.ts, titles.ts, rate-limit.ts
+  bridge/     абстракция платформы
+    IBridge.ts              контракт: storage, http, clipboard, shell, proxyDiagnostics
+    TauriBridge.ts, MonkeyBridge.ts, TauriProxyDiagnostics.ts
+    index.ts                единственная точка импорта: '@/bridge'
+  core/       ядро данных и настроек
+    db.ts           IndexedDB, кэши, сборщик мусора
+    settings.ts     все настройки и чтение их через мост
+    net-health.ts   учёт доступности источников
+    proxy.ts        разбор и сборка настроек прокси
+    dictionary.ts   сборка итогового словаря
+    constants.ts    домены, TTL, регулярки перевода
+    types.ts, custom-links.ts, accent.ts
   adblock/    impl.desktop.ts, impl.noop.ts, index.ts, net-block.ts, net-probe.ts
-  exporter/   index.ts, sync-api.ts, sync-state.ts, SyncModal.vue
-  media/      index.ts, player.ts, franchise.ts, themes.ts, ratings.ts,
-              extlinks.ts, types.ts
-  scanner/    index.ts, compare.ts, scanner-state.ts, ScannerModal.vue,
-              ScannerDiffCategory.vue
-  search/     index.ts, dict-capture.ts
-  translator/ index.ts, rules.ts, dom.ts
-  ui/         SettingsModal.vue и вкладки (SettingsDevTab, SettingsDictTab,
-              SettingsLinksTab, SettingsSupportTab, SettingsProxyCard),
-              settings-state.ts, LoggerModal.vue, logger-state.ts,
-              ActionPanel.vue, action-panel-state.ts, actions.ts,
-              player-hero.scss, NavPanel.vue, nav.ts, reload.ts, links.ts,
-              net-check.ts, NetToast.vue, net-toast.ts, settings.ts, logger-ui.ts
+  utils/      logger.ts, vue-mounter.ts, dom.ts, name-match.ts
 
-utils/      logger.ts, vue-mounter.ts, dom.ts, name-match.ts
+userscript/ надстройка над сайтом
+  main.ts        точка входа: порядок старта и привязка к SPA
+  lifecycle.ts   реестр задач на смену роута и разбор
+  style.scss     все стили надстройки одним файлом
+  features/
+    exporter/   index.ts, sync-api.ts, sync-state.ts, SyncModal.vue
+    media/      index.ts, player.ts, franchise.ts, themes.ts, ratings.ts,
+                extlinks.ts, types.ts
+    scanner/    index.ts, compare.ts, scanner-state.ts, ScannerModal.vue,
+                ScannerDiffCategory.vue
+    search/     index.ts, dict-capture.ts
+    translator/ index.ts, rules.ts, dom.ts
+    ui/         SettingsModal.vue и вкладки (SettingsDevTab, SettingsDictTab,
+                SettingsLinksTab, SettingsSupportTab, SettingsProxyCard),
+                settings-state.ts, LoggerModal.vue, logger-state.ts,
+                ActionPanel.vue, action-panel-state.ts, actions.ts,
+                player-hero.scss, NavPanel.vue, nav.ts, nav-state.ts, reload.ts,
+                links.ts, net-check.ts, NetToast.vue, net-toast.ts, settings.ts,
+                logger-ui.ts
+
+app/        свои экраны приложения, пока пусто
 ```
+
+Жизненный цикл живёт у скрипта, а не в ядре: он знает роуты и корни чужого SPA.
+
+### Алиасы совместимости
+
+Старые имена модулей ведут на новые каталоги, поэтому переезд не потребовал
+править каждый импорт. Между слоями ходят только через алиасы; относительные
+пути допустимы лишь внутри своего каталога.
+
+| Имя в коде          | Куда ведёт                    |
+| ------------------- | ----------------------------- |
+| `@/api/*`           | `src/shared/api/*`            |
+| `@/bridge`          | `src/shared/bridge/index.ts`  |
+| `@/core/*`          | `src/shared/core/*`           |
+| `@/utils/*`         | `src/shared/utils/*`          |
+| `@/features/adblock`| `src/shared/adblock`          |
+| `@/core/lifecycle`  | `src/userscript/lifecycle.ts` |
+| `@/features/*`      | `src/userscript/features/*`   |
+| `@/*`               | `src/*`                       |
+
+Список держится синхронно в двух местах: `resolve.alias` в `vite.config.ts`
+и `paths` в `tsconfig.json`. Правка одного без другого даёт зелёную сборку
+при красном тайпчеке или наоборот. Точные имена стоят раньше общих: порядок
+ключей решает, какой алиас сработает.
 
 ### src-tauri/
 
@@ -146,7 +179,7 @@ monkey. В десктопе — `initialization_script` из `lib.rs`: снач�
 есть гейт `whenDomReady()`: ожидание `document.body` через событие и опрос
 одновременно (между проверкой и подпиской есть зазор).
 
-### 3.2 Порядок старта (`src/main.ts`, `bootstrap()`)
+### 3.2 Порядок старта (`src/userscript/main.ts`, `bootstrap()`)
 
 Каждый шаг обёрнут в `step()`: падение одного не обрывает остальные и оставляет
 запись в журнале.
@@ -174,7 +207,7 @@ monkey. В десктопе — `initialization_script` из `lib.rs`: снач�
   переводе;
 - адблок — до первой отрисовки страницы, иначе баннер успевает мигнуть.
 
-### 3.3 SPA-навигация (`core/lifecycle.ts`)
+### 3.3 SPA-навигация (`src/userscript/lifecycle.ts`)
 
 AniList — SPA на React, документ при переходе не перезагружается. Три источника
 событий: обёртки над `pushState` и `replaceState`, `popstate`, и пулинг адреса
@@ -194,7 +227,7 @@ AniList — SPA на React, документ при переходе не пер
 
 ### 3.4 Монтирование Vue
 
-`utils/vue-mounter.ts` держит реестр всех приложений. Признак `pageScoped`
+`shared/utils/vue-mounter.ts` держит реестр всех приложений. Признак `pageScoped`
 разделяет два рода: постраничные снимаются на каждой смене роута,
 а панель действий и модалки живут в `body` всю сессию. Отдельно есть уборка
 фантомов: узлы `am-vue-root` без живого приложения за ними остаются, когда
