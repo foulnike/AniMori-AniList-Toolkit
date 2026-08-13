@@ -8,8 +8,10 @@
   "author": "foulnike",
   "scripts": {
     "dev": "vite --mode userscript",
+    "dev:app": "vite --mode app",
     "build": "npm run typecheck:all && vite build --mode userscript",
     "build:userscript": "vite build --mode userscript",
+    "build:app": "npm run typecheck:all && vite build --mode app",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "typecheck:shared": "vue-tsc --noEmit -p tsconfig.shared.json",
