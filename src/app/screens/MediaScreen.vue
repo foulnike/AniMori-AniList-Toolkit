@@ -16,8 +16,7 @@ const mediaId = computed(() => currentRoute.value.params.id ?? '')
     <template v-else>
       <p>Номер тайтла из адреса: {{ mediaId }}</p>
       <p class="am-screen__hint">
-        Описание, оценка и список эпизодов появятся в пункте 3.4 поверх данных
-        из раздела 2.
+        Описание, оценка и список эпизодов появятся в пункте 3.4 поверх данных из раздела 2.
       </p>
     </template>
   </section>

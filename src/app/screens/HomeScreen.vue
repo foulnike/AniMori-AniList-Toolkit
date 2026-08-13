@@ -8,8 +8,7 @@ import { navigate } from '../router'
   <section class="am-screen">
     <p>Оболочка готова: меню работает, адрес в окне меняется, «Назад» живое.</p>
     <p class="am-screen__hint">
-      Следующие пункты наполняют экраны: 3.3 списки, 3.4 карточка, 3.5 поиск,
-      3.6 настройки.
+      Следующие пункты наполняют экраны: 3.3 списки, 3.4 карточка, 3.5 поиск, 3.6 настройки.
     </p>
     <button class="am-screen__link" type="button" @click="navigate('lists')">К спискам</button>
   </section>

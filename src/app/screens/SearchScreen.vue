@@ -10,8 +10,7 @@ const query = ref('')
   <section class="am-screen">
     <input v-model="query" class="am-screen__input" type="search" placeholder="Название тайтла" />
     <p class="am-screen__hint">
-      Поиск заработает в пункте 3.5, когда будет клиент GraphQL и ограничитель
-      запросов.
+      Поиск заработает в пункте 3.5, когда будет клиент GraphQL и ограничитель запросов.
     </p>
     <p v-if="query !== ''" class="am-screen__hint">Запрос в памяти: {{ query }}</p>
   </section>

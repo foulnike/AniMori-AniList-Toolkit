@@ -9,8 +9,8 @@ const SAMPLE_IDS: readonly string[] = ['1', '21', '5114']
 <template>
   <section class="am-screen">
     <p class="am-screen__hint">
-      Здесь будут списки с AniList (пункт 3.3). Кнопки ниже проверяют только переход
-      на карточку с номером в адресе.
+      Здесь будут списки с AniList (пункт 3.3). Кнопки ниже проверяют только переход на карточку с
+      номером в адресе.
     </p>
     <ul class="am-screen__rows">
       <li v-for="id in SAMPLE_IDS" :key="id">
