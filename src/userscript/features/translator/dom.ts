@@ -1,12 +1,14 @@
 // Применение перевода к живым узлам страницы: без сети и без очереди.
 // Всё внутри .am-notr не трогаем: иначе Vue и переводчик зациклятся (РИСК №4).
 
+import { NO_TRANSLATE_CLASS } from '@/core/constants'
 import { escapeHTML } from '@/utils/dom'
 import { Logger } from '@/utils/logger'
 import { translateAdvanced } from './rules'
 
-/** Класс-иммунитет: всё, что внутри, переводчик не трогает. */
-export const NO_TRANSLATE_CLASS = 'am-notr'
+// Имя класса живёт в ядре, а не здесь: его ставит монтировщик Vue.
+// Реэкспорт оставлен для остальных частей переводчика.
+export { NO_TRANSLATE_CLASS }
 
 /** В этих тегах текст — код или разметка, перевод только сломает страницу. */
 const SKIP_TAGS: readonly string[] = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG']
