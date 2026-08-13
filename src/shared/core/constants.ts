@@ -4,6 +4,12 @@
 export const IS_SHIKI = window.location.hostname.includes('shikimori')
 export const IS_ANILIST = window.location.hostname.includes('anilist.co')
 
+/**
+ * Класс-иммунитет: всё, что внутри, переводчик не трогает (РИСК №4).
+ * Имя живёт в ядре: его ставит монтировщик Vue, а читает переводчик.
+ */
+export const NO_TRANSLATE_CLASS = 'am-notr'
+
 /** Словарь перевода интерфейса. */
 export const DICT_URL =
   'https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/dictionary.json'
