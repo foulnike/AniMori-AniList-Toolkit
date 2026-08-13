@@ -106,13 +106,13 @@
 Два режима различаются тремя вещами: алиасами, форматом вывода и плагином
 юзерскрипта. Точка входа обоих режимов — `src/userscript/main.ts`.
 
-|                 | userscript                     | tauri                            |
-| --------------- | ------------------------------ | -------------------------------- |
+|                 | userscript                      | tauri                            |
+| --------------- | ------------------------------- | -------------------------------- |
 | `@bridge-impl`  | `shared/bridge/MonkeyBridge.ts` | `shared/bridge/TauriBridge.ts`   |
 | `@adblock-impl` | `shared/adblock/impl.noop.ts`   | `shared/adblock/impl.desktop.ts` |
-| Формат          | сборка с шапкой юзерскрипта    | IIFE, без динамических чанков    |
-| CSS             | встраивается в скрипт        | отдельный файл, вшивается в Rust |
-| Очистка `dist`  | да                             | нет (рядом лежит юзерскрипт)     |
+| Формат          | сборка с шапкой юзерскрипта     | IIFE, без динамических чанков    |
+| CSS             | встраивается в скрипт           | отдельный файл, вшивается в Rust |
+| Очистка `dist`  | да                              | нет (рядом лежит юзерскрипт)     |
 
 Кроме этого в конфиге живут алиасы совместимости — старые имена модулей
 ведут на новые каталоги (таблица в части 1). Они обязаны совпадать
@@ -203,17 +203,17 @@ raw.githubusercontent для словаря. Ключ Kodik вшит в код �
 
 Пути даны от `src/`.
 
-| Задача                      | Файлы                                                                                    |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
+| Задача                      | Файлы                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------ |
 | Добавить настройку          | `shared/core/settings.ts`, `userscript/features/ui/settings-state.ts`, `SettingsModal.vue` |
-| Добавить виджет тайтла      | `userscript/features/media/`, регистрация в `userscript/main.ts`                        |
-| Добавить кнопку              | `userscript/features/ui/actions.ts`, `action-panel-state.ts`                              |
-| Править перевод интерфейса  | `userscript/features/translator/rules.ts`, `dictionary.json`                              |
-| Править плеер               | `userscript/features/media/player.ts`                                                     |
-| Новая возможность оболочки  | `src-tauri/src/lib.rs`, `build.rs`, `capabilities/`                                       |
-| Править списки рекламы      | `shared/adblock/index.ts`, `src-tauri/src/adblock.rs`                                     |
-| Править прокси              | `shared/core/proxy.ts`, `src-tauri/src/proxy*.rs`, `SettingsProxyCard.vue`                |
-| Доступность источников      | `shared/core/net-health.ts`, `userscript/features/ui/net-check.ts`                        |
-| Править алиасы слоёв        | `vite.config.ts` и `tsconfig.json` — только вместе                                    |
-| Разбор сбоев у пользователя | журнал в интерфейсе, `shared/utils/logger.ts`                                          |
-| Почему так сделано            | `docs/DECISIONS.md`, дальше `git show <хеш>`                                            |
+| Добавить виджет тайтла      | `userscript/features/media/`, регистрация в `userscript/main.ts`                           |
+| Добавить кнопку             | `userscript/features/ui/actions.ts`, `action-panel-state.ts`                               |
+| Править перевод интерфейса  | `userscript/features/translator/rules.ts`, `dictionary.json`                               |
+| Править плеер               | `userscript/features/media/player.ts`                                                      |
+| Новая возможность оболочки  | `src-tauri/src/lib.rs`, `build.rs`, `capabilities/`                                        |
+| Править списки рекламы      | `shared/adblock/index.ts`, `src-tauri/src/adblock.rs`                                      |
+| Править прокси              | `shared/core/proxy.ts`, `src-tauri/src/proxy*.rs`, `SettingsProxyCard.vue`                 |
+| Доступность источников      | `shared/core/net-health.ts`, `userscript/features/ui/net-check.ts`                         |
+| Править алиасы слоёв        | `vite.config.ts` и `tsconfig.json` — только вместе                                         |
+| Разбор сбоев у пользователя | журнал в интерфейсе, `shared/utils/logger.ts`                                              |
+| Почему так сделано          | `docs/DECISIONS.md`, дальше `git show <хеш>`                                               |

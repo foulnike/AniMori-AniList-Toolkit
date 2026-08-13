@@ -134,16 +134,16 @@ app/        свои экраны приложения, пока пусто
 править каждый импорт. Между слоями ходят только через алиасы; относительные
 пути допустимы лишь внутри своего каталога.
 
-| Имя в коде          | Куда ведёт                    |
-| ------------------- | ----------------------------- |
-| `@/api/*`           | `src/shared/api/*`            |
-| `@/bridge`          | `src/shared/bridge/index.ts`  |
-| `@/core/*`          | `src/shared/core/*`           |
-| `@/utils/*`         | `src/shared/utils/*`          |
-| `@/features/adblock`| `src/shared/adblock`          |
-| `@/core/lifecycle`  | `src/userscript/lifecycle.ts` |
-| `@/features/*`      | `src/userscript/features/*`   |
-| `@/*`               | `src/*`                       |
+| Имя в коде           | Куда ведёт                    |
+| -------------------- | ----------------------------- |
+| `@/api/*`            | `src/shared/api/*`            |
+| `@/bridge`           | `src/shared/bridge/index.ts`  |
+| `@/core/*`           | `src/shared/core/*`           |
+| `@/utils/*`          | `src/shared/utils/*`          |
+| `@/features/adblock` | `src/shared/adblock`          |
+| `@/core/lifecycle`   | `src/userscript/lifecycle.ts` |
+| `@/features/*`       | `src/userscript/features/*`   |
+| `@/*`                | `src/*`                       |
 
 Список держится синхронно в двух местах: `resolve.alias` в `vite.config.ts`
 и `paths` в `tsconfig.json`. Правка одного без другого даёт зелёную сборку
