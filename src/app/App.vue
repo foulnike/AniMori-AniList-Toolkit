@@ -1,33 +1,72 @@
 <script setup lang="ts">
-// Пункт 1.5: первый экран своего клиента, пока только для проверки сборки.
-// Настоящие экраны придут в разделе 3, вход и данные — в разделе 2.
-const version = __ANIMORI_VERSION__
-const platform = __ANIMORI_PLATFORM__
+// Пункт 3.2: корень приложения. Здесь только выбор экрана по адресу
+// и подписка на его смену; вся разметка рамки — в AppShell.
+import { computed, onBeforeUnmount, onMounted, type Component } from 'vue'
+
+import AppShell from './components/AppShell.vue'
+import { currentRoute, startRouter } from './router'
+import type { ScreenName } from './router/routes'
+import HomeScreen from './screens/HomeScreen.vue'
+import ListsScreen from './screens/ListsScreen.vue'
+import MediaScreen from './screens/MediaScreen.vue'
+import SearchScreen from './screens/SearchScreen.vue'
+import SettingsScreen from './screens/SettingsScreen.vue'
+
+// Полный набор имён обязателен: забытый экран уронит проверку типов,
+// а не вскроется пустым окном у пользователя.
+const SCREENS: Record<ScreenName, Component> = {
+  home: HomeScreen,
+  lists: ListsScreen,
+  search: SearchScreen,
+  media: MediaScreen,
+  settings: SettingsScreen,
+}
+
+const screen = computed<Component>(() => SCREENS[currentRoute.value.name])
+
+let stopRouter: (() => void) | null = null
+
+onMounted(() => {
+  stopRouter = startRouter()
+})
+
+onBeforeUnmount(() => {
+  if (stopRouter === null) return
+  stopRouter()
+  stopRouter = null
+})
 </script>
 
 <template>
-  <main class="am-app">
-    <h1>AniMori</h1>
-    <p>Каркас своего клиента собран. Экраны ещё не написаны.</p>
-    <p class="am-app__meta">Версия {{ version }} · площадка {{ platform }}</p>
-  </main>
+  <AppShell>
+    <component :is="screen" />
+  </AppShell>
 </template>
 
-<style scoped>
-.am-app {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  font-family: system-ui, sans-serif;
-  color: #e7edf7;
-  background: #0b1622;
+<style>
+:root {
+  --am-bg: #0b1622;
+  --am-panel: #101f2f;
+  --am-hover: #17293c;
+  --am-line: #1e3346;
+  --am-text: #e7edf7;
+  --am-dim: #8ba1bd;
+  --am-accent: #4c9ffe;
 }
 
-.am-app__meta {
-  font-size: 13px;
-  color: #8ba1bd;
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  color: var(--am-text);
+  background: var(--am-bg);
+}
+
+#app {
+  min-height: 100vh;
 }
 </style>
