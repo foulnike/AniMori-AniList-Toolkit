@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
-import { isAniListRateLimited } from '../../api/anilist'
-import { getAnime365FailStreak, isAnime365Disabled } from '../../api/anime365'
-import { isShikimoriRateLimited } from '../../api/shikimori'
-import { ANIME365_FAIL_LIMIT } from '../../core/constants'
-import { getDbStats } from '../../core/db'
-import { settings } from '../../core/settings'
-import { escapeHTML } from '../../utils/dom'
-import { Logger, scriptLogs } from '../../utils/logger'
-import { listMountedApps } from '../../utils/vue-mounter'
+import { isAniListRateLimited } from '@/api/anilist'
+import { getAnime365FailStreak, isAnime365Disabled } from '@/api/anime365'
+import { isShikimoriRateLimited } from '@/api/shikimori'
+import { ANIME365_FAIL_LIMIT } from '@/core/constants'
+import { getDbStats } from '@/core/db'
+import { settings } from '@/core/settings'
+import { escapeHTML } from '@/utils/dom'
+import { Logger, scriptLogs } from '@/utils/logger'
+import { listMountedApps } from '@/utils/vue-mounter'
 import { getPendingQueueSizes } from '../translator'
 import {
   FILTERS,

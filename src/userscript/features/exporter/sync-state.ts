@@ -7,7 +7,7 @@
 // первый же запрос мог бы уйти без токена и весь экспорт упал бы на первом шаге.
 
 import { computed, ref } from 'vue'
-import { Logger } from '../../utils/logger'
+import { Logger } from '@/utils/logger'
 import {
   fetchShikiHistoryDates,
   fetchShikiUserId,
@@ -22,7 +22,7 @@ import {
   type HistoryDates,
 } from './sync-api'
 import { getSavedShikiLogin, loadScannerStorage, saveShikiLogin } from '../scanner/compare'
-import { anilistQuery, getStoredAlToken, setAlToken } from '../../api/anilist'
+import { anilistQuery, getStoredAlToken, setAlToken } from '@/api/anilist'
 
 /** Подпись кнопки в покое. */
 export const IDLE_LABEL = 'Экспорт'

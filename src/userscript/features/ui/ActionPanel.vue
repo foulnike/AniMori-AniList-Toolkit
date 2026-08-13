@@ -5,7 +5,7 @@
 -->
 
 <script setup lang="ts">
-import { Logger } from '../../utils/logger'
+import { Logger } from '@/utils/logger'
 import {
   actionButtons,
   isPlayerVisible,

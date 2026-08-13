@@ -8,12 +8,12 @@ import {
   fetchMalThemes,
   type MalThemes,
   type ThemeItem,
-} from '../../api/animethemes'
-import { amApplyAccentToDom } from '../../core/accent'
-import { describeState, getHealth, isTroubled } from '../../core/net-health'
-import { settings } from '../../core/settings'
-import { amCopy, applyMarquee } from '../../utils/dom'
-import { Logger } from '../../utils/logger'
+} from '@/api/animethemes'
+import { amApplyAccentToDom } from '@/core/accent'
+import { describeState, getHealth, isTroubled } from '@/core/net-health'
+import { settings } from '@/core/settings'
+import { amCopy, applyMarquee } from '@/utils/dom'
+import { Logger } from '@/utils/logger'
 import type { MediaContext, MediaWidget } from './types'
 
 const BOX_SELECTOR = '.animori-themes'

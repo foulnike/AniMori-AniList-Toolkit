@@ -1,11 +1,11 @@
 // Виджет внешних ссылок: поиск тайтла по встроенным сервисам и своим шаблонам.
 // Домены сервисов берутся из настроек, а не из кода: зеркала регулярно переезжают.
 
-import { amApplyAccentToDom } from '../../core/accent'
-import { getCustomLinks } from '../../core/custom-links'
-import { settings } from '../../core/settings'
-import { applyMarquee } from '../../utils/dom'
-import { Logger } from '../../utils/logger'
+import { amApplyAccentToDom } from '@/core/accent'
+import { getCustomLinks } from '@/core/custom-links'
+import { settings } from '@/core/settings'
+import { applyMarquee } from '@/utils/dom'
+import { Logger } from '@/utils/logger'
 import type { MediaContext, MediaWidget } from './types'
 
 const BOX_SELECTOR = '.animori-extlinks'

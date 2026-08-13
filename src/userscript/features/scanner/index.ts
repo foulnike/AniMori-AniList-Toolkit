@@ -1,7 +1,7 @@
 // Точка монтирования сканера и регистрация его кнопки: логика сверки в compare.ts,
 // состояние в scanner-state.ts, разметка в ScannerModal.vue.
 
-import { mountApp, unmountApp } from '../../utils/vue-mounter'
+import { mountApp, unmountApp } from '@/utils/vue-mounter'
 import { ACTION_ORDER, registerActionButton } from '../ui/actions'
 import { showCompareButton } from '../ui/settings-state'
 import ScannerModal from './ScannerModal.vue'

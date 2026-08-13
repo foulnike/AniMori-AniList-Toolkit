@@ -1,7 +1,7 @@
 // Точка входа тоста о недоступности источников; логика показа в NetToast.vue.
 // Приложение не постраничное: снятие на смене роута сбросило бы «уже показано».
 
-import { mountApp } from '../../utils/vue-mounter'
+import { mountApp } from '@/utils/vue-mounter'
 import NetToast from './NetToast.vue'
 
 export const NET_TOAST_APP_KEY = 'net-toast'

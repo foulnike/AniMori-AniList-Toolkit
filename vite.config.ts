@@ -46,9 +46,7 @@ export default defineConfig(({ mode }) => {
         // Пересечения всё равно нет: '@' срабатывает лишь на точном '@' или префиксе '@/'.
         '@bridge-impl': fileURLToPath(
           new URL(
-            isTauri
-              ? './src/shared/bridge/TauriBridge.ts'
-              : './src/shared/bridge/MonkeyBridge.ts',
+            isTauri ? './src/shared/bridge/TauriBridge.ts' : './src/shared/bridge/MonkeyBridge.ts',
             import.meta.url,
           ),
         ),
@@ -63,9 +61,7 @@ export default defineConfig(({ mode }) => {
         // Ключ так же обязан идти до '@'.
         '@adblock-impl': fileURLToPath(
           new URL(
-            isTauri
-              ? './src/shared/adblock/impl.desktop.ts'
-              : './src/shared/adblock/impl.noop.ts',
+            isTauri ? './src/shared/adblock/impl.desktop.ts' : './src/shared/adblock/impl.noop.ts',
             import.meta.url,
           ),
         ),

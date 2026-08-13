@@ -7,8 +7,8 @@
 // в shallowRef: внутри Map на десятки тысяч записей, глубокая реактивность тут вредит.
 
 import { computed, ref, shallowRef } from 'vue'
-import type { CmpAniListEntry, CmpShikiEntry } from '../../core/types'
-import { Logger } from '../../utils/logger'
+import type { CmpAniListEntry, CmpShikiEntry } from '@/core/types'
+import { Logger } from '@/utils/logger'
 import {
   CMP_STATUS_ORDER,
   ScanCancelled,

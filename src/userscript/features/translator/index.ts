@@ -1,22 +1,22 @@
 // Переводчик интерфейса: очередь, кэш и наблюдатель за DOM.
 // Устройство конвейера, маркеры узлов и разбор дефектов — docs/DECISIONS.md.
 
-import { anilistPauseRemaining, anilistQuery, isAniListRateLimited } from '../../api/anilist'
-import { isAnime365RateLimited } from '../../api/anime365'
-import { fetchShiki, isShikimoriRateLimited, pauseShikimori } from '../../api/shikimori'
+import { anilistPauseRemaining, anilistQuery, isAniListRateLimited } from '@/api/anilist'
+import { isAnime365RateLimited } from '@/api/anime365'
+import { fetchShiki, isShikimoriRateLimited, pauseShikimori } from '@/api/shikimori'
 import {
   fetchShikiPersonREST,
   resolveShikiPersonByMedia,
   type AniListPersonRef,
   type PersonEndpoint,
-} from '../../api/shikimori-people'
-import { resolveTitle } from '../../api/titles'
-import { CACHE_TIME, SHIKI_DOMAINS } from '../../core/constants'
-import { dbGet, dbSet } from '../../core/db'
-import { registerRetranslateCallback } from '../../core/dictionary'
-import { settings } from '../../core/settings'
-import type { AniListMedia, MediaType, ShikiCacheRecord } from '../../core/types'
-import { Logger } from '../../utils/logger'
+} from '@/api/shikimori-people'
+import { resolveTitle } from '@/api/titles'
+import { CACHE_TIME, SHIKI_DOMAINS } from '@/core/constants'
+import { dbGet, dbSet } from '@/core/db'
+import { registerRetranslateCallback } from '@/core/dictionary'
+import { settings } from '@/core/settings'
+import type { AniListMedia, MediaType, ShikiCacheRecord } from '@/core/types'
+import { Logger } from '@/utils/logger'
 import {
   NO_TRANSLATE_CLASS,
   TRANSLATABLE_ATTRS,

@@ -1,9 +1,9 @@
 // Подключает UI логгера: сток записей, LoggerModal.vue и кнопка в панели.
 // Записи держит кольцевой буфер в logger-state.ts: в DOM их накапливалось до шести тысяч.
 
-import { settings } from '../../core/settings'
-import { registerLogSink } from '../../utils/logger'
-import { mountApp } from '../../utils/vue-mounter'
+import { settings } from '@/core/settings'
+import { registerLogSink } from '@/utils/logger'
+import { mountApp } from '@/utils/vue-mounter'
 import { ACTION_ORDER, registerActionButton } from './actions'
 import LoggerModal from './LoggerModal.vue'
 import { isLoggerOpen, pushLogEntry } from './logger-state'

@@ -3,7 +3,7 @@
 // Буфер ограничен MAX_UI_LOGS: в DOM записей накапливалось до шести тысяч.
 
 import { computed, ref, shallowRef } from 'vue'
-import { type LogEntry, scriptLogs } from '../../utils/logger'
+import { type LogEntry, scriptLogs } from '@/utils/logger'
 
 export const FILTERS = ['ALL', 'INFO', 'WARN', 'API', 'DB', 'QUEUE', 'ERROR'] as const
 export type LogFilter = (typeof FILTERS)[number]

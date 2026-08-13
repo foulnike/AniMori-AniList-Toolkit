@@ -2,12 +2,12 @@
 // Данные требуют двух запросов, а mount() синхронный: готовый блок кэшируется в модуле.
 // Когда карточки Shikimori нет вовсе, виджет молчит: об этом уже сказали рейтинги.
 
-import { anilistQuery } from '../../api/anilist'
-import { fetchShiki, shikimoriTrouble } from '../../api/shikimori'
-import { amApplyAccentToDom } from '../../core/accent'
-import { settings } from '../../core/settings'
-import type { MediaType } from '../../core/types'
-import { Logger } from '../../utils/logger'
+import { anilistQuery } from '@/api/anilist'
+import { fetchShiki, shikimoriTrouble } from '@/api/shikimori'
+import { amApplyAccentToDom } from '@/core/accent'
+import { settings } from '@/core/settings'
+import type { MediaType } from '@/core/types'
+import { Logger } from '@/utils/logger'
 import type { MediaContext, MediaWidget } from './types'
 
 /** Сам блок франшизы. Исключаем темы и ссылки: они переиспользуют тот же класс для вида. */

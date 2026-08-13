@@ -92,7 +92,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { looksLikeOutage, subscribeNetHealth, troubledLabels } from '../../core/net-health'
+import { looksLikeOutage, subscribeNetHealth, troubledLabels } from '@/core/net-health'
 import { activeTab, openSettings } from './settings-state'
 
 const visible = ref(false)

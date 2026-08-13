@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Окно переноса списков Shikimori → AniList.
 
-import { isAnonymousShikiAccess } from '../../api/shikimori-user'
+import { isAnonymousShikiAccess } from '@/api/shikimori-user'
 import {
   AL_DEVELOPER_URL,
   AL_REDIRECT_URL,

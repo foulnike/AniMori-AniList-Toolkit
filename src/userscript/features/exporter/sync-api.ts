@@ -2,9 +2,9 @@
 // Прогресс уходит наружу через onProgress, адрес и транспорт выбирает api/shikimori-user.ts.
 // В оболочке запрос анонимен: закрытый профиль не выгрузится, отказ доступа — отдельная ветка.
 
-import { anilistQuery } from '../../api/anilist'
-import { hiddenProfileMessage, shikiUserGet } from '../../api/shikimori-user'
-import { Logger } from '../../utils/logger'
+import { anilistQuery } from '@/api/anilist'
+import { hiddenProfileMessage, shikiUserGet } from '@/api/shikimori-user'
+import { Logger } from '@/utils/logger'
 
 export type ShikiStatus =
   | 'planned'

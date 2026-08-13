@@ -18,7 +18,7 @@
 
 import { createApp } from 'vue'
 import type { App, Component } from 'vue'
-import { NO_TRANSLATE_CLASS } from '../features/translator/dom'
+import { NO_TRANSLATE_CLASS } from '@/features/translator/dom'
 import { Logger } from './logger'
 
 /** Префикс id у всех созданных нами корней. Удобно искать в инспекторе. */

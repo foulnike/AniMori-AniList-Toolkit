@@ -393,10 +393,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { AM_ACCENTS } from '../../core/accent'
-import { clearCache } from '../../core/db'
-import type { AccentPreset, TitleSource } from '../../core/settings'
-import { Logger } from '../../utils/logger'
+import { AM_ACCENTS } from '@/core/accent'
+import { clearCache } from '@/core/db'
+import type { AccentPreset, TitleSource } from '@/core/settings'
+import { Logger } from '@/utils/logger'
 import SettingsDevTab from './SettingsDevTab.vue'
 import SettingsDictTab from './SettingsDictTab.vue'
 import SettingsLinksTab from './SettingsLinksTab.vue'

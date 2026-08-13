@@ -23,7 +23,7 @@
 // оболочки: рекламу самого сайта режет CSS-блокировщик.
 
 import { Bridge } from '@/bridge'
-import { Logger } from '../../utils/logger'
+import { Logger } from '@/utils/logger'
 
 /** Ключ сводки. Сознательно не пересекается с kodik_player_api из media/player.ts. */
 const PROBE_KEY = '__animoriNetProbe'

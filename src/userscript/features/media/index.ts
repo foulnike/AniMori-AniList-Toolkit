@@ -2,14 +2,14 @@
 // AniList на React пересобирает разметку и выкидывает вставленные узлы (РИСК №3).
 // Поэтому виджеты ставятся не однократно, а по подписке registerMutationHook().
 
-import { anilistQuery } from '../../api/anilist'
-import { fetchShiki } from '../../api/shikimori'
-import { SHIKI_DOMAINS } from '../../core/constants'
-import { dbGet, dbSet } from '../../core/db'
-import type { AniListMedia } from '../../core/types'
+import { anilistQuery } from '@/api/anilist'
+import { fetchShiki } from '@/api/shikimori'
+import { SHIKI_DOMAINS } from '@/core/constants'
+import { dbGet, dbSet } from '@/core/db'
+import type { AniListMedia } from '@/core/types'
 import { registerMutationHook } from '../translator'
 import { hidePlayerButton } from '../ui/action-panel-state'
-import { Logger } from '../../utils/logger'
+import { Logger } from '@/utils/logger'
 import type { MediaAniListData, MediaContext, MediaShikiData, MediaWidget } from './types'
 
 export type { MediaContext, MediaWidget } from './types'

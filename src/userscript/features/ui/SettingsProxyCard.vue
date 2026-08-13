@@ -160,9 +160,9 @@ import {
   isProxyUsable,
   normalizeProxyKind,
   normalizeProxyPort,
-} from '../../core/proxy'
-import type { ProxyKind } from '../../core/proxy'
-import { Logger } from '../../utils/logger'
+} from '@/core/proxy'
+import type { ProxyKind } from '@/core/proxy'
+import { Logger } from '@/utils/logger'
 
 /** Константа на всю сессию, поэтому не ref: платформа за время жизни окна не меняется. */
 const isDesktop = Bridge.platform === 'tauri'

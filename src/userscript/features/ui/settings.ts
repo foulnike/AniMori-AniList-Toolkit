@@ -1,7 +1,7 @@
 // Точка входа панели настроек: монтирует SettingsModal.vue и кнопку ⚙.
 // Разметка живёт в SettingsModal.vue, состояние — в settings-state.ts.
 
-import { mountApp } from '../../utils/vue-mounter'
+import { mountApp } from '@/utils/vue-mounter'
 import SettingsModal from './SettingsModal.vue'
 import { ACTION_ORDER, registerActionButton } from './actions'
 import { openSettings, toggleSettings } from './settings-state'

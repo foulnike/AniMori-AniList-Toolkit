@@ -6,7 +6,7 @@ import { ref } from 'vue'
 
 import { Bridge } from '@/bridge'
 
-import { Logger } from '../../utils/logger'
+import { Logger } from '@/utils/logger'
 
 /** Сколько кнопка держит отметку об успешном копировании. */
 const COPIED_MS = 1500

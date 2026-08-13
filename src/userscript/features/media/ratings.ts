@@ -2,11 +2,11 @@
 // При устойчивом молчании Shikimori блок всё равно строится: оценка AniList есть всегда.
 // Совета про VPN здесь нет: отказ одного источника — не суждение о сети, это дело тоста.
 
-import { shikimoriTrouble } from '../../api/shikimori'
-import { amApplyAccentToDom } from '../../core/accent'
-import { settings } from '../../core/settings'
-import { getPlural } from '../../utils/dom'
-import { Logger } from '../../utils/logger'
+import { shikimoriTrouble } from '@/api/shikimori'
+import { amApplyAccentToDom } from '@/core/accent'
+import { settings } from '@/core/settings'
+import { getPlural } from '@/utils/dom'
+import { Logger } from '@/utils/logger'
 import type { MediaContext, MediaWidget } from './types'
 
 const SHIKI_FALLBACK_DOMAIN = 'shikimori.io'

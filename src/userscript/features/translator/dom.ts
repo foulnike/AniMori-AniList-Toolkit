@@ -1,8 +1,8 @@
 // Применение перевода к живым узлам страницы: без сети и без очереди.
 // Всё внутри .am-notr не трогаем: иначе Vue и переводчик зациклятся (РИСК №4).
 
-import { escapeHTML } from '../../utils/dom'
-import { Logger } from '../../utils/logger'
+import { escapeHTML } from '@/utils/dom'
+import { Logger } from '@/utils/logger'
 import { translateAdvanced } from './rules'
 
 /** Класс-иммунитет: всё, что внутри, переводчик не трогает. */

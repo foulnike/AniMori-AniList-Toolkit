@@ -3,11 +3,11 @@
 // Поэтому виджет только сообщает ей состояние: showPlayerButton() / hidePlayerButton().
 
 import { Bridge } from '@/bridge'
-import { anilistQuery } from '../../api/anilist'
-import { amApplyAccentToDom } from '../../core/accent'
-import { reportError, reportStatus } from '../../core/net-health'
-import { settings } from '../../core/settings'
-import { Logger } from '../../utils/logger'
+import { anilistQuery } from '@/api/anilist'
+import { amApplyAccentToDom } from '@/core/accent'
+import { reportError, reportStatus } from '@/core/net-health'
+import { settings } from '@/core/settings'
+import { Logger } from '@/utils/logger'
 import { hidePlayerButton, showPlayerButton } from '../ui/action-panel-state'
 import type { MediaContext, MediaWidget } from './types'
 

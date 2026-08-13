@@ -9,8 +9,8 @@
 // Класс am-notr на форме обязателен: иначе переводчик начнёт переводить собственную
 // форму и породит рекурсию мутаций (риск №4 из docs/DECISIONS.md).
 
-import { getUserDict, normDictKey, upsertUserDictEntry } from '../../core/dictionary'
-import { html } from '../../utils/dom'
+import { getUserDict, normDictKey, upsertUserDictEntry } from '@/core/dictionary'
+import { html } from '@/utils/dom'
 
 /** Короче — шум вроде случайного клика, длиннее — абзац, а не термин. */
 const MIN_LEN = 2

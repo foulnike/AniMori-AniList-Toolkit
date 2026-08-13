@@ -148,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { CL_COLORS } from '../../core/custom-links'
+import { CL_COLORS } from '@/core/custom-links'
 import {
   CUSTOM_URL_EXAMPLE,
   addCustomLink,

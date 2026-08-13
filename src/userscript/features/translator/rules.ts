@@ -28,10 +28,10 @@ import {
   rxTimeComplex,
   rxUnit,
   seasons,
-} from '../../core/constants'
-import { dictionary } from '../../core/dictionary'
-import { settings } from '../../core/settings'
-import { getPlural } from '../../utils/dom'
+} from '@/core/constants'
+import { dictionary } from '@/core/dictionary'
+import { settings } from '@/core/settings'
+import { getPlural } from '@/utils/dom'
 
 /** Одна, две, много: 'минуту' / 'минуты' / 'минут'. */
 type PluralForms = readonly [string, string, string]

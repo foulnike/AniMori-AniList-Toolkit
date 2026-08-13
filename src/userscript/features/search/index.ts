@@ -10,11 +10,11 @@
 //     каждый персонаж запрашивается через алиас Page(perPage:1) — пустой список вместо ошибки;
 //   - эндпоинты /search у Shikimori игнорируют &limit, поэтому списки режутся на клиенте.
 
-import { anilistQuery } from '../../api/anilist'
-import { fetchShiki } from '../../api/shikimori'
-import { SHIKI_DOMAINS } from '../../core/constants'
-import { html, rawHTML } from '../../utils/dom'
-import { Logger } from '../../utils/logger'
+import { anilistQuery } from '@/api/anilist'
+import { fetchShiki } from '@/api/shikimori'
+import { SHIKI_DOMAINS } from '@/core/constants'
+import { html, rawHTML } from '@/utils/dom'
+import { Logger } from '@/utils/logger'
 import { initDictCapture } from './dict-capture'
 
 /**

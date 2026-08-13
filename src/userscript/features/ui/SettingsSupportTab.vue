@@ -98,7 +98,7 @@
 import { ref } from 'vue'
 
 import { Bridge } from '@/bridge'
-import { amCopy } from '../../utils/dom'
+import { amCopy } from '@/utils/dom'
 import { ISSUES_CHOOSE, SUP_GITHUB, SUP_GREASY, SUP_GREASY_FEEDBACK } from './settings-state'
 
 /** Платформа константна на всю сессию, поэтому не ref и не computed. */

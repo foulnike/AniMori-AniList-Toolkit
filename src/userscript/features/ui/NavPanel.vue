@@ -33,7 +33,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Bridge } from '@/bridge'
-import { Logger } from '../../utils/logger'
+import { Logger } from '@/utils/logger'
 import { copyCurrentUrl, currentUrl, isFullscreen, toggleFullscreen, urlCopied } from './nav-state'
 import { reloadPage } from './reload'
 

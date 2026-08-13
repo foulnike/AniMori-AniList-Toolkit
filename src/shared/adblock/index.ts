@@ -36,8 +36,8 @@
 // упорно пересоздаёт себя, мы отступаем на чистый CSS и не вступаем в гонку
 // на всю оставшуюся жизнь вкладки.
 
-import { settings } from '../../core/settings'
-import { Logger } from '../../utils/logger'
+import { settings } from '@/core/settings'
+import { Logger } from '@/utils/logger'
 import { initNetBlockReporter, setShellAdBlock } from './net-block'
 
 /** id тега со стилями — нужен, чтобы снять его при выключении без перезагрузки. */

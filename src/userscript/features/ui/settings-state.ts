@@ -6,28 +6,28 @@ import { computed, ref } from 'vue'
 import type { WritableComputedRef } from 'vue'
 
 import { Bridge } from '@/bridge'
-import { getStoredAlToken, setAlToken } from '../../api/anilist'
+import { getStoredAlToken, setAlToken } from '@/api/anilist'
 import {
   AM_ACCENTS,
   DEFAULT_CUSTOM_ACCENT,
   amSetAccent,
   isAccentTooLight,
   parseAccentHex,
-} from '../../core/accent'
-import { CL_COLORS, getCustomLinks, setCustomLinks } from '../../core/custom-links'
-import type { CustomLink } from '../../core/custom-links'
+} from '@/core/accent'
+import { CL_COLORS, getCustomLinks, setCustomLinks } from '@/core/custom-links'
+import type { CustomLink } from '@/core/custom-links'
 import {
   getUserDict,
   normDictKey,
   removeUserDictEntry,
   setUserDict,
   upsertUserDictEntry,
-} from '../../core/dictionary'
-import { saveSetting, settings } from '../../core/settings'
-import type { AccentPreset, AniMoriSettings, TitleSource } from '../../core/settings'
+} from '@/core/dictionary'
+import { saveSetting, settings } from '@/core/settings'
+import type { AccentPreset, AniMoriSettings, TitleSource } from '@/core/settings'
 import { syncAdblock } from '@adblock-impl'
-import { amCopy } from '../../utils/dom'
-import { Logger } from '../../utils/logger'
+import { amCopy } from '@/utils/dom'
+import { Logger } from '@/utils/logger'
 
 // Адреса собираются только конкатенацией, никогда шаблонной строкой.
 const HTTPS = 'https://'

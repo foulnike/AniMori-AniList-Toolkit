@@ -8,10 +8,10 @@
 // проверки; сами сетевые запросы не прерываются, процесс встаёт на ближайшей границе.
 
 import { Bridge } from '@/bridge'
-import { anilistQuery } from '../../api/anilist'
-import { fetchShiki } from '../../api/shikimori'
-import type { CmpAniListEntry, CmpShikiEntry, ShikiStatus } from '../../core/types'
-import { Logger } from '../../utils/logger'
+import { anilistQuery } from '@/api/anilist'
+import { fetchShiki } from '@/api/shikimori'
+import type { CmpAniListEntry, CmpShikiEntry, ShikiStatus } from '@/core/types'
+import { Logger } from '@/utils/logger'
 
 export const CMP_STATUS_ORDER = [
   'watching',

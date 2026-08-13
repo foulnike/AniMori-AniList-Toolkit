@@ -3,10 +3,10 @@
 // Ограничения проб и правила добавления адреса — docs/DECISIONS.md.
 
 import { Bridge } from '@/bridge'
-import { anime365Limiter, animeThemesLimiter, shikiLimiter } from '../../api/rate-limit'
-import { ANIME365_DOMAINS, DICT_URL, SHIKI_DOMAINS } from '../../core/constants'
-import { reportError, reportStatus } from '../../core/net-health'
-import { Logger } from '../../utils/logger'
+import { anime365Limiter, animeThemesLimiter, shikiLimiter } from '@/api/rate-limit'
+import { ANIME365_DOMAINS, DICT_URL, SHIKI_DOMAINS } from '@/core/constants'
+import { reportError, reportStatus } from '@/core/net-health'
+import { Logger } from '@/utils/logger'
 
 /** Предел ожидания одного адреса. Дольше держать пользователя незачем. */
 const PROBE_TIMEOUT_MS = 8000

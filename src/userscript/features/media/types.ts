@@ -1,7 +1,7 @@
 // Общие типы медиа-страницы: контекст тайтла и контракт виджета сайдбара.
 // Вынесены отдельно, чтобы виджеты не импортировали друг друга ради одного интерфейса.
 
-import type { MediaType } from '../../core/types'
+import type { MediaType } from '@/core/types'
 
 /** Данные тайтла из AniList, нужные виджетам. */
 export interface MediaAniListData {

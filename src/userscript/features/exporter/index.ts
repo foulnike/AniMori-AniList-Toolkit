@@ -6,8 +6,8 @@
 // и вход на чужом домене там недостижим, а два сценария пришлось бы
 // тестировать отдельно.
 
-import { Logger } from '../../utils/logger'
-import { mountApp, unmountApp } from '../../utils/vue-mounter'
+import { Logger } from '@/utils/logger'
+import { mountApp, unmountApp } from '@/utils/vue-mounter'
 import { ACTION_ORDER, registerActionButton } from '../ui/action-panel-state'
 import { showSyncButton } from '../ui/settings-state'
 import SyncModal from './SyncModal.vue'

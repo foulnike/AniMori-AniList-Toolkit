@@ -1,7 +1,7 @@
 // Точка запуска панели действий: разметка в ActionPanel.vue, состояние в action-panel-state.ts.
 // Реестр кнопок вынесен в отдельный модуль: иначе цикл через ActionPanel.vue.
 
-import { mountApp, unmountApp } from '../../utils/vue-mounter'
+import { mountApp, unmountApp } from '@/utils/vue-mounter'
 import ActionPanel from './ActionPanel.vue'
 
 export {
