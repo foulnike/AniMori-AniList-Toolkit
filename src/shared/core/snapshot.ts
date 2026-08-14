@@ -106,7 +106,10 @@ function parseSnapshot(raw: unknown): UserSnapshot {
   const candidate = raw as Partial<UserSnapshot>
   if (candidate.version !== SNAPSHOT_VERSION) {
     if (typeof candidate.version === 'number') {
-      Logger('WARN', `Снимок версии ${candidate.version} не подходит к ${SNAPSHOT_VERSION} — читаем с нуля`)
+      Logger(
+        'WARN',
+        `Снимок версии ${candidate.version} не подходит к ${SNAPSHOT_VERSION} — читаем с нуля`,
+      )
     }
     return emptySnapshot()
   }
