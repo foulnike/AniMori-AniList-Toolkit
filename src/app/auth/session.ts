@@ -1,5 +1,5 @@
 // Пункт 2.2: единственное место в разметке, которое знает про вызовы Rust.
-// Экраны видят только authStatus и четыре функции — так же, как в юзерскрипте
+// Экраны видят только authStatus и пару функций — так же, как в юзерскрипте
 // вся платформа спрятана за мостом.
 //
 // Самого токена здесь нет и не будет: он живёт в Rust (src-tauri/src/auth.rs),
@@ -14,6 +14,18 @@ export type AuthStatus = {
   authorized: boolean
   /// Секунды эпохи Unix. null — срок неизвестен.
   expiresAt: number | null
+}
+
+/// Ответ на начало входа. Совпадает с LoginStart в auth.rs.
+export type LoginStart = {
+  /// Адрес для этого же компьютера: браузер открылся им.
+  localUrl: string
+  /// Адрес в домашней сети. null — сети нет, вход с телефона невозможен.
+  lanUrl: string | null
+  /// Картинка QR для домашнего адреса, готовый SVG из Rust.
+  qrSvg: string | null
+  /// Сколько секунд приёмник ждёт пропуск.
+  waitSecs: number
 }
 
 // Повторяет EVENT_CHANGED в auth.rs: два места расходиться не должны.
@@ -35,9 +47,10 @@ export async function refreshAuth(): Promise<void> {
   state.value = await invoke<AuthStatus>('animori_auth_status')
 }
 
-/// Открыть окно входа. Ответа с токеном здесь нет: о успехе сообщит событие.
-export async function startLogin(): Promise<void> {
-  await invoke('animori_auth_start')
+/// Начать вход: Rust поднимает приёмник и открывает браузер. Токена в
+/// ответе нет и быть не может: об успехе сообщит событие.
+export async function startLogin(): Promise<LoginStart> {
+  return invoke<LoginStart>('animori_auth_start')
 }
 
 /// Запасной путь: токен, вставленный руками. Срок не передаётся: его нет
