@@ -6,6 +6,7 @@ import { Bridge, type HttpResponse } from '@/bridge'
 import { IS_ANILIST } from '../core/constants'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
+import { anilistLimiter, MAX_RATE_RETRIES } from './rate-limit'
 
 /** Идентификатор и ярлык источника в учёте состояния сети. */
 export const NET_SOURCE_ANILIST = 'anilist:graphql'
@@ -13,12 +14,6 @@ export const NET_LABEL_ANILIST = 'AniList API'
 
 /** Пауза по умолчанию, если сервер не прислал retry-after. */
 const DEFAULT_RETRY_MS = 5000
-
-/**
- * Сколько раз повторять после 429. Безусловный повтор давал вечно висящее обещание.
- * Три попытки — как MAX_RATE_RETRIES в api/rate-limit.ts: правило при лимите одно на всех.
- */
-const MAX_RATE_RETRIES = 3
 
 /**
  * Первая пауза после отказа сервера и потолок роста: каждый следующий отказ удваивает её.
@@ -68,6 +63,7 @@ export function anilistPauseRemaining(): number {
 /** Ставит паузу вручную. Существующая более долгая пауза не укорачивается. */
 export function pauseAniList(ms: number): void {
   alRateLimitPause = Math.max(alRateLimitPause, Date.now() + ms)
+  anilistLimiter.pause(ms)
 }
 
 export interface GraphQLResponse<T = unknown> {
@@ -136,10 +132,45 @@ function shareVuexToken(): void {
   Logger('INFO', 'AniList: токен сессии сайта сохранён для запросов через мост')
 }
 
+/**
+ * Значение заголовка в любом регистре имени.
+ * Мост в Rust понижает имена, а скриптовый отдаёт так, как пришло от браузера.
+ */
+function header(headers: Record<string, string>, name: string): string {
+  const direct = headers[name]
+  if (direct !== undefined) return direct
+
+  const found = Object.keys(headers).find((key) => key.toLowerCase() === name)
+  return found ? (headers[found] ?? '') : ''
+}
+
+/** Целое число из заголовка или NaN: сервер присылает их не в каждом ответе. */
+function headerNumber(headers: Record<string, string>, name: string): number {
+  const raw = header(headers, name)
+  return raw ? parseInt(raw, 10) : NaN
+}
+
+/**
+ * Учит ограничитель по заголовкам ответа: потолок и остаток окна.
+ * Так возврат штатных 90 после техработ не требует правки и выпуска сборок.
+ */
+function learnRateHeaders(headers: Record<string, string>): void {
+  const limit = headerNumber(headers, 'x-ratelimit-limit')
+  if (Number.isFinite(limit) && limit > 0) anilistLimiter.applyCeiling(limit)
+
+  const remaining = headerNumber(headers, 'x-ratelimit-remaining')
+  if (!Number.isFinite(remaining) || remaining > 0) return
+
+  // Окно выбрано до конца: ждём сброса, не дожидаясь 429.
+  const reset = headerNumber(headers, 'x-ratelimit-reset')
+  const untilReset = Number.isFinite(reset) ? reset * 1000 - Date.now() : NaN
+  const wait = Number.isFinite(untilReset) && untilReset > 0 ? untilReset : DEFAULT_RETRY_MS
+  anilistLimiter.pause(Math.min(wait + 500, 60000))
+}
+
 /** Сколько ждать после 429: заголовок retry-after в секундах либо дефолт. */
 function readRetryAfter(headers: Record<string, string>): number {
-  const raw = headers['retry-after']
-  const seconds = raw ? parseInt(raw, 10) : NaN
+  const seconds = headerNumber(headers, 'retry-after')
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_MS
 }
 
@@ -204,6 +235,9 @@ export async function anilistQuery<T = unknown>(
     useAuth,
   })
 
+  // Разрешение на отправку: сам темп знает только ограничитель.
+  await anilistLimiter.acquireSlot()
+
   const startTime = performance.now()
   const startedAt = Date.now()
 
@@ -222,9 +256,16 @@ export async function anilistQuery<T = unknown>(
   // Учёт состояния до разбора кодов: факт ответа важен сам по себе.
   reportStatus(NET_SOURCE_ANILIST, NET_LABEL_ANILIST, res.status, Date.now() - startedAt)
 
+  // Потолок и остаток окна читаются из любого ответа, включая ошибки.
+  learnRateHeaders(res.headers)
+
   if (res.status === 429) {
     const waitTime = readRetryAfter(res.headers)
     alRateLimitPause = Date.now() + waitTime + 500
+    anilistLimiter.pause(waitTime + 500)
+
+    // Потолок был завышен: урезаем его и не верим росту ближайшие минуты.
+    anilistLimiter.reduceCeiling()
 
     // Пауза ставится даже при исчерпанных повторах: остальные вызовы не должны добивать сервер.
     if (attempt >= MAX_RATE_RETRIES) {
