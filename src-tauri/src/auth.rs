@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_store::StoreExt;
 
 /// Порт приёмника. Постоянный, а не свободный из системы: этот же номер
@@ -71,7 +71,7 @@ const KEY_EXPIRES_AT: &str = "auth_expires_at";
 const EVENT_CHANGED: &str = "animori://auth-changed";
 
 /// Запас на жизнь пропуска: срок, истекающий в ближайшую минуту, считаем
-/// истёкшим — иначе запрос ушёл бы с умирающим пропуском и вернулся отказом.
+/// истёкшим — иначе запрос ушᄅл бы с умирающим пропуском и вернулся отказом.
 const EXPIRY_MARGIN_SECS: u64 = 60;
 
 /// Границы здравого смысла для ручной вставки: пропуск AniList — длинная
@@ -412,17 +412,17 @@ fn serve(app: &AppHandle, stream: TcpStream) -> bool {
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
 
     if path == RELAY_PATH {
-        page(
-            stream,
-            "Секунду",
-            "Заканчиваем вход…",
-            RELAY_SCRIPT,
-        );
+        page(stream, "Секунду", "Заканчиваем вход…", RELAY_SCRIPT);
         return false;
     }
 
     if path != "/token" {
-        reply(stream, 404, "text/plain; charset=utf-8", "Нет такой страницы");
+        reply(
+            stream,
+            404,
+            "text/plain; charset=utf-8",
+            "Нет такой страницы",
+        );
         return false;
     }
 
@@ -506,34 +506,52 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
 ///
 /// Бандла скрипта здесь нет: на форме входа ему делать нечего, а лишний код
 /// на странице с паролем — лишний риск.
+///
+/// Само создание уезжает в ГЛАВНЫЙ поток, и это не придирка. Команда
+/// исполняется в рабочем потоке, а окна на Windows умеет создавать только
+/// главный: вызванный со стороны build() не возвращается, и человек видит
+/// пустую раму без движка и без меню по правой кнопке.
+///
+/// Ответ кнопке поэтому не ждёт окна: ошибка создания попадает в журнал, а не
+/// на экран настроек. За эту цену окно вообще открывается.
 fn open_login_window(app: &AppHandle, url: &str) -> Result<(), String> {
-    // Прошлое окно закрывается: адрес входа одноразовый, и старая форма
-    // привела бы к возврату, которого уже никто не ждёт.
-    close_login_window(app);
-
-    let address = url
+    let address: Url = url
         .parse()
         .map_err(|_| "Адрес входа не разбирается".to_string())?;
 
-    let window = WebviewWindowBuilder::new(app, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
-        .title("Вход в AniList")
-        .inner_size(520.0, 720.0)
-        .min_inner_size(420.0, 560.0)
-        .resizable(true)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
+    let handle = app.clone();
 
-    // Прокси с паролем спрашивает учётные данные на первом же соединении,
-    // а подписка действует только вперёд — потому сразу после создания окна.
-    #[cfg(windows)]
-    crate::proxy_auth::install(app, &window);
+    app.run_on_main_thread(move || {
+        // Прошлое окно закрывается: адрес входа одноразовый, и старая форма
+        // привела бы к возврату, которого уже никто не ждёт.
+        close_login_window(&handle);
 
-    #[cfg(not(windows))]
-    let _ = &window;
+        let built =
+            WebviewWindowBuilder::new(&handle, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
+                .title("Вход в AniList")
+                .inner_size(520.0, 720.0)
+                .min_inner_size(420.0, 560.0)
+                .resizable(true)
+                .center()
+                .build();
 
-    log::info!("Открыто окно входа AniList");
-    Ok(())
+        match built {
+            Ok(window) => {
+                // Прокси с паролем спрашивает учётные данные на первом же
+                // соединении, а подписка действует только вперёд — потому сразу
+                // после создания окна.
+                #[cfg(windows)]
+                crate::proxy_auth::install(&handle, &window);
+
+                #[cfg(not(windows))]
+                let _ = &window;
+
+                log::info!("Открыто окно входа AniList");
+            }
+            Err(e) => log::error!("Окно входа не открылось: {e}"),
+        }
+    })
+    .map_err(|e| ["Окно входа не заказать: ", &e.to_string()].concat())
 }
 
 /// Закрывает окно входа, если оно есть. Ошибка закрытия только в журнал:
