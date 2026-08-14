@@ -16,14 +16,9 @@ export type AuthStatus = {
   expiresAt: number | null
 }
 
-/// Ответ на начало входа. Совпадает с LoginStart в auth.rs.
+/// Ответ на начало входа. Совпадает с LoginStart в auth.rs. Адресов здесь нет:
+/// окно с формой входа открывает сам Rust, и человеку нечего открывать руками.
 export type LoginStart = {
-  /// Адрес для этого же компьютера: браузер открылся им.
-  localUrl: string
-  /// Адрес в домашней сети. null — сети нет, вход с телефона невозможен.
-  lanUrl: string | null
-  /// Картинка QR для домашнего адреса, готовый SVG из Rust.
-  qrSvg: string | null
   /// Сколько секунд приёмник ждёт пропуск.
   waitSecs: number
 }
@@ -47,8 +42,8 @@ export async function refreshAuth(): Promise<void> {
   state.value = await invoke<AuthStatus>('animori_auth_status')
 }
 
-/// Начать вход: Rust поднимает приёмник и открывает браузер. Токена в
-/// ответе нет и быть не может: об успехе сообщит событие.
+/// Начать вход: Rust поднимает приёмник и открывает окно с формой входа
+/// AniList. Токена в ответе нет и быть не может: об успехе сообщит событие.
 export async function startLogin(): Promise<LoginStart> {
   return invoke<LoginStart>('animori_auth_start')
 }

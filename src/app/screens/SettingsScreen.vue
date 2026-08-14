@@ -26,8 +26,8 @@ const busy = ref(false)
 const manual = ref('')
 const manualOpen = ref(false)
 
-// Ответ Rust на нажатие «Войти»: адреса и картинка QR. Держится до входа
-// или до ухода с экрана: повторный вызов ничего нового не даст.
+// Ответ Rust на нажатие «Войти». Держится до входа или до ухода с экрана:
+// из него берётся срок ожидания для подсказки.
 const login = ref<LoginStart | null>(null)
 
 let stopWatch: (() => void) | null = null
@@ -137,27 +137,12 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- Показывается только после нажатия: до него приёмник не слушает, и
-             картинка вела бы в никуда. -->
-        <div v-if="login && !authStatus.authorized" class="am-login">
-          <p class="am-screen__hint">
-            В браузере открылась страница входа AniList. После разрешения приложение
-            узнает о входе само. Ожидание — {{ waitText(login.waitSecs) }}.
-          </p>
-
-          <template v-if="login.qrSvg && login.lanUrl">
-            <p class="am-screen__hint">
-              Или войдите с телефона: наведите камеру на код. Телефон должен быть в той же
-              сети и без VPN.
-            </p>
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <div class="am-login__qr" v-html="login.qrSvg"></div>
-            <p class="am-screen__meta">{{ login.lanUrl }}</p>
-          </template>
-          <p v-else class="am-screen__hint">
-            Адрес в домашней сети не определён, вход с телефона сейчас невозможен.
-          </p>
-        </div>
+        <!-- Показывается только после нажатия: до него окна входа нет и ждать
+             человеку нечего. -->
+        <p v-if="login && !authStatus.authorized" class="am-screen__hint">
+          Открылось окно входа AniList — оно идёт через наш прокси. После разрешения
+          окно закроется само. Ожидание — {{ waitText(login.waitSecs) }}.
+        </p>
 
         <div v-if="manualOpen && !authStatus.authorized" class="am-card__row">
           <input
@@ -240,22 +225,6 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 13px;
   color: #ff8a8a;
-}
-
-.am-login {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-  padding-top: 4px;
-  border-top: 1px solid var(--am-line);
-}
-
-.am-login__qr {
-  padding: 8px;
-  line-height: 0;
-  background: #ffffff;
-  border-radius: 8px;
 }
 
 .am-btn {
