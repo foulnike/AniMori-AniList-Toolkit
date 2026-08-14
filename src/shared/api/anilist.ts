@@ -1,14 +1,11 @@
-// Клиент AniList GraphQL: единственный держатель токена и общей паузы по лимиту.
+// Клиент AniList GraphQL: держатель общей паузы по лимиту и разбора ответов.
 // Тормоз живёт здесь, а не в очереди: только клиент видит все запросы к AniList сразу.
-// Токен дублируется в памяти: геттеры синхронные, а хранилище моста асинхронное.
+// Сам запрос собирает мост (пункт 2.3): в десктопе пропуск в разметку не попадает.
 
 import { Bridge, type HttpResponse } from '@/bridge'
 import { IS_ANILIST } from '../core/constants'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
-
-/** Адрес GraphQL-точки AniList. */
-const GRAPHQL_URL = 'https://graphql.anilist.co'
 
 /** Идентификатор и ярлык источника в учёте состояния сети. */
 export const NET_SOURCE_ANILIST = 'anilist:graphql'
@@ -125,6 +122,20 @@ export function getAlToken(): string | null {
   return null
 }
 
+/**
+ * Отдаёт мосту токен, найденный только в Vuex: подписывает запрос теперь мост,
+ * а сессию сайта он сам не видит и без этого ответил бы «вход не выполнен».
+ */
+function shareVuexToken(): void {
+  if (alTokenCache) return
+
+  const token = getAlToken()
+  if (!token) return
+
+  setAlToken(token)
+  Logger('INFO', 'AniList: токен сессии сайта сохранён для запросов через мост')
+}
+
 /** Сколько ждать после 429: заголовок retry-after в секундах либо дефолт. */
 function readRetryAfter(headers: Record<string, string>): number {
   const raw = headers['retry-after']
@@ -167,7 +178,7 @@ function backOffAfterServerFailure(status: number): number {
 
 /**
  * GraphQL-запрос к AniList с паузой после 429 и ограниченным числом повторов.
- * @param useAuth Добавлять ли заголовок Authorization (см. getAlToken()).
+ * @param useAuth Подписывать ли запрос пропуском; сам пропуск подставляет мост.
  * @param attempt Служебный счётчик повторов после 429. Снаружи не передаётся.
  */
 export async function anilistQuery<T = unknown>(
@@ -185,14 +196,7 @@ export async function anilistQuery<T = unknown>(
     await sleep(remaining + Math.floor(Math.random() * 500))
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  }
-  if (useAuth) {
-    const token = getAlToken()
-    if (token) headers['Authorization'] = 'Bearer ' + token
-  }
+  if (useAuth) shareVuexToken()
 
   Logger('API', 'GraphQL запрос (AniList)', {
     query: query.substring(0, 100) + '...',
@@ -205,14 +209,8 @@ export async function anilistQuery<T = unknown>(
 
   let res: HttpResponse
   try {
-    res = await Bridge.http.request({
-      method: 'POST',
-      url: GRAPHQL_URL,
-      headers,
-      body: JSON.stringify({ query, variables }),
-      // Куки с anilist.co дают от nginx «400 Cookie Too Large», а GraphQL авторизует Bearer.
-      credentials: 'omit',
-    })
+    // Адрес, заголовки и пропуск — забота моста: в десктопе запрос идёт из Rust.
+    res = await Bridge.anilist.query(JSON.stringify({ query, variables }), useAuth)
   } catch (e) {
     // Сеть упала — тот же отступ, иначе очередь крутит пачки вхолостую всё время без сети.
     reportError(NET_SOURCE_ANILIST, NET_LABEL_ANILIST, e, Date.now() - startedAt)
