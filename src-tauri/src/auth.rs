@@ -1,23 +1,23 @@
 // Пункт 2.2: вход в аккаунт AniList.
 //
 // Своей формы входа у нас нет и не будет: логин с паролем человек вводит
-// ТОЛЬКО на самом AniList. Наше дело — увести его туда и поймать пропуск
-// на обратном пути.
+// только на самом AniList. Наше дело — увести туда и поймать пропуск на
+// обратном пути.
 //
 // Пропуск приезжает во фрагменте адреса (после #), а фрагмент на сервер не
-// уезжает никогда — прочитать его может лишь страница в браузере. Поэтому в
+// уезжает никогда: прочитать его может лишь страница в браузере. Поэтому в
 // цепочке стоит страничка-стрелочник на GitHub Pages: она читает фрагмент и
 // пересылает пропуск обычным адресом. Её адрес записан у клиента AniList как
-// единственный адрес возврата: он постоянный, а домашний адрес компьютера или
+// единственный адрес возврата: он постоянный, а адрес компьютера или
 // телевизора меняется от сети к сети.
 //
 // Принимает пропуск крошечный сервер внутри приложения. Слушает он не только
 // себя, но и домашнюю сеть: тогда тот же вход годится для телевизора, где
 // пароль набирают телефоном по QR-коду.
 //
-// Пропуск НИКОГДА не уезжает в разметку: своему окну отдаётся только факт
-// входа и срок. Запросы к API пойдут из Rust (пункт 2.3), поэтому в JS
-// пропуск не нужен вовсе, а чего нет в странице, того нельзя и утащить.
+// Пропуск никогда не уезжает в разметку: своему окну отдаётся только факт
+// входа и срок. Запросы к API пойдут из Rust (пункт 2.3), а чего нет в
+// странице, того нельзя и утащить.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream, UdpSocket};
@@ -30,17 +30,17 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 
 /// Порт приёмника. Постоянный, а не свободный из системы: этот же номер
-/// записан в проверке на страничке стрелочника. Случайный порт пришлось бы
-/// согласовывать при каждом входе.
+/// проверяет страничка-стрелочник. Случайный порт пришлось бы согласовывать
+/// при каждом входе.
 pub const PORT: u16 = 48513;
 
-/// Страничка-стрелочник. Ровно этот адрес должен стоять у клиента «AniMori»
+/// Страничка-стрелочник. Ровно этот адрес должен стоять у клиента AniMori
 /// в консоли разработчика AniList, иначе вход отдаст пустую страницу.
 const RELAY_URL: &str = "https://foulnike.github.io/AniMori-AniList-Toolkit/";
 
 const AUTHORIZE_BASE: &str = "https://anilist.co/api/v2/oauth/authorize";
 
-/// Пункт 2.1: клиент «AniMori». Секрета здесь нет и быть не может: неявный
+/// Пункт 2.1: клиент AniMori. Секрета здесь нет и быть не может: неявный
 /// поток его не требует, а в раздаваемом приложении секрет всё равно достанут.
 const CLIENT_ID: &str = "48513";
 
@@ -75,8 +75,8 @@ const EXPIRY_MARGIN_SECS: u64 = 60;
 const TOKEN_MIN_LEN: usize = 24;
 const TOKEN_MAX_LEN: usize = 8192;
 
-/// Приёмник поднят? Приёмник один на приложение: второй попытался бы занять
-/// тот же порт и упал бы с отказом ровно там, где человек нажал кнопку.
+/// Приёмник поднят? Он один на приложение: второй попытался бы занять тот
+/// же порт и упал бы с отказом ровно там, где человек нажал кнопку.
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Всё, что разметка знает о входе. Самого пропуска здесь нет сознательно.
@@ -104,8 +104,8 @@ pub struct LoginStart {
     pub wait_secs: u64,
 }
 
-/// Секунды эпохи Unix. Шаг назад за 1970 год в работе невозможен,
-/// поэтому при сбитых часах честнее считать срок неизвестным.
+/// Секунды эпохи Unix. Шаг назад за 1970 год в работе невозможен, поэтому при
+/// сбитых часах честнее считать срок неизвестным.
 fn now_secs() -> Option<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -220,11 +220,21 @@ fn encode(raw: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(byte as char)
             }
-            other => out.push_str(&format!("%{other:02X}")),
+            other => {
+                out.push('%');
+                out.push_str(&hex(other >> 4));
+                out.push_str(&hex(other & 0x0F));
+            }
         }
     }
 
     out
+}
+
+/// Одна шестнадцатиричная цифра верхним регистром.
+fn hex(nibble: u8) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+    (DIGITS[nibble as usize] as char).to_string()
 }
 
 /// Обратное превращение значения из адреса.
@@ -274,11 +284,16 @@ fn param(query: &str, key: &str) -> Option<String> {
 /// Адрес входа. state — куда стрелочнику вернуть пропуск: этот адрес зависит
 /// от того, кто спрашивает (свой компьютер или телефон в домашней сети).
 fn authorize_url(origin: &str) -> String {
-    format!(
-        "{AUTHORIZE_BASE}?client_id={CLIENT_ID}&response_type=token&redirect_uri={}&state={}",
-        encode(RELAY_URL),
-        encode(origin)
-    )
+    [
+        AUTHORIZE_BASE,
+        "?client_id=",
+        CLIENT_ID,
+        "&response_type=token&redirect_uri=",
+        &encode(RELAY_URL),
+        "&state=",
+        &encode(origin),
+    ]
+    .concat()
 }
 
 /// Наш адрес в домашней сети. Спрашивается у самой системы: перебирать
@@ -294,6 +309,12 @@ fn lan_ip() -> Option<Ipv4Addr> {
         IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
         _ => None,
     }
+}
+
+/// Адрес входа приёмника для заданного узла. Склейка через concat, а не
+/// шаблон: в шаблоне легко опечататься скобкой и увезти её в адрес.
+fn login_url(host: &str) -> String {
+    ["http://", host, ":", &PORT.to_string(), "/login"].concat()
 }
 
 /// Картинка QR. Уровень M — середина между размером и терпимостью к засветке
@@ -332,7 +353,7 @@ fn is_home_host(host: &str) -> bool {
 /// вернуть пропуск именно туда, откуда пришли.
 fn origin_from_host(host: &str) -> String {
     let cleaned = host.trim();
-    let fallback = format!("http://127.0.0.1:{PORT}");
+    let fallback = ["http://127.0.0.1:", &PORT.to_string()].concat();
 
     let Some((name, port)) = cleaned.rsplit_once(':') else {
         return fallback;
@@ -342,7 +363,7 @@ fn origin_from_host(host: &str) -> String {
         return fallback;
     }
 
-    format!("http://{cleaned}")
+    ["http://", cleaned].concat()
 }
 
 /// Ответ одной строкой. Свой мини-сервер вместо готового: нам нужны два
@@ -350,16 +371,23 @@ fn origin_from_host(host: &str) -> String {
 fn reply(mut stream: TcpStream, code: u16, kind: &str, body: &str) {
     let reason = match code {
         200 => "OK",
-        302 => "Found",
         404 => "Not Found",
         405 => "Method Not Allowed",
         _ => "Error",
     };
 
-    let head = format!(
-        "HTTP/1.1 {code} {reason}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-        body.as_bytes().len()
-    );
+    let head = [
+        "HTTP/1.1 ",
+        &code.to_string(),
+        " ",
+        reason,
+        "\r\nContent-Type: ",
+        kind,
+        "\r\nContent-Length: ",
+        &body.as_bytes().len().to_string(),
+        "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+    ]
+    .concat();
 
     let sent = stream
         .write_all(head.as_bytes())
@@ -373,26 +401,34 @@ fn reply(mut stream: TcpStream, code: u16, kind: &str, body: &str) {
 
 /// Отправка человека на страницу входа AniList.
 fn redirect(mut stream: TcpStream, url: &str) {
-    let head = format!(
-        "HTTP/1.1 302 Found\r\nLocation: {url}\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
-    );
+    let head = [
+        "HTTP/1.1 302 Found\r\nLocation: ",
+        url,
+        "\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+    ]
+    .concat();
 
     if let Err(e) = stream.write_all(head.as_bytes()).and_then(|_| stream.flush()) {
         log::warn!("Отправка на вход не ушла: {e}");
     }
 }
 
-/// Страница-итог для браузера или телефона.
+/// Страница-итог для браузера или телефона. Сверстана тёмной под нашу
+/// палитру, чтобы возврат не выглядел чужим.
 fn page(stream: TcpStream, title: &str, text: &str) {
-    let body = format!(
-        "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-<title>AniMori</title><style>:root{{color-scheme:dark}}\
-body{{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;\
-background:#0b1622;color:#e7edf7;font:16px/1.5 system-ui,sans-serif;text-align:center}}\
-h1{{margin:0 0 8px;font-size:22px;color:#4c9ffe}}</style></head>\
-<body><main><h1>{title}</h1><p>{text}</p></main></body></html>"
-    );
+    let body = [
+        "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>AniMori</title><style>:root{color-scheme:dark}",
+        "body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;",
+        "background:#0b1622;color:#e7edf7;font:16px/1.5 system-ui,sans-serif;text-align:center}",
+        "h1{margin:0 0 8px;font-size:22px;color:#4c9ffe}</style></head><body><main><h1>",
+        title,
+        "</h1><p>",
+        text,
+        "</p></main></body></html>",
+    ]
+    .concat();
 
     reply(stream, 200, "text/html; charset=utf-8", &body);
 }
@@ -469,7 +505,7 @@ fn serve(app: &AppHandle, stream: TcpStream) -> bool {
                     }
                     Err(e) => {
                         log::warn!("Пропуск из адреса возврата не принят: {e}");
-                        page(stream, "Не вышло", &format!("Пропуск не принят: {e}"));
+                        page(stream, "Не вышло", "Пропуск не принят. Попробуй ещё раз.");
                         false
                     }
                 },
@@ -493,13 +529,13 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
     }
 
     // Слушаем все свои адреса, а не только 127.0.0.1: иначе телефон из
-    // домашней сети до приёмника не дотянется и QR-вход стал бы невозможен.
+    // домашней сети до приёмника не дотянется и вход по QR стал бы невозможен.
     let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, PORT))
-        .map_err(|e| format!("Приёмник не занял порт {PORT}: {e}"))?;
+        .map_err(|e| ["Приёмник не занял свой порт: ", &e.to_string()].concat())?;
 
     listener
         .set_nonblocking(true)
-        .map_err(|e| format!("Приёмник не перевести в ожидание: {e}"))?;
+        .map_err(|e| ["Приёмник не перевести в ожидание: ", &e.to_string()].concat())?;
 
     RUNNING.store(true, Ordering::SeqCst);
 
@@ -534,7 +570,7 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
         RUNNING.store(false, Ordering::SeqCst);
     });
 
-    log::info!("Приёмник входа слушает порт {PORT}");
+    log::info!("Приёмник входа слушает свой порт");
     Ok(())
 }
 
@@ -544,8 +580,8 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
 pub fn animori_auth_start(app: AppHandle) -> Result<LoginStart, String> {
     start_receiver(&app)?;
 
-    let local_url = format!("http://127.0.0.1:{PORT}/login");
-    let lan_url = lan_ip().map(|ip| format!("http://{ip}:{PORT}/login"));
+    let local_url = login_url("127.0.0.1");
+    let lan_url = lan_ip().map(|ip| login_url(&ip.to_string()));
     let qr_svg = lan_url.as_deref().and_then(qr_code_svg);
 
     // Отказ браузера — не отказ входа: приёмник уже слушает, и остаётся QR
