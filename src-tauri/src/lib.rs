@@ -23,6 +23,10 @@ mod proxy_auth;
 // Пункт 2.2: вход в аккаунт AniList отдельным окном.
 mod auth;
 
+// Пункт 2.3: запросы к API из процесса оболочки. Без cfg: запрос из Rust
+// одинаков на всех платформах, в отличие от прокси для окна.
+mod anilist;
+
 // Запасной вид: настоящий сайт во втором окне.
 mod hybrid;
 
@@ -135,6 +139,7 @@ pub fn run() {
             auth::animori_auth_submit,
             auth::animori_auth_status,
             auth::animori_auth_logout,
+            anilist::animori_anilist_query,
             proxy::animori_proxy_status,
             proxy::animori_proxy_probe
         ])
