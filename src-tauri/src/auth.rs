@@ -4,45 +4,49 @@
 // только на самом AniList. Наше дело — увести туда и поймать пропуск на
 // обратном пути.
 //
-// Пропуск приезжает во фрагменте адреса (после #), а фрагмент на сервер не
-// уезжает никогда: прочитать его может лишь страница в браузере. Поэтому в
-// цепочке стоит страничка-стрелочник на GitHub Pages: она читает фрагмент и
-// пересылает пропуск обычным адресом. Её адрес записан у клиента AniList как
-// единственный адрес возврата: он постоянный, а адрес компьютера или
-// телевизора меняется от сети к сети.
+// Показывает страницу входа НАШЕ окно, а не системный браузер. Причина
+// простая: AniList из России без обхода не открывается, а браузер и телефон
+// про наш прокси ничего не знают. Своё окно живёт в том же окружении движка,
+// что и запасной вид сайта, и потому идёт через тот же прокси.
 //
-// Принимает пропуск крошечный сервер внутри приложения. Слушает он не только
-// себя, но и домашнюю сеть: тогда тот же вход годится для телевизора, где
-// пароль набирают телефоном по QR-коду.
+// Пропуск приезжает во фрагменте адреса (после #), а фрагмент на сервер не
+// уезжает никогда: прочитать его может лишь страница в браузере. Поэтому
+// адресом возврата стоит наша же страничка-стрелочник, которую отдаёт
+// приёмник внутри приложения: она читает фрагмент и пересылает пропуск
+// обычным адресом. Внешний хостинг для этого больше не нужен.
 //
 // Пропуск никогда не уезжает в разметку: своему окну отдаётся только факт
 // входа и срок. Запросы к API пойдут из Rust (пункт 2.3), а чего нет в
 // странице, того нельзя и утащить.
 
 use std::io::{BufRead, BufReader, Write};
-use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream, UdpSocket};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_opener::OpenerExt;
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_store::StoreExt;
 
 /// Порт приёмника. Постоянный, а не свободный из системы: этот же номер
-/// проверяет страничка-стрелочник. Случайный порт пришлось бы согласовывать
-/// при каждом входе.
+/// записан у клиента AniList в адресе возврата. Случайный порт пришлось бы
+/// согласовывать при каждом входе.
 pub const PORT: u16 = 48513;
 
-/// Страничка-стрелочник. Ровно этот адрес должен стоять у клиента AniMori
-/// в консоли разработчика AniList, иначе вход отдаст пустую страницу.
-const RELAY_URL: &str = "https://foulnike.github.io/AniMori-AniList-Toolkit/";
+/// Путь странички-стрелочника. Вместе с портом даёт адрес возврата, который
+/// должен стоять у клиента AniMori в консоли разработчика AniList.
+const RELAY_PATH: &str = "/relay";
 
 const AUTHORIZE_BASE: &str = "https://anilist.co/api/v2/oauth/authorize";
 
 /// Пункт 2.1: клиент AniMori. Секрета здесь нет и быть не может: неявный
 /// поток его не требует, а в раздаваемом приложении секрет всё равно достанут.
 const CLIENT_ID: &str = "48513";
+
+/// Метка окна входа. Своя, не главная и не site: разрешения выдаются окну по
+/// метке, а здесь живёт чужая страница с формой пароля, и прав ей не нужно
+/// никаких. Файла в capabilities у этой метки нет сознательно.
+const LOGIN_WINDOW_LABEL: &str = "login";
 
 /// Сколько приёмник ждёт пропуск. Пять минут человеку хватает, а открытый
 /// порт без нужды висеть не должен.
@@ -62,8 +66,8 @@ const STORE_FILE: &str = "animori-settings.json";
 const KEY_TOKEN: &str = "auth_token";
 const KEY_EXPIRES_AT: &str = "auth_expires_at";
 
-/// Событие для своего окна: пропуск приходит из браузера, то есть со стороны,
-/// и без события настройки узнали бы о входе только опросом в цикле.
+/// Событие для своего окна: пропуск приходит со стороны, из окна входа, и
+/// без события настройки узнали бы о входе только опросом в цикле.
 const EVENT_CHANGED: &str = "animori://auth-changed";
 
 /// Запас на жизнь пропуска: срок, истекающий в ближайшую минуту, считаем
@@ -88,19 +92,12 @@ pub struct AuthStatus {
     pub expires_at: Option<u64>,
 }
 
-/// Ответ на нажатие «Войти»: чем открылся браузер и что показать на экране
-/// для входа с телефона.
+/// Ответ на нажатие «Войти». Адресов здесь больше нет: человек ничего не
+/// открывает руками, окно входа поднимаем мы. Осталось только ожидание,
+/// чтобы экран сказал, сколько времени есть.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginStart {
-    /// Адрес для этого же компьютера. Им открывается браузер.
-    pub local_url: String,
-    /// Адрес в домашней сети. None — сети нет, вход с телефона невозможен.
-    pub lan_url: Option<String>,
-    /// Картинка QR для домашнего адреса. Рисуется в Rust: тащить в разметку
-    /// целую библиотеку ради одной картинки незачем.
-    pub qr_svg: Option<String>,
-    /// Сколько секунд приёмник ждёт. Экран показывает это человеку.
     pub wait_secs: u64,
 }
 
@@ -210,8 +207,8 @@ fn accept_token(
     Ok(status)
 }
 
-/// Кодирование значения для адреса. Своё, а не библиотечное: нужны ровно два
-/// значения в одной строке, и целая зависимость ради этого не оправдана.
+/// Кодирование значения для адреса. Своё, а не библиотечное: нужно ровно
+/// одно значение в одной строке, и целая зависимость ради этого не оправдана.
 fn encode(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() + raw.len() / 2);
 
@@ -281,89 +278,26 @@ fn param(query: &str, key: &str) -> Option<String> {
         .map(|(_, value)| decode(value))
 }
 
-/// Адрес входа. state — куда стрелочнику вернуть пропуск: этот адрес зависит
-/// от того, кто спрашивает (свой компьютер или телефон в домашней сети).
-fn authorize_url(origin: &str) -> String {
+/// Адрес странички-стрелочника. Ровно эта строка должна стоять у клиента
+/// AniMori в консоли разработчика AniList, иначе вход отдаст пустую страницу.
+///
+/// Склейка через concat, а не шаблон: в шаблоне легко опечататься скобкой и
+/// увезти её прямо в адрес.
+fn relay_url() -> String {
+    ["http://127.0.0.1:", &PORT.to_string(), RELAY_PATH].concat()
+}
+
+/// Адрес страницы входа AniList. state не передаётся: адрес возврата теперь
+/// один и наш собственный, и пересылать стрелочнику больше нечего.
+fn authorize_url() -> String {
     [
         AUTHORIZE_BASE,
         "?client_id=",
         CLIENT_ID,
         "&response_type=token&redirect_uri=",
-        &encode(RELAY_URL),
-        "&state=",
-        &encode(origin),
+        &encode(&relay_url()),
     ]
     .concat()
-}
-
-/// Наш адрес в домашней сети. Спрашивается у самой системы: перебирать
-/// сетевые устройства руками пришлось бы по-разному на каждой платформе.
-///
-/// Ни одного байта не отправляется: connect у UDP только выбирает исходящий
-/// путь, зато после него можно спросить, каким адресом мы в этом пути видны.
-fn lan_ip() -> Option<Ipv4Addr> {
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
-    socket.connect((Ipv4Addr::new(8, 8, 8, 8), 53)).ok()?;
-
-    match socket.local_addr().ok()?.ip() {
-        IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
-        _ => None,
-    }
-}
-
-/// Адрес входа приёмника для заданного узла. Склейка через concat, а не
-/// шаблон: в шаблоне легко опечататься скобкой и увезти её в адрес.
-fn login_url(host: &str) -> String {
-    ["http://", host, ":", &PORT.to_string(), "/login"].concat()
-}
-
-/// Картинка QR. Уровень M — середина между размером и терпимостью к засветке
-/// на экране телевизора.
-fn qr_code_svg(data: &str) -> Option<String> {
-    use qrcode::render::svg;
-    use qrcode::{EcLevel, QrCode};
-
-    let code = QrCode::with_error_correction_level(data, EcLevel::M).ok()?;
-
-    Some(
-        code.render::<svg::Color>()
-            .min_dimensions(220, 220)
-            .quiet_zone(true)
-            .dark_color(svg::Color("#0b1622"))
-            .light_color(svg::Color("#ffffff"))
-            .build(),
-    )
-}
-
-/// Домашний ли адрес. Пропуск возвращается только в свой компьютер или в
-/// домашнюю сеть: чужой адрес здесь означал бы утечку пропуска наружу.
-fn is_home_host(host: &str) -> bool {
-    if host == "localhost" {
-        return true;
-    }
-
-    match host.parse::<Ipv4Addr>() {
-        Ok(ip) => ip.is_loopback() || ip.is_private(),
-        Err(_) => false,
-    }
-}
-
-/// Каким адресом до нас дошли. Берётся из заголовка Host, потому что для
-/// своего компьютера и для телефона это разные адреса, а стрелочнику нужно
-/// вернуть пропуск именно туда, откуда пришли.
-fn origin_from_host(host: &str) -> String {
-    let cleaned = host.trim();
-    let fallback = ["http://127.0.0.1:", &PORT.to_string()].concat();
-
-    let Some((name, port)) = cleaned.rsplit_once(':') else {
-        return fallback;
-    };
-
-    if port != PORT.to_string() || !is_home_host(name) {
-        return fallback;
-    }
-
-    ["http://", cleaned].concat()
 }
 
 /// Ответ одной строкой. Свой мини-сервер вместо готового: нам нужны два
@@ -399,39 +333,39 @@ fn reply(mut stream: TcpStream, code: u16, kind: &str, body: &str) {
     }
 }
 
-/// Отправка человека на страницу входа AniList.
-fn redirect(mut stream: TcpStream, url: &str) {
-    let head = [
-        "HTTP/1.1 302 Found\r\nLocation: ",
-        url,
-        "\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-    ]
-    .concat();
-
-    if let Err(e) = stream.write_all(head.as_bytes()).and_then(|_| stream.flush()) {
-        log::warn!("Отправка на вход не ушла: {e}");
-    }
-}
-
-/// Страница-итог для браузера или телефона. Сверстана тёмной под нашу
-/// палитру, чтобы возврат не выглядел чужим.
-fn page(stream: TcpStream, title: &str, text: &str) {
+/// Общая обёртка страницы под нашу палитру: возврат не должен выглядеть
+/// чужим. Тело собирается массивом строк, поэтому фигурные скобки в стилях
+/// и в скрипте остаются одинарными и экранировать их не нужно.
+fn page(stream: TcpStream, title: &str, text: &str, script: &str) {
     let body = [
         "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">",
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
         "<title>AniMori</title><style>:root{color-scheme:dark}",
         "body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;",
         "background:#0b1622;color:#e7edf7;font:16px/1.5 system-ui,sans-serif;text-align:center}",
-        "h1{margin:0 0 8px;font-size:22px;color:#4c9ffe}</style></head><body><main><h1>",
+        "h1{margin:0 0 8px;font-size:22px;color:#4c9ffe}",
+        "code{font-size:13px;color:#8ba1bd;word-break:break-all}</style></head><body><main><h1>",
         title,
-        "</h1><p>",
+        "</h1><p id=\"text\">",
         text,
-        "</p></main></body></html>",
+        "</p></main>",
+        script,
+        "</body></html>",
     ]
     .concat();
 
     reply(stream, 200, "text/html; charset=utf-8", &body);
 }
+
+/// Страничка-стрелочник. Единственная её работа — переложить пропуск из
+/// фрагмента адреса в обычный запрос, который приёмник уже увидит.
+///
+/// Фрагмент отдаётся целиком: в нём и пропуск, и срок, и вид пропуска, а
+/// разбирать пары в скрипте страницы было бы вторым местом с той же логикой.
+const RELAY_SCRIPT: &str = "<script>(function(){var h=location.hash.slice(1);\
+var t=document.getElementById('text');\
+if(!h){t.textContent='В адресе возврата нет пропуска. Закрой окно и попробуй ещё раз.';return;}\
+location.replace('/token?'+h);})();</script>";
 
 /// Одно соединение. true — пропуск получен, приёмник больше не нужен.
 fn serve(app: &AppHandle, stream: TcpStream) -> bool {
@@ -454,22 +388,15 @@ fn serve(app: &AppHandle, stream: TcpStream) -> bool {
         return false;
     }
 
-    // Заголовки до пустой строки. Нужен ровно один — Host.
-    let mut host = String::new();
+    // Остаток заголовков вычитывается и выбрасывается: ни один из них нам
+    // больше не нужен, но недочитанный запрос мешает закрыть соединение чисто.
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
             Ok(0) => break,
+            Ok(_) if line.trim().is_empty() => break,
             Ok(_) => {}
             Err(_) => break,
-        }
-
-        if line.trim().is_empty() {
-            break;
-        }
-
-        if line.to_ascii_lowercase().starts_with("host:") {
-            host = line[5..].trim().to_string();
         }
     }
 
@@ -484,39 +411,38 @@ fn serve(app: &AppHandle, stream: TcpStream) -> bool {
 
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
 
-    match path {
-        "/" | "/login" => {
-            redirect(stream, &authorize_url(&origin_from_host(&host)));
-            false
-        }
-        "/token" => {
-            let token = param(query, "access_token");
-            let expires_in = param(query, "expires_in").and_then(|v| v.parse::<u64>().ok());
+    if path == RELAY_PATH {
+        page(
+            stream,
+            "Секунду",
+            "Заканчиваем вход…",
+            RELAY_SCRIPT,
+        );
+        return false;
+    }
 
-            match token {
-                Some(token) => match accept_token(app, &token, expires_in) {
-                    Ok(_) => {
-                        page(
-                            stream,
-                            "Готово",
-                            "Вход выполнен. Эту страницу можно закрыть и вернуться в AniMori.",
-                        );
-                        true
-                    }
-                    Err(e) => {
-                        log::warn!("Пропуск из адреса возврата не принят: {e}");
-                        page(stream, "Не вышло", "Пропуск не принят. Попробуй ещё раз.");
-                        false
-                    }
-                },
-                None => {
-                    page(stream, "Не вышло", "В адресе возврата нет пропуска.");
-                    false
-                }
-            }
+    if path != "/token" {
+        reply(stream, 404, "text/plain; charset=utf-8", "Нет такой страницы");
+        return false;
+    }
+
+    let token = param(query, "access_token");
+    let expires_in = param(query, "expires_in").and_then(|v| v.parse::<u64>().ok());
+
+    let Some(token) = token else {
+        page(stream, "Не вышло", "В адресе возврата нет пропуска.", "");
+        return false;
+    };
+
+    match accept_token(app, &token, expires_in) {
+        Ok(_) => {
+            page(stream, "Готово", "Вход выполнен, окно закроется само.", "");
+            close_login_window(app);
+            true
         }
-        _ => {
-            reply(stream, 404, "text/plain; charset=utf-8", "Нет такой страницы");
+        Err(e) => {
+            log::warn!("Пропуск из адреса возврата не принят: {e}");
+            page(stream, "Не вышло", "Пропуск не принят. Попробуй ещё раз.", "");
             false
         }
     }
@@ -528,9 +454,9 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // Слушаем все свои адреса, а не только 127.0.0.1: иначе телефон из
-    // домашней сети до приёмника не дотянется и вход по QR стал бы невозможен.
-    let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, PORT))
+    // Только 127.0.0.1: пропуск возвращается в это же приложение, и слушать
+    // домашнюю сеть незачем — открытый наружу порт был бы лишним риском.
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, PORT))
         .map_err(|e| ["Приёмник не занял свой порт: ", &e.to_string()].concat())?;
 
     listener
@@ -574,32 +500,65 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Пункт 2.2: начать вход. Поднимает приёмник, открывает браузер и отдаёт
-/// экрану QR для входа с телефона.
+/// Окно входа. Своё, а не системный браузер: движок окна работает в общем
+/// окружении приложения, где уже настроен прокси, — без него страница входа
+/// просто не откроется там, где AniList недоступен.
+///
+/// Бандла скрипта здесь нет: на форме входа ему делать нечего, а лишний код
+/// на странице с паролем — лишний риск.
+fn open_login_window(app: &AppHandle, url: &str) -> Result<(), String> {
+    // Прошлое окно закрывается: адрес входа одноразовый, и старая форма
+    // привела бы к возврату, которого уже никто не ждёт.
+    close_login_window(app);
+
+    let address = url
+        .parse()
+        .map_err(|_| "Адрес входа не разбирается".to_string())?;
+
+    let window = WebviewWindowBuilder::new(app, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
+        .title("Вход в AniList")
+        .inner_size(520.0, 720.0)
+        .min_inner_size(420.0, 560.0)
+        .resizable(true)
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Прокси с паролем спрашивает учётные данные на первом же соединении,
+    // а подписка действует только вперёд — потому сразу после создания окна.
+    #[cfg(windows)]
+    crate::proxy_auth::install(app, &window);
+
+    #[cfg(not(windows))]
+    let _ = &window;
+
+    log::info!("Открыто окно входа AniList");
+    Ok(())
+}
+
+/// Закрывает окно входа, если оно есть. Ошибка закрытия только в журнал:
+/// вход к этому моменту уже состоялся, и отказом отвечать было бы ложью.
+fn close_login_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(LOGIN_WINDOW_LABEL) {
+        if let Err(e) = window.close() {
+            log::warn!("Окно входа не закрылось: {e}");
+        }
+    }
+}
+
+/// Пункт 2.2: начать вход. Поднимает приёмник и открывает окно с формой
+/// входа AniList.
 #[tauri::command]
 pub fn animori_auth_start(app: AppHandle) -> Result<LoginStart, String> {
     start_receiver(&app)?;
-
-    let local_url = login_url("127.0.0.1");
-    let lan_url = lan_ip().map(|ip| login_url(&ip.to_string()));
-    let qr_svg = lan_url.as_deref().and_then(qr_code_svg);
-
-    // Отказ браузера — не отказ входа: приёмник уже слушает, и остаётся QR
-    // с адресом, который человек может открыть руками.
-    if let Err(e) = app.opener().open_url(local_url.clone(), None::<&str>) {
-        log::warn!("Браузер не открылся: {e}");
-    }
+    open_login_window(&app, &authorize_url())?;
 
     Ok(LoginStart {
-        local_url,
-        lan_url,
-        qr_svg,
         wait_secs: WAIT_SECS,
     })
 }
 
-/// Ручная вставка пропуска. Запасной путь на случай, когда возврат не дошёл:
-/// стрелочник тогда показывает пропуск на экране.
+/// Ручная вставка пропуска. Запасной путь на случай, когда возврат не дошёл.
 #[tauri::command]
 pub fn animori_auth_submit(
     app: AppHandle,
