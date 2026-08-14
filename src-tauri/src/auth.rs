@@ -207,34 +207,8 @@ fn accept_token(
     Ok(status)
 }
 
-/// Кодирование значения для адреса. Своё, а не библиотечное: нужно ровно
-/// одно значение в одной строке, и целая зависимость ради этого не оправдана.
-fn encode(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() + raw.len() / 2);
-
-    for byte in raw.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            other => {
-                out.push('%');
-                out.push_str(&hex(other >> 4));
-                out.push_str(&hex(other & 0x0F));
-            }
-        }
-    }
-
-    out
-}
-
-/// Одна шестнадцатиричная цифра верхним регистром.
-fn hex(nibble: u8) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
-    (DIGITS[nibble as usize] as char).to_string()
-}
-
-/// Обратное превращение значения из адреса.
+/// Обратное превращение значения из адреса. Кодирования рядом нет: в адрес
+/// входа уезжают только цифры клиента и вид пропуска.
 fn decode(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
@@ -355,15 +329,16 @@ fn page(stream: TcpStream, title: &str, text: &str, script: &str) {
     reply(stream, 200, "text/html; charset=utf-8", &body);
 }
 
-/// Страничка-стрелочник. Единственная её работа — переложить пропуск из
-/// фрагмента адреса в обычный запрос, который приёмник уже увидит.
-///
-/// Фрагмент отдаётся целиком: в нём и пропуск, и срок, и вид пропуска, а
-/// разбирать пары в скрипте страницы было бы вторым местом с той же логикой.
-const RELAY_SCRIPT: &str = "<script>(function(){var h=location.hash.slice(1);\\
-var t=document.getElementById('text');\\
-if(!h){t.textContent='В адресе возврата нет пропуска. Закрой окно и попробуй ещё раз.';return;}\\
-location.replace('/token?'+h);})();</script>";
+/// Скрипт странички-стрелочника: перекладывает фрагмент адреса целиком в
+/// обычный запрос. Склеен concat!: слеш переноса уезжал в код и ломал его.
+const RELAY_SCRIPT: &str = concat!(
+    "<script>(function(){",
+    "var t=document.getElementById('text');",
+    "var h=location.hash.slice(1);",
+    "if(!h){t.textContent='В адресе возврата нет пропуска. Закрой окно и попробуй ещё раз.';return;}",
+    "location.replace('/token?'+h);",
+    "})();</script>"
+);
 
 /// Одно соединение. true — пропуск получен, приёмник больше не нужен.
 fn serve(app: &AppHandle, stream: TcpStream) -> bool {
