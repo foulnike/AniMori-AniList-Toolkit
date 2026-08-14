@@ -14,6 +14,22 @@ export const API_WINDOW_MS = 60000
 export const API_MAX_PER_WINDOW = 60
 
 /**
+ * Начало и предохранитель для AniList: настоящий потолок придёт в заголовках.
+ * Сейчас сервис отдаёт деградированные 30, штатные 90 вернутся без наших правок.
+ */
+export const ANILIST_START_PER_WINDOW = 30
+export const ANILIST_MAX_PER_WINDOW = 90
+
+/** Ниже этого потолок не урезается: иначе серия 429 остановила бы работу вовсе. */
+export const RATE_FLOOR_PER_WINDOW = 6
+
+/**
+ * На сколько закрывается рост потолка после урезания.
+ * Ответ во время техработ может назвать прежний потолок и тут же ответить 429.
+ */
+export const CEILING_RECOVERY_MS = 300000
+
+/**
  * Отказ по исчерпанию повторов на 429.
  * Отдельный тип нужен, чтобы перебор зеркал не проглотил его своим catch.
  */
@@ -31,8 +47,12 @@ export interface RateLimiterOptions {
   minIntervalMs: number
   /** Длина скользящего окна учёта. */
   windowMs: number
-  /** Сколько запросов допускается внутри окна. */
+  /** Сколько запросов допускается внутри окна до первого ответа сервера. */
   maxPerWindow: number
+  /** Предохранитель: выше этого не подниматься, что бы ни сказал сервер. */
+  maxCeiling?: number
+  /** Считать интервал от потолка, а не брать из minIntervalMs. */
+  deriveInterval?: boolean
 }
 
 export interface RateLimiter {
@@ -45,8 +65,15 @@ export interface RateLimiter {
   isPaused: () => boolean
   /** Сколько миллисекунд осталось до конца паузы. */
   pauseRemaining: () => number
+  /**
+   * Принимает потолок, названный сервером в заголовках ответа.
+   * Выше предохранителя обрезается, а во время восстановления рост игнорируется.
+   */
+  applyCeiling: (limit: number) => void
+  /** Урезает потолок вдвое после 429 и закрывает его рост на время восстановления. */
+  reduceCeiling: () => void
   /** Снимок состояния для инспектора логгера (только чтение). */
-  stats: () => { inWindow: number; pauseRemaining: number }
+  stats: () => { inWindow: number; pauseRemaining: number; ceiling: number; intervalMs: number }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -55,8 +82,15 @@ function sleep(ms: number): Promise<void> {
 
 /** Создаёт независимый ограничитель темпа для одного источника. */
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
-  const { name, minIntervalMs, windowMs, maxPerWindow } = options
+  const { name, minIntervalMs, windowMs, maxPerWindow, maxCeiling, deriveInterval } = options
 
+  /** Выше этого потолок не поднимется даже по словам сервера. */
+  const hardMax = Math.max(maxPerWindow, maxCeiling ?? maxPerWindow)
+
+  /** Действующий потолок за окно: меняется по заголовкам и после 429. */
+  let ceiling = maxPerWindow
+  /** До этого времени потолок не повышается после урезания. */
+  let ceilingLockedUntil = 0
   /** Unix-время, до которого запросы к источнику приостановлены. */
   let pausedUntil = 0
   /** Время последней выдачи слота. */
@@ -68,6 +102,12 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
    * Ответа не ждём — иначе один медленный запрос застопорит всех остальных.
    */
   let gate: Promise<void> = Promise.resolve()
+
+  /** Действующий промежуток: при deriveInterval он размазывает потолок по окну. */
+  function currentInterval(): number {
+    if (!deriveInterval) return minIntervalMs
+    return Math.max(minIntervalMs, Math.ceil(windowMs / Math.max(1, ceiling)))
+  }
 
   async function acquireSlot(): Promise<void> {
     const previous = gate
@@ -87,10 +127,11 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         }
 
         const waits: number[] = []
+        const interval = currentInterval()
         const sinceLast = now - lastSentAt
-        if (sinceLast < minIntervalMs) waits.push(minIntervalMs - sinceLast)
+        if (sinceLast < interval) waits.push(interval - sinceLast)
         if (now < pausedUntil) waits.push(pausedUntil - now)
-        if (recentSends.length >= maxPerWindow) {
+        if (recentSends.length >= ceiling) {
           waits.push(windowMs - (now - (recentSends[0] ?? now)) + 50)
         }
 
@@ -119,10 +160,27 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     pauseRemaining(): number {
       return Math.max(0, pausedUntil - Date.now())
     },
+    applyCeiling(limit: number): void {
+      if (!Number.isFinite(limit) || limit <= 0) return
+
+      const next = Math.min(Math.floor(limit), hardMax)
+      if (next === ceiling) return
+
+      // Снижение принимаем всегда, рост — только когда восстановление закончилось.
+      if (next > ceiling && Date.now() < ceilingLockedUntil) return
+
+      ceiling = Math.max(RATE_FLOOR_PER_WINDOW, next)
+    },
+    reduceCeiling(): void {
+      ceiling = Math.max(RATE_FLOOR_PER_WINDOW, Math.floor(ceiling / 2))
+      ceilingLockedUntil = Date.now() + CEILING_RECOVERY_MS
+    },
     stats() {
       return {
         inWindow: recentSends.length,
         pauseRemaining: Math.max(0, pausedUntil - Date.now()),
+        ceiling,
+        intervalMs: currentInterval(),
       }
     },
   }
@@ -159,4 +217,17 @@ export const animeThemesLimiter = createRateLimiter({
   minIntervalMs: API_MIN_INTERVAL_MS,
   windowMs: API_WINDOW_MS,
   maxPerWindow: API_MAX_PER_WINDOW,
+})
+
+/**
+ * Единственный ограничитель с плавающим потолком: только AniList их присылает.
+ * Интервал считается от потолка: всплеск в одну секунду ловит 429 даже в лимите.
+ */
+export const anilistLimiter = createRateLimiter({
+  name: 'AniList',
+  minIntervalMs: 100,
+  windowMs: API_WINDOW_MS,
+  maxPerWindow: ANILIST_START_PER_WINDOW,
+  maxCeiling: ANILIST_MAX_PER_WINDOW,
+  deriveInterval: true,
 })
