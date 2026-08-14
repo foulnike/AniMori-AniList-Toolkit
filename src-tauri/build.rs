@@ -11,13 +11,18 @@
 //   animori_toggle_fullscreen -> allow-animori-toggle-fullscreen
 //   animori_open_external     -> allow-animori-open-external
 //   animori_open_site         -> allow-animori-open-site
+//   animori_auth_start        -> allow-animori-auth-start
+//   animori_auth_submit       -> allow-animori-auth-submit
+//   animori_auth_status       -> allow-animori-auth-status
+//   animori_auth_logout       -> allow-animori-auth-logout
 //   animori_proxy_status      -> allow-animori-proxy-status
 //   animori_proxy_probe       -> allow-animori-proxy-probe
 //   animori_page_ready        -> allow-animori-page-ready
 //
-// Разрешения разнесены по двум файлам, потому что окна два и доверия к ним разное:
+// Разрешения разнесены по трём файлам, потому что окон три и доверие к ним разное:
 //   capabilities/default.json — своё окно «main» на своей сборке;
-//   capabilities/site.json    — окно «site» с настоящим anilist.co.
+//   capabilities/site.json    — окно «site» с настоящим anilist.co;
+//   capabilities/auth.json    — окно «auth» со страницей входа AniList.
 //
 // Правило на будущее: новая команда — три места.
 //   1) invoke_handler в src/lib.rs
@@ -35,22 +40,6 @@ const COMMANDS: &[&str] = &[
     // адрес зашит в hybrid.rs, иначе команда стала бы способом открыть любой сайт
     // в окне с правами нашего приложения. Выдана только своему окну.
     "animori_open_site",
-    // Пункт 5.3.6: диагностика прокси для карточки настроек. Обе только читают:
-    // status отдаёт снимок состояния, probe открывает TCP-соединение на адрес из
-    // файла настроек. Ни та, ни другая не принимают адрес параметром — иначе скрипт
-    // чужого сайта получил бы сканер портов местной сети чужими руками.
-    "animori_proxy_status",
-    "animori_proxy_probe",
-    // Пункт 5.3.7: отметка «страница ожила» для сторожа прокси. Ничего не читает,
-    // ничего не возвращает и параметров не принимает — только поднимает флаг, по
-    // которому сторож понимает, что вмешиваться не нужно.
-    "animori_page_ready",
-];
-
-fn main() {
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
-    )
-    .expect("failed to run tauri-build")
-}
+    // Пункт 2.2: вход в AniList. start и status нужны только своему окну,
+    // submit — ещё и окну входа (страховочный скрипт со страницы возврата).
+    // Окну запасного вида не выдана ни одна из них: там живёт чужой сай

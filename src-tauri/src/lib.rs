@@ -20,6 +20,9 @@ mod adblock;
 #[cfg(windows)]
 mod proxy_auth;
 
+// Пункт 2.2: вход в аккаунт AniList отдельным окном.
+mod auth;
+
 // Запасной вид: настоящий сайт во втором окне.
 mod hybrid;
 
@@ -125,6 +128,10 @@ pub fn run() {
             animori_toggle_fullscreen,
             animori_open_external,
             animori_open_site,
+            auth::animori_auth_start,
+            auth::animori_auth_submit,
+            auth::animori_auth_status,
+            auth::animori_auth_logout,
             proxy::animori_proxy_status,
             proxy::animori_proxy_probe
         ])
@@ -138,7 +145,7 @@ pub fn run() {
             }
 
             // Прокси — СТРОГО до создания первого окна: движок читает аргументы один раз,
-            // на первом окне — и теперь первым идёт своё окно, а гибридное открывается
+            // на первом окне — и теперь первым идёт свое окно, а гибридное открывается
             // позже и пользуется тем же окружением. Здесь же заводится ProxyState,
             // без которого animori_proxy_status не ответит.
             proxy::apply_to_webview(app.handle());
