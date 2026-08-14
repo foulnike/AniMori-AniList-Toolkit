@@ -88,8 +88,11 @@ fn animori_open_external(app: AppHandle, url: String) -> Result<(), String> {
 ///
 /// Параметров нет сознательно: адрес зашит в hybrid.rs. Иначе команда стала бы
 /// способом открыть любой сайт в окне с правами нашего приложения.
+///
+/// async по той же причине, что и у входа: синхронная команда идёт в главном
+/// потоке, а создание окна там встаёт насмерть: пустая рама без движка.
 #[tauri::command]
-fn animori_open_site(app: AppHandle) -> Result<(), String> {
+async fn animori_open_site(app: AppHandle) -> Result<(), String> {
     hybrid::open(&app)
 }
 
@@ -150,7 +153,7 @@ pub fn run() {
             // без которого animori_proxy_status не ответит.
             proxy::apply_to_webview(app.handle());
 
-            // Своё окно: WebviewUrl::default() — это index.html из frontendDist, то есть
+            // Свое окно: WebviewUrl::default() — это index.html из frontendDist, то есть
             // наша сборка dist/app. Никаких скриптов инициализации здесь нет: разметка
             // своя, и стили со скриптом приходят из самого index.html.
             WebviewWindowBuilder::new(app.handle(), "main", WebviewUrl::default())
