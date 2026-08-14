@@ -71,7 +71,7 @@ const KEY_EXPIRES_AT: &str = "auth_expires_at";
 const EVENT_CHANGED: &str = "animori://auth-changed";
 
 /// Запас на жизнь пропуска: срок, истекающий в ближайшую минуту, считаем
-/// истёкшим — иначе запрос ушᄅл бы с умирающим пропуском и вернулся отказом.
+/// истёкшим — иначе запрос ушёл бы с умирающим пропуском и вернулся отказом.
 const EXPIRY_MARGIN_SECS: u64 = 60;
 
 /// Границы здравого смысла для ручной вставки: пропуск AniList — длинная
@@ -362,9 +362,9 @@ fn page(stream: TcpStream, title: &str, text: &str, script: &str) {
 ///
 /// Фрагмент отдаётся целиком: в нём и пропуск, и срок, и вид пропуска, а
 /// разбирать пары в скрипте страницы было бы вторым местом с той же логикой.
-const RELAY_SCRIPT: &str = "<script>(function(){var h=location.hash.slice(1);\
-var t=document.getElementById('text');\
-if(!h){t.textContent='В адресе возврата нет пропуска. Закрой окно и попробуй ещё раз.';return;}\
+const RELAY_SCRIPT: &str = "<script>(function(){var h=location.hash.slice(1);\\
+var t=document.getElementById('text');\\
+if(!h){t.textContent='В адресе возврата нет пропуска. Закрой окно и попробуй ещё раз.';return;}\\
 location.replace('/token?'+h);})();</script>";
 
 /// Одно соединение. true — пропуск получен, приёмник больше не нужен.
@@ -507,51 +507,44 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
 /// Бандла скрипта здесь нет: на форме входа ему делать нечего, а лишний код
 /// на странице с паролем — лишний риск.
 ///
-/// Само создание уезжает в ГЛАВНЫЙ поток, и это не придирка. Команда
-/// исполняется в рабочем потоке, а окна на Windows умеет создавать только
-/// главный: вызванный со стороны build() не возвращается, и человек видит
-/// пустую раму без движка и без меню по правой кнопке.
-///
-/// Ответ кнопке поэтому не ждёт окна: ошибка создания попадает в журнал, а не
-/// на экран настроек. За эту цену окно вообще открывается.
+/// Строится СТРОГО из рабочего потока, и это не придирка. build() ставит
+/// задачу в цикл событий и ждёт ответа; на главном потоке он ждёт сам себя,
+/// и человек видит пустую раму без движка, которую нельзя даже закрыть.
+/// Поэтому команда входа асинхронная: такие команды Tauri исполняет в рабочем
+/// потоке, а синхронные — в главном.
 fn open_login_window(app: &AppHandle, url: &str) -> Result<(), String> {
     let address: Url = url
         .parse()
         .map_err(|_| "Адрес входа не разбирается".to_string())?;
 
-    let handle = app.clone();
+    // Прошлое окно закрывается: адрес входа одноразовый, и старая форма
+    // привела бы к возврату, которого уже никто не ждёт.
+    close_login_window(app);
 
-    app.run_on_main_thread(move || {
-        // Прошлое окно закрывается: адрес входа одноразовый, и старая форма
-        // привела бы к возврату, которого уже никто не ждёт.
-        close_login_window(&handle);
+    // Отметка перед созданием: без неё не отличить «не дошло до окна» от
+    // «зависло внутри создания».
+    log::info!("Создаю окно входа AniList");
 
-        let built =
-            WebviewWindowBuilder::new(&handle, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
-                .title("Вход в AniList")
-                .inner_size(520.0, 720.0)
-                .min_inner_size(420.0, 560.0)
-                .resizable(true)
-                .center()
-                .build();
+    let window =
+        WebviewWindowBuilder::new(app, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
+            .title("Вход в AniList")
+            .inner_size(520.0, 720.0)
+            .min_inner_size(420.0, 560.0)
+            .resizable(true)
+            .center()
+            .build()
+            .map_err(|e| ["Окно входа не открылось: ", &e.to_string()].concat())?;
 
-        match built {
-            Ok(window) => {
-                // Прокси с паролем спрашивает учётные данные на первом же
-                // соединении, а подписка действует только вперёд — потому сразу
-                // после создания окна.
-                #[cfg(windows)]
-                crate::proxy_auth::install(&handle, &window);
+    // Прокси с паролем спрашивает учётные данные на первом же соединении,
+    // а подписка действует только вперёд — потому сразу после создания окна.
+    #[cfg(windows)]
+    crate::proxy_auth::install(app, &window);
 
-                #[cfg(not(windows))]
-                let _ = &window;
+    #[cfg(not(windows))]
+    let _ = &window;
 
-                log::info!("Открыто окно входа AniList");
-            }
-            Err(e) => log::error!("Окно входа не открылось: {e}"),
-        }
-    })
-    .map_err(|e| ["Окно входа не заказать: ", &e.to_string()].concat())
+    log::info!("Открыто окно входа AniList");
+    Ok(())
 }
 
 /// Закрывает окно входа, если оно есть. Ошибка закрытия только в журнал:
@@ -566,8 +559,11 @@ fn close_login_window(app: &AppHandle) {
 
 /// Пункт 2.2: начать вход. Поднимает приёмник и открывает окно с формой
 /// входа AniList.
+///
+/// async здесь несёт смысл, а не форму: синхронная команда исполняется в
+/// главном потоке, а там создание окна встаёт насмерть.
 #[tauri::command]
-pub fn animori_auth_start(app: AppHandle) -> Result<LoginStart, String> {
+pub async fn animori_auth_start(app: AppHandle) -> Result<LoginStart, String> {
     start_receiver(&app)?;
     open_login_window(&app, &authorize_url())?;
 
