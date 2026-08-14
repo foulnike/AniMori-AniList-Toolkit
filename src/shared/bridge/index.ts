@@ -15,6 +15,7 @@ export {
   type HttpMethod,
   type HttpRequestOptions,
   type HttpResponse,
+  type IAniList,
   type IBridge,
   type IClipboard,
   type IHttp,
@@ -27,8 +28,8 @@ export {
 } from './IBridge'
 
 /**
- * Мост к платформе: хранилище, сеть, буфер обмена, окно и диагностика прокси.
- * Реализацию подставляет сборка; ветвиться по Bridge.platform стоит только там,
- * где поведение действительно расходится.
+ * Мост к платформе: хранилище, сеть, запросы к AniList, буфер обмена, окно
+ * и диагностика прокси. Реализацию подставляет сборка; ветвиться по Bridge.platform
+ * стоит только там, где поведение действительно расходится.
  */
 export { platformBridge as Bridge } from '@bridge-impl'
