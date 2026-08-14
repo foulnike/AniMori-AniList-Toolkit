@@ -26,6 +26,7 @@ import {
   type IShell,
   type IStorage,
 } from './IBridge'
+import { tauriAniList } from './TauriAniList'
 import { tauriProxyDiagnostics } from './TauriProxyDiagnostics'
 
 // ==== storage ====
@@ -121,6 +122,7 @@ const tauriStorage: IStorage = {
 /**
  * Прокси НАШЕГО канала — запросов из процесса оболочки. Страницу в WebView2
  * настраивает src-tauri/src/proxy.rs. Тип выведен из fetch: имя экспорта менялось.
+ * Запросы к AniList сюда не идут: им прокси собирает anilist.rs из тех же ключей.
  */
 type TauriFetchOptions = NonNullable<Parameters<typeof tauriFetch>[1]>
 type TauriProxyOption = TauriFetchOptions['proxy']
@@ -304,6 +306,8 @@ export const tauriBridge: IBridge = {
   platform: 'tauri',
   storage: tauriStorage,
   http: tauriHttp,
+  // Реализация в TauriAniList.ts: запрос собирает Rust вместе с пропуском.
+  anilist: tauriAniList,
   clipboard: tauriClipboard,
   shell: tauriShell,
   // Реализация в TauriProxyDiagnostics.ts.
