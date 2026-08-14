@@ -1,7 +1,7 @@
 // Контракт платформы: ЧТО умеет среда, но не КАК.
 // Реализации — MonkeyBridge.ts и TauriBridge.ts, выбор между ними — index.ts.
 // Исполняемого кода здесь один класс ошибки: обе реализации бросают одно и то же.
-// Подсистемы: storage, http, clipboard, shell, proxyDiagnostics. Сверх этого ничего.
+// Подсистемы: storage, http, anilist, clipboard, shell, proxyDiagnostics. Сверх этого ничего.
 
 // ==== storage ====
 
@@ -84,6 +84,24 @@ export interface IHttp {
    * Невыполнимый режим credentials реализация обязана записать в журнал.
    */
   request(options: HttpRequestOptions): Promise<HttpResponse>
+}
+
+// ==== anilist ====
+
+/**
+ * Запросы к AniList GraphQL. Отдельно от http потому, что адрес и пропуск
+ * живут внутри реализации: в десктопе пропуск в разметку не попадает вовсе.
+ */
+export interface IAniList {
+  /**
+   * Отправляет готовое тело запроса и возвращает ответ как есть: код вне 2xx
+   * исключением не является, 429 и отказы разбирает клиент в api/anilist.ts.
+   * Отклонение — BridgeHttpError либо обычная ошибка о невыполненном входе.
+   *
+   * `useAuth` — просьба подписать запрос пропуском текущего входа. Сам пропуск
+   * вызывающему коду не передаётся и из него не принимается.
+   */
+  query(body: string, useAuth: boolean): Promise<HttpResponse>
 }
 
 // ==== clipboard ====
@@ -190,6 +208,8 @@ export interface IBridge {
   readonly platform: 'userscript' | 'tauri'
   readonly storage: IStorage
   readonly http: IHttp
+  /** Пункт 2.3: запросы к AniList. В десктопе идут из Rust вместе с пропуском. */
+  readonly anilist: IAniList
   readonly clipboard: IClipboard
   readonly shell: IShell
   readonly proxyDiagnostics: IProxyDiagnostics
