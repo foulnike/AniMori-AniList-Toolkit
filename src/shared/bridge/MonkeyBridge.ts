@@ -5,6 +5,7 @@ import {
   BridgeHttpError,
   type HttpRequestOptions,
   type HttpResponse,
+  type IAniList,
   type IBridge,
   type IClipboard,
   type IHttp,
@@ -129,6 +130,46 @@ const monkeyHttp: IHttp = {
   },
 }
 
+// ==== anilist ====
+
+/** Адрес и ключ пропуска повторяют GRAPHQL_URL и TOKEN_KEY из api/anilist.ts:
+ * импорт оттуда развернул бы зависимость моста на прикладной слой. */
+const GRAPHQL_URL = 'https://graphql.anilist.co'
+const TOKEN_KEY = 'AL_TOKEN'
+
+/** Сколько ждём ответ AniList. Совпадает с TIMEOUT_SECS в anilist.rs. */
+const ANILIST_TIMEOUT_MS = 30000
+
+const monkeyAniList: IAniList = {
+  /**
+   * Подпись берётся из хранилища здесь, а не у вызывающего: в десктопе пропуск
+   * в разметку не попадает вовсе, и контракт у двух платформ обязан быть один.
+   */
+  async query(body: string, useAuth: boolean): Promise<HttpResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    }
+
+    if (useAuth) {
+      const token = await storageGet<string>(TOKEN_KEY, '')
+      // Словесный отказ тот же, что у anilist.rs: одно сообщение на две платформы.
+      if (!token) throw new Error('Вход в AniList не выполнен')
+      headers.Authorization = `Bearer ${token}`
+    }
+
+    return await monkeyHttp.request({
+      method: 'POST',
+      url: GRAPHQL_URL,
+      headers,
+      body,
+      timeoutMs: ANILIST_TIMEOUT_MS,
+      // Куки сайта к API отношения не имеют, а чужая сессия мешала бы пропуску.
+      credentials: 'omit',
+    })
+  },
+}
+
 // ==== clipboard ====
 
 const monkeyClipboard: IClipboard = {
@@ -210,6 +251,7 @@ export const monkeyBridge: IBridge = {
   platform: 'userscript',
   storage: monkeyStorage,
   http: monkeyHttp,
+  anilist: monkeyAniList,
   clipboard: monkeyClipboard,
   shell: monkeyShell,
   proxyDiagnostics: monkeyProxyDiagnostics,
