@@ -279,23 +279,21 @@ fn param(query: &str, key: &str) -> Option<String> {
 }
 
 /// Адрес странички-стрелочника. Ровно эта строка должна стоять у клиента
-/// AniMori в консоли разработчика AniList, иначе вход отдаст пустую страницу.
-///
-/// Склейка через concat, а не шаблон: в шаблоне легко опечататься скобкой и
-/// увезти её прямо в адрес.
+/// AniMori в консоли разработчика AniList: в запросе входа адрес не передаётся,
+/// и сверить его больше негде.
 fn relay_url() -> String {
     ["http://127.0.0.1:", &PORT.to_string(), RELAY_PATH].concat()
 }
 
-/// Адрес страницы входа AniList. state не передаётся: адрес возврата теперь
-/// один и наш собственный, и пересылать стрелочнику больше нечего.
+/// Адрес страницы входа AniList. Ни redirect_uri, ни state здесь нет: в неявном
+/// потоке AniList берёт адрес возврата только из настроек клиента, а лишний
+/// параметр отвергает ответом unsupported_grant_type.
 fn authorize_url() -> String {
     [
         AUTHORIZE_BASE,
         "?client_id=",
         CLIENT_ID,
-        "&response_type=token&redirect_uri=",
-        &encode(&relay_url()),
+        "&response_type=token",
     ]
     .concat()
 }
@@ -496,7 +494,8 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
         RUNNING.store(false, Ordering::SeqCst);
     });
 
-    log::info!("Приёмник входа слушает свой порт");
+    // Адрес возврата в журнал: сверить его с консолью клиента больше негде.
+    log::info!("Приёмник входа слушает свой порт, адрес возврата: {}", relay_url());
     Ok(())
 }
 
