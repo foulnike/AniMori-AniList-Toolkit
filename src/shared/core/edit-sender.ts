@@ -2,6 +2,7 @@
 // Экраны зовут только queueEdit и сразу видят правку в памяти.
 // Отказ сервера память не откатывает: правда восстановится обновлением списка.
 
+import { anilistPauseRemaining, isAniListRateLimited } from '../api/anilist'
 import { removeEntry, saveEntry, type EditOutcome } from '../api/anilist-edit'
 import { Logger } from '../utils/logger'
 import { dropEntry, getEntry, putEntry } from './collection'
@@ -76,6 +77,13 @@ export function flushEdits(): Promise<void> {
 
   sweepInFlight = (async () => {
     try {
+      // Сервер закрыт целиком — ходить некуда, и попытки тратить не на что.
+      if (isAniListRateLimited()) {
+        const left = Math.ceil(anilistPauseRemaining() / 1000)
+        Logger('QUEUE', `Очередь правок ждёт: AniList недоступен ещё ${left}с`)
+        return
+      }
+
       const queue = await readEditQueue()
       if (!queue.length) return
 
@@ -94,6 +102,13 @@ export function flushEdits(): Promise<void> {
           await markEditAccepted(edit.id)
           Logger('QUEUE', `Правка ${edit.id} брошена: сервер её не примет`)
           continue
+        }
+
+        // Сервер отказал всем сразу: правка не виновата, попытка не считается.
+        if (isAniListRateLimited()) {
+          const left = Math.ceil(anilistPauseRemaining() / 1000)
+          Logger('QUEUE', `Отправка отложена: AniList недоступен ещё ${left}с`)
+          return
         }
 
         const attempts = await bumpEditAttempt(edit.id)
