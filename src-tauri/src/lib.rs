@@ -27,6 +27,10 @@ mod auth;
 // одинаков на всех платформах, в отличие от прокси для окна.
 mod anilist;
 
+// Пункт 2.5.2: дубль снимка в файл приватного каталога. Без cfg: работа
+// с файлом одинакова везде, а на Android она нужнее всего.
+mod files;
+
 // Запасной вид: настоящий сайт во втором окне.
 mod hybrid;
 
@@ -140,6 +144,8 @@ pub fn run() {
             auth::animori_auth_status,
             auth::animori_auth_logout,
             anilist::animori_anilist_query,
+            files::animori_file_read,
+            files::animori_file_write,
             proxy::animori_proxy_status,
             proxy::animori_proxy_probe
         ])
