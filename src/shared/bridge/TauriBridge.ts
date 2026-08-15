@@ -22,6 +22,7 @@ import {
   type HttpResponse,
   type IBridge,
   type IClipboard,
+  type IFiles,
   type IHttp,
   type IShell,
   type IStorage,
@@ -113,6 +114,39 @@ const tauriStorage: IStorage = {
     for (let round = 0; round < FLUSH_MAX_ROUNDS; round++) {
       if (pendingWrites.size === 0) return
       await Promise.all([...pendingWrites])
+    }
+  },
+}
+
+// ==== files ====
+
+/**
+ * Запасная копия снимка файлом в приватном каталоге (пункт 2.5.2). Каталог
+ * и список имён живут в files.rs: сюда пути не попадают вовсе.
+ *
+ * Ни чтение, ни запись не отклоняются: дубль — страховка, и его отказ не должен
+ * портить сохранение снимка в основное хранилище.
+ */
+const tauriFiles: IFiles = {
+  available: true,
+
+  async read(name: string): Promise<string | null> {
+    try {
+      const text = await invoke<string | null>('animori_file_read', { name })
+      return text ?? null
+    } catch (e) {
+      console.error('[AniMori] Не удалось прочитать файл приложения', name, e)
+      return null
+    }
+  },
+
+  async write(name: string, text: string): Promise<boolean> {
+    try {
+      await invoke('animori_file_write', { name, text })
+      return true
+    } catch (e) {
+      console.error('[AniMori] Не удалось записать файл приложения', name, e)
+      return false
     }
   },
 }
@@ -305,6 +339,7 @@ const tauriShell: IShell = {
 export const tauriBridge: IBridge = {
   platform: 'tauri',
   storage: tauriStorage,
+  files: tauriFiles,
   http: tauriHttp,
   // Реализация в TauriAniList.ts: запрос собирает Rust вместе с пропуском.
   anilist: tauriAniList,
