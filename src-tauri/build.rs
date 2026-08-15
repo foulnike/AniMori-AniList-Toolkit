@@ -16,6 +16,8 @@
 //   animori_auth_status       -> allow-animori-auth-status
 //   animori_auth_logout       -> allow-animori-auth-logout
 //   animori_anilist_query     -> allow-animori-anilist-query
+//   animori_file_read         -> allow-animori-file-read
+//   animori_file_write        -> allow-animori-file-write
 //   animori_proxy_status      -> allow-animori-proxy-status
 //   animori_proxy_probe       -> allow-animori-proxy-probe
 //   animori_page_ready        -> allow-animori-page-ready
@@ -54,6 +56,11 @@ const COMMANDS: &[&str] = &[
     // Выдана только своему окну: из окна с чужим сайтом она была бы способом
     // говорить с API от нашего имени и править список чужими руками.
     "animori_anilist_query",
+    // Пункт 2.5.2: дубль снимка в файл приватного каталога. Имя файла проверяется
+    // по списку в files.rs, каталог выбирает сама оболочка. Выданы только своему окну:
+    // чужому сайту нечего читать и переписывать в нашем снимке.
+    "animori_file_read",
+    "animori_file_write",
     // Пункт 5.3.6: диагностика прокси для карточки настроек. Обе только читают:
     // status отдаёт снимок состояния, probe открывает TCP-соединение на адрес из
     // файла настроек. Ни та, ни другая не принимают адрес параметром — иначе скрипт
