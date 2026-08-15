@@ -10,6 +10,12 @@ const SNAPSHOT_KEY = 'AM_SNAPSHOT'
 const QUEUE_KEY = 'AM_EDIT_QUEUE'
 
 /**
+ * Имя файла дубля снимка (пункт 2.5.2). Путь выбирает оболочка:
+ * список разрешённых имён живёт в src-tauri/src/files.rs.
+ */
+const SNAPSHOT_FILE = 'animori-snapshot.json'
+
+/**
  * Номер версии снимка. Поднимать при любом изменении формы SnapshotEntry.
  * Миграций схемы здесь нет сознательно: старый снимок дешевле выбросить.
  */
@@ -130,6 +136,37 @@ function parseSnapshot(raw: unknown): UserSnapshot {
 }
 
 /**
+ * Поднимает снимок из файла — страховка на случай почищенного хранилища.
+ * Ничего не бросает: отсутствие файла — штатный исход, а не сбой.
+ */
+async function readSnapshotFile(): Promise<UserSnapshot | null> {
+  if (!Bridge.files.available) return null
+
+  const text = await Bridge.files.read(SNAPSHOT_FILE)
+  if (!text) return null
+
+  try {
+    const snapshot = parseSnapshot(JSON.parse(text))
+    if (snapshot.entries.length === 0) return null
+    return snapshot
+  } catch (e) {
+    Logger('WARN', 'Снимок: дубль в файле не разобран', e)
+    return null
+  }
+}
+
+/**
+ * Кладёт второй экземпляр снимка в файл. Ошибки только в журнал:
+ * без дубля программа работает, а прерванная запись снимка — потеря данных.
+ */
+async function writeSnapshotFile(payload: UserSnapshot): Promise<void> {
+  if (!Bridge.files.available) return
+
+  const ok = await Bridge.files.write(SNAPSHOT_FILE, JSON.stringify(payload))
+  if (!ok) Logger('WARN', 'Снимок: дубль в файл не записан')
+}
+
+/**
  * Читает снимок с диска. Никогда не отклоняется: пустой список лучше мёртвого запуска.
  * Записи старой версии не поднимаются, а забываются — см. SNAPSHOT_VERSION.
  */
@@ -137,6 +174,22 @@ export async function readSnapshot(): Promise<UserSnapshot> {
   try {
     const raw = await Bridge.storage.get<unknown>(SNAPSHOT_KEY)
     const snapshot = parseSnapshot(raw)
+
+    // Пустое хранилище при живом дубле — почистили данные окна со стороны.
+    if (snapshot.entries.length === 0) {
+      const backup = await readSnapshotFile()
+      if (backup) {
+        Logger('DB', `Снимок поднят из файла: записей ${backup.entries.length}`)
+        // Сразу возвращаем в хранилище: иначе подъём повторится каждый запуск.
+        try {
+          await Bridge.storage.set(SNAPSHOT_KEY, backup)
+        } catch (e) {
+          Logger('WARN', 'Снимок: поднятый дубль не вернулся в хранилище', e)
+        }
+        return backup
+      }
+    }
+
     Logger('DB', `Снимок прочитан: записей ${snapshot.entries.length}`)
     return snapshot
   } catch (e) {
@@ -208,6 +261,9 @@ export async function saveSnapshotNow(): Promise<void> {
     } catch (e) {
       Logger('ERROR', 'Снимок: ошибка записи', e)
     }
+
+    // Дубль после основной записи и внутри того же звена: порядок версий важен.
+    await writeSnapshotFile(payload)
   })
 
   return writeChain
