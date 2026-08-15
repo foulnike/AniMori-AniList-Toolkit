@@ -8,6 +8,7 @@ import {
   type IAniList,
   type IBridge,
   type IClipboard,
+  type IFiles,
   type IHttp,
   type IProxyDiagnostics,
   type IShell,
@@ -40,6 +41,25 @@ const monkeyStorage: IStorage = {
     // Ждать нечего по сути: GM_setValue завершает запись до возврата управления.
     // Поэтому дефект 4.5 в браузерной сборке и не воспроизводился.
     return Promise.resolve()
+  },
+}
+
+// ==== files ====
+
+/**
+ * Файлов у юзерскрипта нет и не будет: скачивание требует жеста пользователя
+ * и не читается обратно, так что запасной копией оно быть не может.
+ * Здесь честный отказ, а не половинчатая видимость работы.
+ */
+const monkeyFiles: IFiles = {
+  available: false,
+
+  read(): Promise<string | null> {
+    return Promise.resolve(null)
+  },
+
+  write(): Promise<boolean> {
+    return Promise.resolve(false)
   },
 }
 
@@ -76,7 +96,7 @@ let anonymousWarningShown = false
 
 /**
  * Поддерживает ли менеджер анонимные запросы. В Greasemonkey 4 поле anonymous
- * игнорируется и куки всё равно уйдут; молчать об этом контракт запрещает.
+ * игнорируется и куки всё1 равно уйдут; молчать об этом контракт запрещает.
  */
 function supportsAnonymous(): boolean {
   const handler = typeof GM_info === 'object' ? (GM_info?.scriptHandler ?? '') : ''
@@ -250,6 +270,7 @@ const monkeyProxyDiagnostics: IProxyDiagnostics = {
 export const monkeyBridge: IBridge = {
   platform: 'userscript',
   storage: monkeyStorage,
+  files: monkeyFiles,
   http: monkeyHttp,
   anilist: monkeyAniList,
   clipboard: monkeyClipboard,
