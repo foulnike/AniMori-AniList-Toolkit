@@ -4,9 +4,15 @@
 
 import { eachEntry, entryCount } from './collection'
 import type { SnapshotEntry } from './snapshot'
+import type { MediaType } from './types'
 
 /** Условия отбора. Пустой набор пропускает все записи. */
 export interface EntryFilter {
+  /**
+   * Аниме или манга. Без этого условия в выдачу попадают оба типа:
+   * это верно для сводки, но не для экранов — они разделены.
+   */
+  type?: MediaType
   status?: string[]
   minScore?: number
   maxScore?: number
@@ -41,6 +47,8 @@ const EMPTY_FILTER: EntryFilter = {}
  * нужно и перебору, и подсчёту, и странице — расхождение видно как ошибка чисел.
  */
 export function matchesEntry(entry: SnapshotEntry, filter: EntryFilter = EMPTY_FILTER): boolean {
+  if (filter.type !== undefined && entry.type !== filter.type) return false
+
   if (filter.status && filter.status.length > 0) {
     if (entry.status === null || !filter.status.includes(entry.status)) return false
   }
@@ -122,10 +130,14 @@ export function findEntry(filter: EntryFilter): SnapshotEntry | undefined {
 /**
  * Сколько записей в каждом статусе. Экран списков рисует этим числа
  * у закладок. Запись без статуса попадает в UNKNOWN, а не теряется.
+ *
+ * Отбор обязательно тот же, что у строк: иначе число у закладки
+ * считало бы записи второго типа, которых на этом экране не увидеть.
  */
-export function countByStatus(): Map<string, number> {
+export function countByStatus(filter: EntryFilter = EMPTY_FILTER): Map<string, number> {
   const totals = new Map<string, number>()
   for (const entry of eachEntry()) {
+    if (!matchesEntry(entry, filter)) continue
     const key = entry.status ?? 'UNKNOWN'
     totals.set(key, (totals.get(key) ?? 0) + 1)
   }
@@ -152,6 +164,18 @@ export function totalProgress(filter: EntryFilter = EMPTY_FILTER): number {
   let total = 0
   for (const entry of eachEntry()) {
     if (matchesEntry(entry, filter)) total += entry.progress
+  }
+  return total
+}
+
+/**
+ * Сумма прочитанных томов по отбору. Отдельная величина, а не часть глав:
+ * у части записей заполнено только одно из двух полей.
+ */
+export function totalVolumes(filter: EntryFilter = EMPTY_FILTER): number {
+  let total = 0
+  for (const entry of eachEntry()) {
+    if (matchesEntry(entry, filter)) total += entry.volumes
   }
   return total
 }
