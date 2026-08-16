@@ -28,6 +28,13 @@ export interface RussianTitle {
 const memory = new Map<number, RussianTitle | null>()
 
 /**
+ * Русские названия, добытые попутно: их приносит поиск по Шикимори вместе
+ * с находкой. Держатся отдельно от карточек: описания и ссылки тут нет,
+ * и выдавать голое имя за полную карточку нельзя.
+ */
+const names = new Map<number, string>()
+
+/**
  * Чьи ключи уже искали на складе. Отдельно от памяти: отсутствие на складе
  * не значит «перевода нет», сеть спросить всё ещё стоит, а склад — уже нет.
  */
@@ -128,6 +135,18 @@ export async function getRussianTitle(
 }
 
 /**
+ * Запоминает русское название, доставшееся даром вместе с чужим ответом.
+ * Сети это не стоит ничего, и выдача поиска выходит на русском сразу,
+ * а не через двадцать запросов за тем, что уже было в руках.
+ */
+export function rememberRussianName(mediaId: number, russian: string): void {
+  const clean = russian.trim()
+  if (clean === '') return
+
+  names.set(mediaId, clean)
+}
+
+/**
  * Поднимает в память то, что уже лежит на складе. Сеть не трогается вовсе.
  * Нужно поиску по своему списку: искать на кириллице надо по всей коллекции,
  * а не только по той сотне строк, которую успели показать.
@@ -210,9 +229,18 @@ export function peekRussianTitle(mediaId: number): RussianTitle | null {
   return memory.get(mediaId) ?? null
 }
 
+/**
+ * Русское название, известное прямо сейчас: из полной карточки или попутное.
+ * Строкам списка и выдачи большего и не надо.
+ */
+export function peekRussianName(mediaId: number): string | null {
+  return memory.get(mediaId)?.russian ?? names.get(mediaId) ?? null
+}
+
 /** Забывает знание запуска. Склад не трогается: его чистят из настроек. */
 export function forgetRussianTitles(): void {
   memory.clear()
+  names.clear()
   asked.clear()
   pending.clear()
 }
