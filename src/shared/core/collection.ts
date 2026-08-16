@@ -21,6 +21,9 @@ import type { MediaType } from './types'
 /**
  * Записи по номеру тайтла. Словарь, а не массив: карточка и каждая правка
  * ищут запись по номеру, а обход тысяч записей на приставке виден глазом.
+ *
+ * Аниме и манга лежат в одной карте: номера AniList из общего пространства
+ * и столкнуться не могут, а разделяют их экраны отбором по типу.
  */
 const entries = new Map<number, SnapshotEntry>()
 
@@ -33,6 +36,12 @@ let loaded = false
 /** Идущее обновление с сервера: второй вызов ждёт первый, а не шлёт свой запрос. */
 let refreshInFlight: Promise<number> | null = null
 
+/**
+ * Какие типы тянем по умолчанию. Оба сразу: половинчатый список хуже
+ * одного лишнего запроса в минуту, а чтение манги ведут и без нашего плеера.
+ */
+const ALL_TYPES: readonly MediaType[] = ['ANIME', 'MANGA']
+
 /** Собирает снимок из памяти. Синхронно: хранилище ждёт готовый слепок. */
 function collectSnapshot(): UserSnapshot {
   return {
@@ -43,13 +52,19 @@ function collectSnapshot(): UserSnapshot {
   }
 }
 
-/** Запись списка из ответа сервера в виде, пригодном для снимка. */
-function fromServer(raw: RawListEntry): SnapshotEntry {
+/**
+ * Запись списка из ответа сервера в виде, пригодном для снимка.
+ * Тип приходит снаружи: запрос шёл по одному типу, и это надёжнее,
+ * чем вычитывать его из каждой записи ответа.
+ */
+function fromServer(raw: RawListEntry, type: MediaType): SnapshotEntry {
   return {
     mediaId: raw.mediaId,
+    type,
     status: raw.status,
     score10: raw.score,
     progress: raw.progress,
+    volumes: raw.volumes,
     updatedAt: raw.updatedAt,
     isAdult: raw.isAdult,
     romaji: raw.romaji,
@@ -70,11 +85,14 @@ function applyEdit(edit: PendingEdit): void {
   const known = entries.get(edit.mediaId)
   const entry: SnapshotEntry = known ?? {
     mediaId: edit.mediaId,
+    // Правка не знает о тайтле ничего кроме номера; ответ сервера поля поправит.
+    // Аниме выбрано подставкой сознательно: таких записей подавляющее большинство.
+    type: 'ANIME',
     status: null,
     score10: 0,
     progress: 0,
+    volumes: 0,
     updatedAt: edit.createdAt,
-    // Правка не знает о тайтле ничего кроме номера; ответ сервера имена и метку поправит.
     isAdult: false,
     romaji: null,
     english: null,
@@ -123,8 +141,13 @@ export async function initCollection(): Promise<number> {
 /**
  * Забирает список с сервера и кладёт в память. Ответ сервера — основа,
  * неотправленные правки накатываются сверху, иначе оценка «откатится» на глазах.
+ *
+ * @param types Какие типы тянуть. По умолчанию оба: экраны разделены, но список один
+ * и наполняться он должен целиком, иначе числа у закладок врут до первого визита.
  */
-export async function refreshFromServer(type: MediaType = 'ANIME'): Promise<number> {
+export async function refreshFromServer(
+  types: readonly MediaType[] = ALL_TYPES,
+): Promise<number> {
   if (refreshInFlight) return refreshInFlight
 
   refreshInFlight = (async () => {
@@ -138,11 +161,26 @@ export async function refreshFromServer(type: MediaType = 'ANIME'): Promise<numb
     }
     ownerUserId = viewer.id
 
-    const fresh = await fetchUserList(viewer.id, type)
+    // Сначала собираем все ответы и только потом трогаем память: отказ
+    // на втором типе иначе оставит половину списка вместо прежнего целого.
+    const loads: Array<{ type: MediaType; raw: RawListEntry[] }> = []
+    for (const type of types) {
+      // Последовательно, а не веером: темп AniList общий на весь ключ.
+      loads.push({ type, raw: await fetchUserList(viewer.id, type) })
+    }
 
     // Ответ замещает содержимое целиком: иначе удалённое на сайте останется навечно.
-    entries.clear()
-    for (const raw of fresh) entries.set(raw.mediaId, fromServer(raw))
+    // Чистится только то, что мы только что спросили: обновление одного типа
+    // не имеет права выносить второй.
+    for (const { type } of loads) {
+      for (const [mediaId, entry] of entries) {
+        if (entry.type === type) entries.delete(mediaId)
+      }
+    }
+
+    for (const { type, raw } of loads) {
+      for (const item of raw) entries.set(item.mediaId, fromServer(item, type))
+    }
 
     await applyPendingEdits()
     // Полная замена списка бывает редко, так что дубль в файл здесь уместен.
