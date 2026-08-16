@@ -15,13 +15,19 @@ export interface ViewerInfo {
 /**
  * Запись списка в сыром виде. Картинок здесь нет: их даёт склад.
  * Названия есть: без них свой список нечитаем без сети.
+ *
+ * Типа тайтла здесь нет сознательно: запрос идёт по одному типу сразу,
+ * и вызывающий знает его точнее, чем мы вычитали бы из ответа.
  */
 export interface RawListEntry {
   mediaId: number
   status: string | null
   /** Шкала 0..10 с десятыми долями: запрошена явно, независимо от настроек сайта. */
   score: number
+  /** Серий у аниме, глав у манги. */
   progress: number
+  /** Прочитано томов. У аниме всегда ноль — это штатно. */
+  volumes: number
   updatedAt: number
   /** Взрослый тайтл по мнению AniList. Отбор — забота экранов, не этого слоя. */
   isAdult: boolean
@@ -53,6 +59,7 @@ const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
         status
         score(format: POINT_10_DECIMAL)
         progress
+        progressVolumes
         updatedAt
         media {
           isAdult
@@ -120,6 +127,7 @@ function toEntry(value: unknown): RawListEntry | null {
     status: typeof raw.status === 'string' ? raw.status : null,
     score: num(raw.score, 0),
     progress: num(raw.progress, 0),
+    volumes: num(raw.progressVolumes, 0),
     updatedAt: num(raw.updatedAt, 0) * 1000,
     isAdult: readAdult(raw.media),
     romaji: readTitle(raw.media, 'romaji'),
