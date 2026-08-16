@@ -1,4 +1,4 @@
-// Соответствие номеров AniList и MyAnimeList и подробности одного тайтла.
+// Соответствие номеров AniList и MyAnimeList, подробности тайтла и поиск.
 // Отдельно от anilist-list.ts: там записи пользователя, здесь сами тайтлы.
 // Запрос номеров пакетный: вся коллекция поодиночке сожгла бы темп целиком.
 
@@ -8,6 +8,9 @@ import { anilistQuery } from './anilist'
 
 /** Сколько тайтлов просим одним запросом. Потолок страницы у AniList — пятьдесят. */
 const PAGE_SIZE = 50
+
+/** Сколько находок на странице поиска. Больше одного экрана всё равно не читают. */
+export const SEARCH_PAGE_SIZE = 20
 
 const MAL_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int) {
   Page(page: 1, perPage: $perPage) {
@@ -54,10 +57,54 @@ const CARD_QUERY = `query ($id: Int!) {
   }
 }`
 
+// Поиск по слову. Закладка хозяина идёт тем же запросом: в выдаче
+// надо сразу видеть, что из найденного уже в своём списке.
+const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $perPage: Int!) {
+  Page(page: $page, perPage: $perPage) {
+    pageInfo {
+      hasNextPage
+      total
+    }
+    media(search: $word, type: $type, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
+      id
+      idMal
+      type
+      format
+      status
+      episodes
+      chapters
+      seasonYear
+      averageScore
+      isAdult
+      title {
+        romaji
+        english
+        native
+      }
+      coverImage {
+        medium
+      }
+      mediaListEntry {
+        status
+        score(format: POINT_10_DECIMAL)
+        progress
+        progressVolumes
+      }
+    }
+  }
+}`
+
 interface MalReply {
   Page?: {
     media?: Array<{ id?: number; idMal?: number | null } | null> | null
   } | null
+}
+
+interface OwnReply {
+  status?: string | null
+  score?: number | null
+  progress?: number | null
+  progressVolumes?: number | null
 }
 
 interface CardReply {
@@ -79,12 +126,28 @@ interface CardReply {
     description?: string | null
     title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
     coverImage?: { large?: string | null } | null
-    mediaListEntry?: {
+    mediaListEntry?: OwnReply | null
+  } | null
+}
+
+interface SearchReply {
+  Page?: {
+    pageInfo?: { hasNextPage?: boolean | null; total?: number | null } | null
+    media?: Array<{
+      id?: number
+      idMal?: number | null
+      type?: string | null
+      format?: string | null
       status?: string | null
-      score?: number | null
-      progress?: number | null
-      progressVolumes?: number | null
-    } | null
+      episodes?: number | null
+      chapters?: number | null
+      seasonYear?: number | null
+      averageScore?: number | null
+      isAdult?: boolean | null
+      title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
+      coverImage?: { medium?: string | null } | null
+      mediaListEntry?: OwnReply | null
+    } | null> | null
   } | null
 }
 
@@ -122,6 +185,35 @@ export interface MediaCard {
   cover: string | null
   /** Запись в списке хозяина или `null`, если тайтл в списке не числится. */
   ownEntry: ServerEntry | null
+}
+
+/**
+ * Короткая выписка тайтла для выдачи поиска. Отдельный вид от карточки:
+ * в строке списка описание и жанры ни к чему, а вес ответа важен.
+ */
+export interface MediaBrief {
+  mediaId: number
+  malId: number | null
+  type: MediaType
+  format: string | null
+  status: string | null
+  episodes: number | null
+  chapters: number | null
+  seasonYear: number | null
+  averageScore: number | null
+  isAdult: boolean
+  romaji: string | null
+  english: string | null
+  native: string | null
+  cover: string | null
+  ownEntry: ServerEntry | null
+}
+
+/** Страница находок. Общего числа у AniList может и не быть — тогда `null`. */
+export interface SearchPage {
+  items: MediaBrief[]
+  hasNext: boolean
+  total: number | null
 }
 
 /**
@@ -170,6 +262,18 @@ function textOrNull(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
 }
 
+/** Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет». */
+function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
+  if (!own) return null
+
+  return {
+    status: textOrNull(own.status),
+    score10: typeof own.score === 'number' ? own.score : 0,
+    progress: typeof own.progress === 'number' ? own.progress : 0,
+    volumes: typeof own.progressVolumes === 'number' ? own.progressVolumes : 0,
+  }
+}
+
 /**
  * Подробности одного тайтла и запись хозяина в нём. Запрос идёт с ключом:
  * без входа сервер отдаст тайтл, но про запись ответит пустотой.
@@ -182,8 +286,6 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     Logger('WARN', `Карточка ${mediaId}: сервер тайтл не назвал`, reply.errors)
     return null
   }
-
-  const own = media.mediaListEntry
 
   return {
     mediaId: media.id,
@@ -208,13 +310,62 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     english: textOrNull(media.title?.english),
     native: textOrNull(media.title?.native),
     cover: textOrNull(media.coverImage?.large),
-    ownEntry: own
-      ? {
-          status: textOrNull(own.status),
-          score10: typeof own.score === 'number' ? own.score : 0,
-          progress: typeof own.progress === 'number' ? own.progress : 0,
-          volumes: typeof own.progressVolumes === 'number' ? own.progressVolumes : 0,
-        }
-      : null,
+    ownEntry: ownOrNull(media.mediaListEntry),
+  }
+}
+
+/**
+ * Поиск тайтлов по слову. Запрос с ключом, иначе в выдаче не будет видно,
+ * что тайтл уже в списке. Пустое слово сеть не тревожит.
+ */
+export async function searchMedia(
+  word: string,
+  type: MediaType,
+  page = 1,
+): Promise<SearchPage | null> {
+  const asked = word.trim()
+  if (asked === '') return { items: [], hasNext: false, total: 0 }
+
+  const reply = await anilistQuery<SearchReply>(
+    SEARCH_QUERY,
+    { word: asked, type, page, perPage: SEARCH_PAGE_SIZE },
+    true,
+  )
+
+  const found = reply.data?.Page
+  if (!found || !Array.isArray(found.media)) {
+    Logger('WARN', `Поиск «${asked}»: сервер ответил пустотой`, reply.errors)
+    return null
+  }
+
+  const items: MediaBrief[] = []
+  for (const item of found.media) {
+    if (!item || typeof item.id !== 'number') continue
+
+    items.push({
+      mediaId: item.id,
+      malId: countOrNull(item.idMal),
+      type: item.type === 'MANGA' ? 'MANGA' : 'ANIME',
+      format: textOrNull(item.format),
+      status: textOrNull(item.status),
+      episodes: countOrNull(item.episodes),
+      chapters: countOrNull(item.chapters),
+      seasonYear: countOrNull(item.seasonYear),
+      averageScore: countOrNull(item.averageScore),
+      isAdult: item.isAdult === true,
+      romaji: textOrNull(item.title?.romaji),
+      english: textOrNull(item.title?.english),
+      native: textOrNull(item.title?.native),
+      cover: textOrNull(item.coverImage?.medium),
+      ownEntry: ownOrNull(item.mediaListEntry),
+    })
+  }
+
+  Logger('API', `Поиск «${asked}»: страница ${page}, нашлось ${items.length}`)
+
+  return {
+    items,
+    hasNext: found.pageInfo?.hasNextPage === true,
+    total: countOrNull(found.pageInfo?.total),
   }
 }
