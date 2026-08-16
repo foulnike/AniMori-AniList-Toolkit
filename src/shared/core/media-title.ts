@@ -27,6 +27,12 @@ export interface RussianTitle {
  */
 const memory = new Map<number, RussianTitle | null>()
 
+/**
+ * Чьи ключи уже искали на складе. Отдельно от памяти: отсутствие на складе
+ * не значит «перевода нет», сеть спросить всё ещё стоит, а склад — уже нет.
+ */
+const asked = new Set<number>()
+
 /** Незавершённые добычи: два виджета часто просят один тайтл в один миг. */
 const pending = new Map<number, Promise<RussianTitle | null>>()
 
@@ -36,6 +42,8 @@ function cacheKey(mediaId: number): string {
 
 /** Читает карточку со склада. Протухшая запись считается отсутствующей. */
 async function readCache(mediaId: number): Promise<RussianTitle | null> {
+  asked.add(mediaId)
+
   const record = await dbGet<ShikiCacheRecord<RussianTitle>>('shikiCache', cacheKey(mediaId))
   if (!record || typeof record.ts !== 'number') return null
   if (Date.now() - record.ts > CACHE_TIME) return null
@@ -120,6 +128,35 @@ export async function getRussianTitle(
 }
 
 /**
+ * Поднимает в память то, что уже лежит на складе. Сеть не трогается вовсе.
+ * Нужно поиску по своему списку: искать на кириллице надо по всей коллекции,
+ * а не только по той сотне строк, которую успели показать.
+ */
+export async function warmRussianTitles(mediaIds: number[]): Promise<number> {
+  let warmed = 0
+
+  for (const mediaId of mediaIds) {
+    // Склад спрашивается один раз за запуск: чтений тут тысячи, и второй проход лишний.
+    if (memory.has(mediaId) || asked.has(mediaId)) continue
+
+    try {
+      const cached = await readCache(mediaId)
+      if (!cached) continue
+
+      memory.set(mediaId, cached)
+      warmed++
+    } catch (e) {
+      // Склад мог не открыться: без него поиск обеднеет, но работать обязан.
+      Logger('WARN', `Русские названия: склад не ответил по тайтлу ${mediaId}`, e)
+      return warmed
+    }
+  }
+
+  if (warmed > 0) Logger('DB', `Русские названия: со склада поднято ${warmed}`)
+  return warmed
+}
+
+/**
  * Готовит карточки для видимого куска списка. Соответствия MAL берутся пачкой,
  * а сами источники опрашиваются по очереди: веер запросов сразу упирается в темп.
  */
@@ -176,5 +213,6 @@ export function peekRussianTitle(mediaId: number): RussianTitle | null {
 /** Забывает знание запуска. Склад не трогается: его чистят из настроек. */
 export function forgetRussianTitles(): void {
   memory.clear()
+  asked.clear()
   pending.clear()
 }
