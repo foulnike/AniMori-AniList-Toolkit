@@ -13,6 +13,7 @@ import {
   readEditQueue,
   type EditKind,
   type PendingEdit,
+  type SnapshotEntry,
 } from './snapshot'
 
 /**
@@ -38,7 +39,9 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
   }
 
   const known = getEntry(mediaId)
-  const entry = known
+
+  // Тип указан явно: новое поле снимка должно ломать сборку здесь, а не живой запуск.
+  const entry: SnapshotEntry = known
     ? { ...known }
     : {
         mediaId,
@@ -46,8 +49,10 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
         score10: 0,
         progress: 0,
         updatedAt: Date.now(),
-        // Метки взрослого у правки нет; верную принесёт обновление списка.
+        // Правка знает только номер тайтла; метку и имена принесёт обновление списка.
         isAdult: false,
+        romaji: null,
+        english: null,
       }
 
   if (kind === 'status' && typeof value === 'string') entry.status = value
