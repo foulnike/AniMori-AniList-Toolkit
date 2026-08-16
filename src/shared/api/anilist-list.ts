@@ -20,6 +20,8 @@ export interface RawListEntry {
   score: number
   progress: number
   updatedAt: number
+  /** Взрослый тайтл по мнению AniList. Отбор — забота экранов, не этого слоя. */
+  isAdult: boolean
 }
 
 const VIEWER_QUERY = `query {
@@ -32,6 +34,9 @@ const VIEWER_QUERY = `query {
 /**
  * Шкала оценки задана в запросе, а не взята из настроек пользователя.
  * Иначе одна и та же запись приходила бы то как 85, то как 8.5.
+ *
+ * Признак взрослого берётся здесь же: отдельный запрос за ним означал бы
+ * второй обход всей коллекции пачками по пятьдесят тайтлов.
  */
 const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
   MediaListCollection(userId: $userId, type: $type) {
@@ -42,6 +47,9 @@ const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
         score(format: POINT_10_DECIMAL)
         progress
         updatedAt
+        media {
+          isAdult
+        }
       }
     }
   }
@@ -63,6 +71,15 @@ function num(value: unknown, fallback: number): number {
 }
 
 /**
+ * Признак взрослого из вложенного тайтла. Молчание сервера трактуется как «нет»:
+ * скрыть лишнее хуже, чем показать, — пользователь не найдёт свою же запись.
+ */
+function readAdult(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  return (value as Record<string, unknown>).isAdult === true
+}
+
+/**
  * Годна ли запись списка. Без номера тайтла запись бесполезна:
  * ни показать, ни слить с правкой её всё равно не получится.
  */
@@ -79,6 +96,7 @@ function toEntry(value: unknown): RawListEntry | null {
     score: num(raw.score, 0),
     progress: num(raw.progress, 0),
     updatedAt: num(raw.updatedAt, 0) * 1000,
+    isAdult: readAdult(raw.media),
   }
 }
 
