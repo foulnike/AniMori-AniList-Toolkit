@@ -51,6 +51,7 @@ function fromServer(raw: RawListEntry): SnapshotEntry {
     score10: raw.score,
     progress: raw.progress,
     updatedAt: raw.updatedAt,
+    isAdult: raw.isAdult,
   }
 }
 
@@ -71,6 +72,8 @@ function applyEdit(edit: PendingEdit): void {
     score10: 0,
     progress: 0,
     updatedAt: edit.createdAt,
+    // Правка не знает о тайтле ничего кроме номера; ответ сервера метку поправит.
+    isAdult: false,
   }
 
   if (edit.kind === 'status' && typeof edit.value === 'string') entry.status = edit.value
@@ -138,7 +141,8 @@ export async function refreshFromServer(type: MediaType = 'ANIME'): Promise<numb
     for (const raw of fresh) entries.set(raw.mediaId, fromServer(raw))
 
     await applyPendingEdits()
-    await saveSnapshotNow()
+    // Полная замена списка бывает редко, так что дубль в файл здесь уместен.
+    await saveSnapshotNow({ backup: true })
     Logger('DB', `Коллекция обновлена с сервера: записей ${entries.size}`)
 
     return entries.size
@@ -191,12 +195,12 @@ export function dropEntry(mediaId: number): void {
 
 /**
  * Забывает список целиком: выход из учётной записи.
- * Снимок перезаписывается сразу: чужой список не должен пережить выход.
+ * Снимок и его дубль перезаписываются сразу: чужой список не должен пережить выход.
  */
 export async function forgetCollection(): Promise<void> {
   entries.clear()
   ownerUserId = null
-  await saveSnapshotNow()
+  await saveSnapshotNow({ backup: true })
   Logger('DB', 'Коллекция забыта: снимок очищен')
 }
 
