@@ -18,8 +18,10 @@ const SNAPSHOT_FILE = 'animori-snapshot.json'
 /**
  * Номер версии снимка. Поднимать при любом изменении формы SnapshotEntry.
  * Миграций схемы здесь нет сознательно: старый снимок дешевле выбросить.
+ *
+ * 2 — добавлена метка взрослого.
  */
-export const SNAPSHOT_VERSION = 1
+export const SNAPSHOT_VERSION = 2
 
 /**
  * Задержка записи снимка: прокрутка списка меняет его десятками правок в секунду.
@@ -52,7 +54,7 @@ export interface PendingEdit {
   attempts: number
 }
 
-/** Запись списка в снимке. Названия и картинки сюда не кладём: их даёт склад. */
+/** Запись списка в снимке. Названия и картинки сюда не кладᑑм: их даёт склад. */
 export interface SnapshotEntry {
   mediaId: number
   status: string | null
@@ -61,6 +63,11 @@ export interface SnapshotEntry {
   progress: number
   /** Когда запись меняли у нас или на сервере. */
   updatedAt: number
+  /**
+   * Взрослый тайтл. Метка хранится рядом со записью, а не спрашивается при отрисовке:
+   * отбор идᑑт по всему списку сразу и без сети (пункт 3.8).
+   */
+  isAdult: boolean
 }
 
 /**
@@ -77,7 +84,7 @@ export interface UserSnapshot {
 /** Поставщик снимка: собирает его из памяти в момент записи, а не заранее. */
 type SnapshotSource = () => UserSnapshot
 
-/** Единственный хозяин снимка. Второй пишущий гарантированно затрёт чужие правки. */
+/** Единственный хозяин снимка. Второй пишущий гарантированно затрᑑт чужие правки. */
 let source: SnapshotSource | null = null
 
 /** Таймер отложенной записи снимка. */
@@ -103,6 +110,21 @@ function isEntry(value: unknown): value is SnapshotEntry {
 }
 
 /**
+ * Приводит прочитанную запись к нынешней форме. Версия уже совпала, но файл дубля
+ * мог быть правлен руками: метка взрослого без значения означает «нет».
+ */
+function normalizeEntry(entry: SnapshotEntry): SnapshotEntry {
+  return {
+    mediaId: entry.mediaId,
+    status: typeof entry.status === 'string' ? entry.status : null,
+    score10: typeof entry.score10 === 'number' ? entry.score10 : 0,
+    progress: typeof entry.progress === 'number' ? entry.progress : 0,
+    updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
+    isAdult: entry.isAdult === true,
+  }
+}
+
+/**
  * Разбирает прочитанное в снимок. Стороннее и битое отбрасывается в пустой:
  * коллекция восстановима одним запросом, а половинчатый список вводит в заблуждение.
  */
@@ -122,7 +144,7 @@ function parseSnapshot(raw: unknown): UserSnapshot {
 
   if (!Array.isArray(candidate.entries)) return emptySnapshot()
 
-  const entries = candidate.entries.filter(isEntry)
+  const entries = candidate.entries.filter(isEntry).map(normalizeEntry)
   if (entries.length !== candidate.entries.length) {
     Logger('WARN', `Снимок: отброшено ${candidate.entries.length - entries.length} битых записей`)
   }
@@ -215,6 +237,9 @@ export function ownSnapshot(next: SnapshotSource): void {
 /**
  * Планирует запись снимка. Зовётся на любое изменение списка в памяти.
  * Серия вызовов даёт одну запись: таймер взводится только свободный.
+ *
+ * Дубль в файл отложенная запись не делает: файл страхует от чистки
+ * данных окна, а хранилище к этому моменту уже записано.
  */
 export function markSnapshotDirty(): void {
   if (!source) {
@@ -233,8 +258,12 @@ export function markSnapshotDirty(): void {
 /**
  * Пишет снимок немедленно и дожидается диска. Не отклоняется.
  * Отложенная запись отменяется: иначе после ухода в фон будет вторая, пустая.
+ *
+ * @param options.backup Писать ли второй экземпляр в файл. По умолчанию нет:
+ * дубль нужен на точках сохранения и при полной замене списка, а не на каждую
+ * правку оценки — иначе прокрутка со правками бьёт в диск дважды.
  */
-export async function saveSnapshotNow(): Promise<void> {
+export async function saveSnapshotNow(options?: { backup?: boolean }): Promise<void> {
   if (saveTimer !== undefined) {
     window.clearTimeout(saveTimer)
     saveTimer = undefined
@@ -242,6 +271,8 @@ export async function saveSnapshotNow(): Promise<void> {
 
   const collect = source
   if (!collect) return
+
+  const withBackup = options?.backup === true
 
   // Сборка снимка синхронная: иначе между сбором и записью влезет правка.
   let payload: UserSnapshot
@@ -263,14 +294,14 @@ export async function saveSnapshotNow(): Promise<void> {
     }
 
     // Дубль после основной записи и внутри того же звена: порядок версий важен.
-    await writeSnapshotFile(payload)
+    if (withBackup) await writeSnapshotFile(payload)
   })
 
   return writeChain
 }
 
 /**
- * Две точки сохранения: уход в фон и закрытие окна.
+ * Две точки сохранения: уход в фон и закрытие окна. Только они пишут дубль в файл.
  * На Android процесс гасят без закрытия, так что уход в фон там единственный шанс.
  */
 function installSaveHooks(): void {
@@ -278,12 +309,12 @@ function installSaveHooks(): void {
   hooksInstalled = true
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') void saveSnapshotNow()
+    if (document.visibilityState === 'hidden') void saveSnapshotNow({ backup: true })
   })
 
   // pagehide, а не beforeunload: в WebView и на мобилках второй часто не приходит вовсе.
   window.addEventListener('pagehide', () => {
-    void saveSnapshotNow()
+    void saveSnapshotNow({ backup: true })
   })
 }
 
