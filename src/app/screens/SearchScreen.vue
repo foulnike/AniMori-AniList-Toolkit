@@ -231,6 +231,20 @@ function onSwitch(): void {
   onType()
 }
 
+/** Где искать: в своём списке или в каталоге. */
+function pickSource(next: 'own' | 'catalog'): void {
+  if (source.value === next) return
+  source.value = next
+  onSwitch()
+}
+
+/** Аниме или манга. Тип решает и запрос, и подписи закладок. */
+function pickKind(next: MediaType): void {
+  if (kind.value === next) return
+  kind.value = next
+  onSwitch()
+}
+
 function open(mediaId: number): void {
   navigate('media', { id: String(mediaId) })
 }
@@ -248,10 +262,7 @@ onMounted(() => {
         class="am-tab"
         :class="{ 'am-tab--on': source === 'own' }"
         type="button"
-        @click="
-          source = 'own'
-          onSwitch()
-        "
+        @click="pickSource('own')"
       >
         Свой список
       </button>
@@ -259,10 +270,7 @@ onMounted(() => {
         class="am-tab"
         :class="{ 'am-tab--on': source === 'catalog' }"
         type="button"
-        @click="
-          source = 'catalog'
-          onSwitch()
-        "
+        @click="pickSource('catalog')"
       >
         Каталог AniList
       </button>
@@ -271,10 +279,7 @@ onMounted(() => {
         class="am-tab"
         :class="{ 'am-tab--on': kind === 'ANIME' }"
         type="button"
-        @click="
-          kind = 'ANIME'
-          onSwitch()
-        "
+        @click="pickKind('ANIME')"
       >
         Аниме
       </button>
@@ -282,10 +287,7 @@ onMounted(() => {
         class="am-tab"
         :class="{ 'am-tab--on': kind === 'MANGA' }"
         type="button"
-        @click="
-          kind = 'MANGA'
-          onSwitch()
-        "
+        @click="pickKind('MANGA')"
       >
         Манга
       </button>
@@ -341,7 +343,12 @@ onMounted(() => {
     </div>
 
     <div v-if="source === 'catalog' && hasNext" class="am-foot">
-      <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="searchCatalog(true)">
+      <button
+        class="am-btn am-btn--ghost"
+        type="button"
+        :disabled="busy"
+        @click="searchCatalog(true)"
+      >
         Ещё {{ SEARCH_PAGE_SIZE }}
       </button>
     </div>
