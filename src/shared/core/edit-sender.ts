@@ -45,11 +45,13 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
     ? { ...known }
     : {
         mediaId,
+        // Правка знает только номер тайтла; тип, метку и имена принесёт обновление списка.
+        type: 'ANIME',
         status: null,
         score10: 0,
         progress: 0,
+        volumes: 0,
         updatedAt: Date.now(),
-        // Правка знает только номер тайтла; метку и имена принесёт обновление списка.
         isAdult: false,
         romaji: null,
         english: null,
