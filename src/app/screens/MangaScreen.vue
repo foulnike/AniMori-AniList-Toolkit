@@ -66,9 +66,13 @@ function redraw(): void {
   counts.value = countByStatus({ type: 'MANGA' })
   total.value = countEntries({ type: 'MANGA' })
 
-  const picked = selectEntries({ type: 'MANGA', status: [activeStatus.value] }, { key: 'updated' }, {
-    limit: PAGE_LIMIT,
-  })
+  const picked = selectEntries(
+    { type: 'MANGA', status: [activeStatus.value] },
+    { key: 'updated' },
+    {
+      limit: PAGE_LIMIT,
+    },
+  )
 
   rows.value = picked.map((entry) => ({
     mediaId: entry.mediaId,
