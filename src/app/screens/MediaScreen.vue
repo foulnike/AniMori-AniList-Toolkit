@@ -51,9 +51,7 @@ const mediaId = computed<number>(() => {
 })
 
 /** Закладки под тип тайтла. До ответа сервера считаем тайтл аниме. */
-const statuses = computed(() =>
-  card.value?.type === 'MANGA' ? MANGA_STATUSES : ANIME_STATUSES,
-)
+const statuses = computed(() => (card.value?.type === 'MANGA' ? MANGA_STATUSES : ANIME_STATUSES))
 
 /** Своя запись из памяти. Счётчик правок в зависимостях не случаен: */
 /** мап коллекции вне реактивности Vue, сам он пересчёт не закажет. */
