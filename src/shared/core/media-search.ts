@@ -7,7 +7,7 @@ import { searchMedia, type SearchPage } from '../api/anilist-media'
 import { hasCyrillic, searchShikimori } from '../api/shikimori-search'
 import { Logger } from '../utils/logger'
 import { selectEntries } from './collection-view'
-import { peekRussianTitle, warmRussianTitles } from './media-title'
+import { peekRussianName, rememberRussianName, warmRussianTitles } from './media-title'
 import type { SnapshotEntry } from './snapshot'
 import type { MediaType } from './types'
 
@@ -58,7 +58,7 @@ export async function searchOwnList(
   const found: SnapshotEntry[] = []
 
   for (const entry of all) {
-    const russian = peekRussianTitle(entry.mediaId)?.russian ?? null
+    const russian = peekRussianName(entry.mediaId)
     if (!fits(russian, needle) && !fits(entry.romaji, needle) && !fits(entry.english, needle)) {
       continue
     }
@@ -96,10 +96,26 @@ export async function searchCatalog(
     return { items: [], hasNext: false, total: 0 }
   }
 
+  // Русские названия приехали вместе с находками: связь держится по номеру MAL.
+  const russianByMal = new Map<number, string>()
+  for (const row of found) {
+    if (typeof row.russian === 'string' && row.russian !== '') {
+      russianByMal.set(row.malId, row.russian)
+    }
+  }
+
   const items = await fetchBriefsByMal(
     found.map((row) => row.malId),
     type,
   )
+
+  // Имя уже в руках — ходить за ним в сеть по второму кругу было бы глупо.
+  for (const item of items) {
+    if (item.malId === null) continue
+
+    const russian = russianByMal.get(item.malId)
+    if (russian) rememberRussianName(item.mediaId, russian)
+  }
 
   Logger(
     'API',
