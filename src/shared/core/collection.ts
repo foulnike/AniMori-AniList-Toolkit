@@ -1,6 +1,6 @@
 // Хозяин коллекции: единственный источник правды о списке пользователя.
 // Записи держатся в памяти, на диск уходят снимком из snapshot.ts.
-// Названия и картинки сюда не попадают: это забота склада в db.ts.
+// Картинки и русские названия сюда не попадают: это забота склада в db.ts.
 
 import { fetchUserList, fetchViewer, type RawListEntry } from '../api/anilist-list'
 import { Logger } from '../utils/logger'
@@ -52,6 +52,8 @@ function fromServer(raw: RawListEntry): SnapshotEntry {
     progress: raw.progress,
     updatedAt: raw.updatedAt,
     isAdult: raw.isAdult,
+    romaji: raw.romaji,
+    english: raw.english,
   }
 }
 
@@ -72,8 +74,10 @@ function applyEdit(edit: PendingEdit): void {
     score10: 0,
     progress: 0,
     updatedAt: edit.createdAt,
-    // Правка не знает о тайтле ничего кроме номера; ответ сервера метку поправит.
+    // Правка не знает о тайтле ничего кроме номера; ответ сервера имена и метку поправит.
     isAdult: false,
+    romaji: null,
+    english: null,
   }
 
   if (edit.kind === 'status' && typeof edit.value === 'string') entry.status = edit.value
