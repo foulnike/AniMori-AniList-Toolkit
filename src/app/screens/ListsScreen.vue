@@ -5,7 +5,7 @@
 // Манга живёт на своём экране: статусы те же, но подписи и столбцы другие.
 import { onMounted, ref } from 'vue'
 
-import { entryCount, initCollection, refreshFromServer } from '@/core/collection'
+import { initCollection, refreshFromServer } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
 import { startEditSender } from '@/core/edit-sender'
 import { peekRussianTitle, prefetchRussianTitles } from '@/core/media-title'
@@ -91,9 +91,11 @@ function redraw(): void {
   counts.value = countByStatus({ type: 'ANIME' })
   total.value = countEntries({ type: 'ANIME' })
 
-  const picked = selectEntries({ type: 'ANIME', status: [activeStatus.value] }, { key: 'updated' }, {
-    limit: PAGE_LIMIT,
-  })
+  const picked = selectEntries(
+    { type: 'ANIME', status: [activeStatus.value] },
+    { key: 'updated' },
+    { limit: PAGE_LIMIT },
+  )
 
   rows.value = picked.map((entry) => ({
     mediaId: entry.mediaId,
