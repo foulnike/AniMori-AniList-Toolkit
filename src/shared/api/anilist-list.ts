@@ -12,7 +12,10 @@ export interface ViewerInfo {
   name: string
 }
 
-/** Запись списка в сыром виде. Названий и картинок здесь нет: их даёт склад. */
+/**
+ * Запись списка в сыром виде. Картинок здесь нет: их даёт склад.
+ * Названия есть: без них свой список нечитаем без сети.
+ */
 export interface RawListEntry {
   mediaId: number
   status: string | null
@@ -22,6 +25,10 @@ export interface RawListEntry {
   updatedAt: number
   /** Взрослый тайтл по мнению AniList. Отбор — забота экранов, не этого слоя. */
   isAdult: boolean
+  /** Название латиницей. Есть почти всегда и служит опорой показа. */
+  romaji: string | null
+  /** Английское название. У многих тайтлов отсутствует. */
+  english: string | null
 }
 
 const VIEWER_QUERY = `query {
@@ -35,8 +42,8 @@ const VIEWER_QUERY = `query {
  * Шкала оценки задана в запросе, а не взята из настроек пользователя.
  * Иначе одна и та же запись приходила бы то как 85, то как 8.5.
  *
- * Признак взрослого берётся здесь же: отдельный запрос за ним означал бы
- * второй обход всей коллекции пачками по пятьдесят тайтлов.
+ * Названия и признак взрослого берутся здесь же: отдельный запрос за ними
+ * означал бы второй обход всей коллекции пачками по пятьдесят тайтлов.
  */
 const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
   MediaListCollection(userId: $userId, type: $type) {
@@ -49,6 +56,10 @@ const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
         updatedAt
         media {
           isAdult
+          title {
+            romaji
+            english
+          }
         }
       }
     }
@@ -80,6 +91,20 @@ function readAdult(value: unknown): boolean {
 }
 
 /**
+ * Название из вложенного тайтла. Пустая строка равносильна отсутствию:
+ * показывать пустоту хуже, чем честно взять следующий вариант названия.
+ */
+function readTitle(value: unknown, key: 'romaji' | 'english'): string | null {
+  if (typeof value !== 'object' || value === null) return null
+
+  const title = (value as Record<string, unknown>).title
+  if (typeof title !== 'object' || title === null) return null
+
+  const text = (title as Record<string, unknown>)[key]
+  return typeof text === 'string' && text.length > 0 ? text : null
+}
+
+/**
  * Годна ли запись списка. Без номера тайтла запись бесполезна:
  * ни показать, ни слить с правкой её всё равно не получится.
  */
@@ -97,6 +122,8 @@ function toEntry(value: unknown): RawListEntry | null {
     progress: num(raw.progress, 0),
     updatedAt: num(raw.updatedAt, 0) * 1000,
     isAdult: readAdult(raw.media),
+    romaji: readTitle(raw.media, 'romaji'),
+    english: readTitle(raw.media, 'english'),
   }
 }
 
