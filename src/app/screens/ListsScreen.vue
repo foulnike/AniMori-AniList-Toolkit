@@ -1,24 +1,196 @@
 <script setup lang="ts">
-// Пункт 3.2: заглушка списков. Набор номеров здесь не данные,
-// а проверка перехода с параметром в адресе. Настоящие списки — пункт 3.3.
+// Пункт 3.3: списки на живой коллекции. Первый экран, который зовёт слой данных
+// раздела 2: подъём снимка, обновление с сервера, запуск отправщика правок.
+// Правка оценок и статусов — на карточке (3.4), отборы и сортировки — 3.5.
+import { onMounted, ref } from 'vue'
+
+import { entryCount, initCollection, refreshFromServer } from '@/core/collection'
+import { countByStatus, selectEntries } from '@/core/collection-view'
+import { startEditSender } from '@/core/edit-sender'
+import { peekRussianTitle, prefetchRussianTitles } from '@/core/media-title'
+import { Logger } from '@/utils/logger'
+
 import { navigate } from '../router'
 
-const SAMPLE_IDS: readonly string[] = ['1', '21', '5114']
+/**
+ * Сколько записей рисуется за раз. Полный список бывает на тысячи записей,
+ * а каждая требует русского названия — то есть обращения к чужому сервису.
+ * Добор остатка по прокрутке — пункт 3.5, вместе с отборами.
+ */
+const PAGE_LIMIT = 100
+
+/**
+ * Закладки по статусам AniList. Порядок как в привычном списке на сайте:
+ * человек ищет глазами туда, где привык.
+ */
+const STATUS_TABS: ReadonlyArray<{ key: string; title: string }> = [
+  { key: 'CURRENT', title: 'Смотрю' },
+  { key: 'REPEATING', title: 'Пересматриваю' },
+  { key: 'PLANNING', title: 'В планах' },
+  { key: 'COMPLETED', title: 'Просмотрено' },
+  { key: 'PAUSED', title: 'Отложено' },
+  { key: 'DROPPED', title: 'Брошено' },
+]
+
+/** Строка списка в виде, готовом к отрисовке. Название может быть ещё не добыто. */
+interface Row {
+  mediaId: number
+  score10: number
+  progress: number
+  title: string | null
+}
+
+const busy = ref(true)
+const trouble = ref('')
+const activeStatus = ref<string>('CURRENT')
+const rows = ref<Row[]>([])
+const counts = ref<Map<string, number>>(new Map())
+const total = ref(0)
+
+function describe(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * Снимает кусок коллекции в свои строки. Память коллекции не реактивна
+ * сознательно, и ссылки на её записи в разметку не передаются: отрисовка
+ * должна меняться по событиям экрана, а не незаметно из-под рук.
+ */
+function redraw(): void {
+  counts.value = countByStatus()
+  total.value = entryCount()
+
+  const picked = selectEntries({ status: [activeStatus.value] }, { key: 'updated' }, {
+    limit: PAGE_LIMIT,
+  })
+
+  rows.value = picked.map((entry) => ({
+    mediaId: entry.mediaId,
+    score10: entry.score10,
+    progress: entry.progress,
+    title: peekRussianTitle(entry.mediaId)?.russian ?? null,
+  }))
+}
+
+/**
+ * Добирает русские названия для показанных строк. Ошибка здесь не стопорит экран:
+ * без перевода строка покажет номер, а список останется пригодным.
+ */
+async function fillTitles(): Promise<void> {
+  const wanted = rows.value.filter((row) => row.title === null).map((row) => row.mediaId)
+  if (wanted.length === 0) return
+
+  try {
+    await prefetchRussianTitles(wanted)
+    redraw()
+  } catch (e) {
+    Logger('WARN', 'Списки: названия добрать не вышло', e)
+  }
+}
+
+/** Переключение закладки. Сети не требует: вся коллекция уже в памяти. */
+function pick(status: string): void {
+  if (activeStatus.value === status) return
+
+  activeStatus.value = status
+  redraw()
+  void fillTitles()
+}
+
+/** Переход на карточку. Номер идёт строкой: в адресе окна чисел нет. */
+function open(mediaId: number): void {
+  navigate('media', { id: String(mediaId) })
+}
+
+/** Оценка для глаз: ноль у AniList значит «оценки нет», а не «ноль баллов». */
+function scoreText(score10: number): string {
+  return score10 > 0 ? score10.toFixed(1) : '—'
+}
+
+/** Забирает список с сервера. Отказ сети показанные данные не стирает. */
+async function pull(): Promise<void> {
+  busy.value = true
+  trouble.value = ''
+
+  try {
+    await refreshFromServer()
+    redraw()
+    await fillTitles()
+  } catch (e) {
+    trouble.value = describe(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+function onRefresh(): void {
+  void pull()
+}
+
+onMounted(() => {
+  void (async () => {
+    try {
+      // Сначала снимок и отрисовка, потом сеть: список виден даже при лежащем API.
+      await initCollection()
+      redraw()
+      void fillTitles()
+
+      // Отправщик запускается только после подъёма: до него в памяти править нечего.
+      startEditSender()
+    } catch (e) {
+      trouble.value = describe(e)
+      busy.value = false
+      return
+    }
+
+    await pull()
+  })()
+})
 </script>
 
 <template>
   <section class="am-screen">
-    <p class="am-screen__hint">
-      Здесь будут списки с AniList (пункт 3.3). Кнопки ниже проверяют только переход на карточку с
-      номером в адресе.
+    <div class="am-tabs">
+      <button
+        v-for="tab in STATUS_TABS"
+        :key="tab.key"
+        class="am-tab"
+        :class="{ 'am-tab--on': tab.key === activeStatus }"
+        type="button"
+        @click="pick(tab.key)"
+      >
+        {{ tab.title }}
+        <span class="am-tab__num">{{ counts.get(tab.key) ?? 0 }}</span>
+      </button>
+    </div>
+
+    <p v-if="trouble" class="am-screen__error">{{ trouble }}</p>
+
+    <p v-if="busy && total === 0" class="am-screen__hint">Список загружается…</p>
+    <p v-else-if="total === 0" class="am-screen__hint">
+      Списка пока нет. Войдите в AniList на экране настроек и обновите список.
     </p>
-    <ul class="am-screen__rows">
-      <li v-for="id in SAMPLE_IDS" :key="id">
-        <button class="am-screen__row" type="button" @click="navigate('media', { id })">
-          Тайтл № {{ id }}
+    <p v-else-if="rows.length === 0" class="am-screen__hint">В этой закладке записей нет.</p>
+
+    <ul v-else class="am-rows">
+      <li v-for="row in rows" :key="row.mediaId" class="am-row">
+        <button class="am-row__open" type="button" @click="open(row.mediaId)">
+          {{ row.title ?? `Тайтл #${row.mediaId}` }}
         </button>
+        <span class="am-row__num" title="Оценка">{{ scoreText(row.score10) }}</span>
+        <span class="am-row__num" title="Просмотрено частей">{{ row.progress }}</span>
       </li>
     </ul>
+
+    <div class="am-foot">
+      <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onRefresh">
+        Обновить с сервера
+      </button>
+      <span class="am-screen__meta">
+        Всего записей {{ total }} · показано {{ rows.length }} из
+        {{ counts.get(activeStatus) ?? 0 }}
+      </span>
+    </div>
   </section>
 </template>
 
@@ -26,8 +198,9 @@ const SAMPLE_IDS: readonly string[] = ['1', '21', '5114']
 .am-screen {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   align-items: flex-start;
+  width: 100%;
 }
 
 .am-screen__hint {
@@ -36,28 +209,128 @@ const SAMPLE_IDS: readonly string[] = ['1', '21', '5114']
   color: var(--am-dim);
 }
 
-.am-screen__rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
+.am-screen__meta {
+  font-size: 13px;
+  color: var(--am-dim);
 }
 
-.am-screen__row {
-  width: 260px;
-  padding: 9px 12px;
+.am-screen__error {
+  margin: 0;
+  font-size: 13px;
+  color: #ff8a8a;
+}
+
+.am-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.am-tab {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 12px;
   font: inherit;
   color: var(--am-text);
-  text-align: left;
   cursor: pointer;
-  background: var(--am-panel);
+  background: transparent;
   border: 1px solid var(--am-line);
   border-radius: 8px;
 }
 
-.am-screen__row:hover {
+.am-tab:hover {
+  background: var(--am-hover);
+}
+
+.am-tab--on {
+  background: var(--am-panel);
+  border-color: var(--am-accent);
+}
+
+.am-tab__num {
+  font-size: 12px;
+  color: var(--am-dim);
+}
+
+.am-rows {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 720px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--am-panel);
+  border: 1px solid var(--am-line);
+  border-radius: 12px;
+}
+
+.am-row {
+  display: grid;
+  grid-template-columns: 1fr 52px 52px;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--am-line);
+}
+
+.am-row:last-child {
+  border-bottom: none;
+}
+
+.am-row__open {
+  padding: 6px 0;
+  overflow: hidden;
+  font: inherit;
+  color: var(--am-text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.am-row__open:hover {
+  color: var(--am-accent);
+}
+
+.am-row__num {
+  font-size: 13px;
+  color: var(--am-dim);
+  text-align: right;
+}
+
+.am-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.am-btn {
+  padding: 8px 14px;
+  font: inherit;
+  color: #06121f;
+  cursor: pointer;
+  background: var(--am-accent);
+  border: 1px solid var(--am-accent);
+  border-radius: 8px;
+}
+
+.am-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.am-btn--ghost {
+  color: var(--am-text);
+  background: transparent;
+  border-color: var(--am-line);
+}
+
+.am-btn--ghost:hover:not(:disabled) {
   background: var(--am-hover);
 }
 </style>
