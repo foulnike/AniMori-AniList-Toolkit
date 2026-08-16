@@ -4,6 +4,7 @@
 
 import { Bridge } from '@/bridge'
 import { Logger } from '../utils/logger'
+import type { MediaType } from './types'
 
 /** Ключи хранилища моста. Приставка AM_ занята только нашими записями. */
 const SNAPSHOT_KEY = 'AM_SNAPSHOT'
@@ -21,8 +22,9 @@ const SNAPSHOT_FILE = 'animori-snapshot.json'
  *
  * 2 — добавлена метка взрослого.
  * 3 — добавлены названия тайтла.
+ * 4 — добавлены тип тайтла и прочитанные тома.
  */
-export const SNAPSHOT_VERSION = 3
+export const SNAPSHOT_VERSION = 4
 
 /**
  * Задержка записи снимка: прокрутка списка меняет его десятками правок в секунду.
@@ -58,10 +60,21 @@ export interface PendingEdit {
 /** Запись списка в снимке. Картинки сюда не кладём: их даёт склад. */
 export interface SnapshotEntry {
   mediaId: number
+  /**
+   * Аниме или манга. Хранится в записи, а не в двух разных снимках:
+   * номера AniList из общего пространства и столкнуться в одной карте не могут.
+   */
+  type: MediaType
   status: string | null
   /** Оценка 0..10, как в остальном ядре. */
   score10: number
+  /** Серий у аниме, глав у манги. */
   progress: number
+  /**
+   * Прочитано томов. Отдельное поле, а не пересчёт глав: тома и главы
+   * у AniList независимы и часто заполнено только одно из двух. У аниме ноль.
+   */
+  volumes: number
   /** Когда запись меняли у нас или на сервере. */
   updatedAt: number
   /**
@@ -124,15 +137,25 @@ function text(value: unknown): string | null {
 }
 
 /**
+ * Тип тайтла из прочитанного. Неизвестное считается аниме:
+ * таких записей подавляющее большинство, и первое же обновление исправит ошибку.
+ */
+function mediaType(value: unknown): MediaType {
+  return value === 'MANGA' ? 'MANGA' : 'ANIME'
+}
+
+/**
  * Приводит прочитанную запись к нынешней форме. Версия уже совпала, но файл дубля
  * мог быть правлен руками: метка взрослого без значения означает «нет».
  */
 function normalizeEntry(entry: SnapshotEntry): SnapshotEntry {
   return {
     mediaId: entry.mediaId,
+    type: mediaType(entry.type),
     status: typeof entry.status === 'string' ? entry.status : null,
     score10: typeof entry.score10 === 'number' ? entry.score10 : 0,
     progress: typeof entry.progress === 'number' ? entry.progress : 0,
+    volumes: typeof entry.volumes === 'number' ? entry.volumes : 0,
     updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
     isAdult: entry.isAdult === true,
     romaji: text(entry.romaji),
