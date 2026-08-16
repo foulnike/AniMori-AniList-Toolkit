@@ -19,6 +19,13 @@ export interface EntryFilter {
   onlyRated?: boolean
   onlyStarted?: boolean
   updatedAfter?: number
+  /**
+   * Слово для поиска по названиям из снимка: ромадзи и английское.
+   * Регистр не важен. Русских названий в памяти списка нет.
+   */
+  word?: string
+  /** Только взрослое или только остальное. Без условия — всё подряд. */
+  isAdult?: boolean
 }
 
 /** По какому полю сортировать. Названий в памяти нет, по ним сортирует экран. */
@@ -42,6 +49,12 @@ export interface EntryPage {
 /** Пустой отбор одним образцом: сравнение с ним даёт быстрый путь подсчёта. */
 const EMPTY_FILTER: EntryFilter = {}
 
+/** Есть ли слово в названии. Пустое название совпадением не считается. */
+function hasWord(title: string | null | undefined, word: string): boolean {
+  if (typeof title !== 'string' || title === '') return false
+  return title.toLowerCase().includes(word)
+}
+
 /**
  * Проверяет одну запись. Отдельная функция: одно и то же условие
  * нужно и перебору, и подсчёту, и странице — расхождение видно как ошибка чисел.
@@ -60,6 +73,13 @@ export function matchesEntry(entry: SnapshotEntry, filter: EntryFilter = EMPTY_F
   if (typeof filter.minScore === 'number' && entry.score10 < filter.minScore) return false
   if (typeof filter.maxScore === 'number' && entry.score10 > filter.maxScore) return false
   if (typeof filter.updatedAfter === 'number' && entry.updatedAt < filter.updatedAfter) return false
+
+  if (filter.isAdult !== undefined && entry.isAdult !== filter.isAdult) return false
+
+  if (typeof filter.word === 'string' && filter.word !== '') {
+    const word = filter.word.toLowerCase()
+    if (!hasWord(entry.romaji, word) && !hasWord(entry.english, word)) return false
+  }
 
   return true
 }
