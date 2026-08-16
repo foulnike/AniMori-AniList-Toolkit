@@ -20,6 +20,13 @@ import { navigate } from '../router'
 const PAGE_LIMIT = 100
 
 /**
+ * По скольку тайтлов просить названия за один заход. Источники отвечают
+ * по одному тайтлу и с выдержкой темпа, поэтому пачка — единица показа:
+ * после каждой список перерисовывается, и ждать всё целиком не приходится.
+ */
+const TITLE_CHUNK = 10
+
+/**
  * Закладки по статусам AniList. Порядок как в привычном списке на сайте:
  * человек ищет глазами туда, где привык.
  */
@@ -40,12 +47,26 @@ interface Row {
   title: string | null
 }
 
+/** Идёт ли работа со списком: подъём снимка или ответ сервера. */
 const busy = ref(true)
+
+/**
+ * Идᑑт ли добор названий. Флаг отдельный сознательно: названия берутся
+ * из чужих сервисов минутами и не должны держать кнопки самого списка.
+ */
+const titlesBusy = ref(false)
+
 const trouble = ref('')
 const activeStatus = ref<string>('CURRENT')
 const rows = ref<Row[]>([])
 const counts = ref<Map<string, number>>(new Map())
 const total = ref(0)
+
+/**
+ * Номер идущего добора названий. Смена закладки увеличивает его,
+ * и старый цикл видит, что его работа больше не нужна.
+ */
+let titleRun = 0
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -73,18 +94,31 @@ function redraw(): void {
 }
 
 /**
- * Добирает русские названия для показанных строк. Ошибка здесь не стопорит экран:
- * без перевода строка покажет номер, а список останется пригодным.
+ * Добирает русские названия для показанных строк пачками.
+ * Ошибка здесь не стопорит экран: без перевода строка покажет номер,
+ * а список останется пригодным.
  */
 async function fillTitles(): Promise<void> {
+  const run = ++titleRun
   const wanted = rows.value.filter((row) => row.title === null).map((row) => row.mediaId)
   if (wanted.length === 0) return
 
+  titlesBusy.value = true
+
   try {
-    await prefetchRussianTitles(wanted)
-    redraw()
+    for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
+      // Закладку успели сменить: остаток пачек этому показу уже не нужен.
+      if (run !== titleRun) return
+
+      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK))
+      if (run !== titleRun) return
+
+      redraw()
+    }
   } catch (e) {
     Logger('WARN', 'Списки: названия добрать не вышло', e)
+  } finally {
+    if (run === titleRun) titlesBusy.value = false
   }
 }
 
@@ -107,7 +141,10 @@ function scoreText(score10: number): string {
   return score10 > 0 ? score10.toFixed(1) : '—'
 }
 
-/** Забирает список с сервера. Отказ сети показанные данные не стирает. */
+/**
+ * Забирает список с сервера. Отказ сети показанные данные не стирает.
+ * Названия запускаются вдогонку и не держат состояние занятости.
+ */
 async function pull(): Promise<void> {
   busy.value = true
   trouble.value = ''
@@ -115,12 +152,13 @@ async function pull(): Promise<void> {
   try {
     await refreshFromServer()
     redraw()
-    await fillTitles()
   } catch (e) {
     trouble.value = describe(e)
   } finally {
     busy.value = false
   }
+
+  void fillTitles()
 }
 
 function onRefresh(): void {
@@ -133,7 +171,6 @@ onMounted(() => {
       // Сначала снимок и отрисовка, потом сеть: список виден даже при лежащем API.
       await initCollection()
       redraw()
-      void fillTitles()
 
       // Отправщик запускается только после подъёма: до него в памяти править нечего.
       startEditSender()
@@ -189,6 +226,7 @@ onMounted(() => {
       <span class="am-screen__meta">
         Всего записей {{ total }} · показано {{ rows.length }} из
         {{ counts.get(activeStatus) ?? 0 }}
+        <template v-if="titlesBusy\"> · названия догружаются…</template>
       </span>
     </div>
   </section>
