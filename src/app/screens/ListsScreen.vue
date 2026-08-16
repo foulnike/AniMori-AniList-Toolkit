@@ -2,10 +2,11 @@
 // Пункт 3.3: списки на живой коллекции. Первый экран, который зовёт слой данных
 // раздела 2: подъём снимка, обновление с сервера, запуск отправщика правок.
 // Правка оценок и статусов — на карточке (3.4), отборы и сортировки — 3.5.
+// Манга живёт на своём экране: статусы те же, но подписи и столбцы другие.
 import { onMounted, ref } from 'vue'
 
 import { entryCount, initCollection, refreshFromServer } from '@/core/collection'
-import { countByStatus, selectEntries } from '@/core/collection-view'
+import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
 import { startEditSender } from '@/core/edit-sender'
 import { peekRussianTitle, prefetchRussianTitles } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
@@ -82,12 +83,15 @@ function describe(e: unknown): string {
  * Снимает кусок коллекции в свои строки. Память коллекции не реактивна
  * сознательно, и ссылки на её записи в разметку не передаются: отрисовка
  * должна меняться по событиям экрана, а не незаметно из-под рук.
+ *
+ * Везде один и тот же отбор по типу: в памяти лежат оба типа, а числа
+ * у закладок и внизу должны совпадать со списком на глазах.
  */
 function redraw(): void {
-  counts.value = countByStatus()
-  total.value = entryCount()
+  counts.value = countByStatus({ type: 'ANIME' })
+  total.value = countEntries({ type: 'ANIME' })
 
-  const picked = selectEntries({ status: [activeStatus.value] }, { key: 'updated' }, {
+  const picked = selectEntries({ type: 'ANIME', status: [activeStatus.value] }, { key: 'updated' }, {
     limit: PAGE_LIMIT,
   })
 
@@ -127,7 +131,8 @@ async function fillTitles(): Promise<void> {
       // Закладку успели сменить: остаток пачек этому показу уже не нужен.
       if (run !== titleRun) return
 
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK))
+      // Тип обязателен: у Шикимори аниме и манга лежат в разных разделах.
+      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
       if (run !== titleRun) return
 
       redraw()
@@ -161,6 +166,9 @@ function scoreText(score10: number): string {
 /**
  * Забирает список с сервера. Отказ сети показанные данные не стирает.
  * Названия запускаются вдогонку и не держат состояние занятости.
+ *
+ * Обновление тянет оба типа сразу: списки разделены только на экранах,
+ * а хранилище и порядок обновления у них общие.
  */
 async function pull(): Promise<void> {
   busy.value = true
@@ -241,7 +249,7 @@ onMounted(() => {
         Обновить с сервера
       </button>
       <span class="am-screen__meta">
-        Всего записей {{ total }} · показано {{ rows.length }} из
+        Всего аниме {{ total }} · показано {{ rows.length }} из
         {{ counts.get(activeStatus) ?? 0 }}
         <template v-if="titlesBusy"> · названия догружаются…</template>
       </span>
