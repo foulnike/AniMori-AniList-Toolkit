@@ -8,7 +8,6 @@ import { currentRoute, startRouter } from './router'
 import type { ScreenName } from './router/routes'
 import HomeScreen from './screens/HomeScreen.vue'
 import ListsScreen from './screens/ListsScreen.vue'
-import MangaScreen from './screens/MangaScreen.vue'
 import MediaScreen from './screens/MediaScreen.vue'
 import SearchScreen from './screens/SearchScreen.vue'
 import SettingsScreen from './screens/SettingsScreen.vue'
@@ -18,7 +17,6 @@ import SettingsScreen from './screens/SettingsScreen.vue'
 const SCREENS: Record<ScreenName, Component> = {
   home: HomeScreen,
   lists: ListsScreen,
-  manga: MangaScreen,
   search: SearchScreen,
   media: MediaScreen,
   settings: SettingsScreen,
