@@ -51,7 +51,7 @@ interface Row {
 const busy = ref(true)
 
 /**
- * Идᑑт ли добор названий. Флаг отдельный сознательно: названия берутся
+ * Идёт ли добор названий. Флаг отдельный сознательно: названия берутся
  * из чужих сервисов минутами и не должны держать кнопки самого списка.
  */
 const titlesBusy = ref(false)
@@ -226,7 +226,7 @@ onMounted(() => {
       <span class="am-screen__meta">
         Всего записей {{ total }} · показано {{ rows.length }} из
         {{ counts.get(activeStatus) ?? 0 }}
-        <template v-if="titlesBusy\"> · названия догружаются…</template>
+        <template v-if="titlesBusy"> · названия догружаются…</template>
       </span>
     </div>
   </section>
