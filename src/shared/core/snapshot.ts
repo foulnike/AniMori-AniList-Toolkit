@@ -20,8 +20,9 @@ const SNAPSHOT_FILE = 'animori-snapshot.json'
  * Миграций схемы здесь нет сознательно: старый снимок дешевле выбросить.
  *
  * 2 — добавлена метка взрослого.
+ * 3 — добавлены названия тайтла.
  */
-export const SNAPSHOT_VERSION = 2
+export const SNAPSHOT_VERSION = 3
 
 /**
  * Задержка записи снимка: прокрутка списка меняет его десятками правок в секунду.
@@ -54,7 +55,7 @@ export interface PendingEdit {
   attempts: number
 }
 
-/** Запись списка в снимке. Названия и картинки сюда не кладᑑм: их даёт склад. */
+/** Запись списка в снимке. Картинки сюда не кладём: их даёт склад. */
 export interface SnapshotEntry {
   mediaId: number
   status: string | null
@@ -65,9 +66,17 @@ export interface SnapshotEntry {
   updatedAt: number
   /**
    * Взрослый тайтл. Метка хранится рядом со записью, а не спрашивается при отрисовке:
-   * отбор идᑑт по всему списку сразу и без сети (пункт 3.8).
+   * отбор идёт по всему списку сразу и без сети (пункт 3.8).
    */
   isAdult: boolean
+  /**
+   * Название латиницей и английское. Лежат в снимке, а не на складе:
+   * склад расходен и протухает, а читаемость своего списка терять нельзя.
+   * Русское название здесь не хранится: оно зависит от настроек источников
+   * и живёт на складе вместе с описанием.
+   */
+  romaji: string | null
+  english: string | null
 }
 
 /**
@@ -84,7 +93,7 @@ export interface UserSnapshot {
 /** Поставщик снимка: собирает его из памяти в момент записи, а не заранее. */
 type SnapshotSource = () => UserSnapshot
 
-/** Единственный хозяин снимка. Второй пишущий гарантированно затрᑑт чужие правки. */
+/** Единственный хозяин снимка. Второй пишущий гарантированно затрёт чужие правки. */
 let source: SnapshotSource | null = null
 
 /** Таймер отложенной записи снимка. */
@@ -109,6 +118,11 @@ function isEntry(value: unknown): value is SnapshotEntry {
   return typeof entry.mediaId === 'number' && Number.isFinite(entry.mediaId)
 }
 
+/** Строка или «нет значения». Пустая строка равносильна отсутствию названия. */
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
 /**
  * Приводит прочитанную запись к нынешней форме. Версия уже совпала, но файл дубля
  * мог быть правлен руками: метка взрослого без значения означает «нет».
@@ -121,6 +135,8 @@ function normalizeEntry(entry: SnapshotEntry): SnapshotEntry {
     progress: typeof entry.progress === 'number' ? entry.progress : 0,
     updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
     isAdult: entry.isAdult === true,
+    romaji: text(entry.romaji),
+    english: text(entry.english),
   }
 }
 
@@ -164,11 +180,11 @@ function parseSnapshot(raw: unknown): UserSnapshot {
 async function readSnapshotFile(): Promise<UserSnapshot | null> {
   if (!Bridge.files.available) return null
 
-  const text = await Bridge.files.read(SNAPSHOT_FILE)
-  if (!text) return null
+  const raw = await Bridge.files.read(SNAPSHOT_FILE)
+  if (!raw) return null
 
   try {
-    const snapshot = parseSnapshot(JSON.parse(text))
+    const snapshot = parseSnapshot(JSON.parse(raw))
     if (snapshot.entries.length === 0) return null
     return snapshot
   } catch (e) {
