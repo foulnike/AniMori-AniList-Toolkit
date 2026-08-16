@@ -6,17 +6,23 @@ import { computed, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
 import { isRussianWord, searchCatalog } from '@/core/media-search'
-import { peekRussianTitle, prefetchRussianTitles } from '@/core/media-title'
+import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import { navigate } from '../router'
 
 /** Пауза после последнего нажатия: каждая буква в сеть — сожжённый темп. */
-const TYPING_PAUSE_MS = 450
+const TYPING_PAUSE_MS = 300
 
 /** По скольку тайтлов просить русские названия за заход. */
 const TITLE_CHUNK = 10
+
+/**
+ * Скольким верхним строкам добирать названия сетью. Ниже человек почти не смотрит,
+ * а каждая строка стоит отдельного похода к источнику через очередь темпа.
+ */
+const TITLE_DEPTH = 20
 
 /** Подвкладки вида: тип решает и запрос, и раздел русского источника. */
 const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
@@ -109,8 +115,7 @@ function ownText(brief: MediaBrief): string {
 
 /** Название для строки: русское, латиница, английское, номер. */
 function pickTitle(brief: MediaBrief): string {
-  const russian = peekRussianTitle(brief.mediaId)?.russian ?? null
-  return russian ?? brief.romaji ?? brief.english ?? `Тайтл #${brief.mediaId}`
+  return peekRussianName(brief.mediaId) ?? brief.romaji ?? brief.english ?? `Тайтл #${brief.mediaId}`
 }
 
 /** Выписка сервера в строку показа. */
@@ -129,14 +134,15 @@ function redraw(): void {
 }
 
 /**
- * Добирает русские названия для найденного. На выдаче это важнее,
- * чем в списке: человек искал русское слово и ждёт русский ответ.
+ * Добирает русские названия тем строкам, где их ещё нет. Русский путь сюда
+ * почти не заходит: имена пришли вместе с находками Шикимори.
  */
 async function fillTitles(): Promise<void> {
   const mine = ++titleRun
   const type = kind.value
   const wanted = briefs
-    .filter((brief) => peekRussianTitle(brief.mediaId) === null)
+    .slice(0, TITLE_DEPTH)
+    .filter((brief) => peekRussianName(brief.mediaId) === null)
     .map((brief) => brief.mediaId)
 
   if (wanted.length === 0) return
