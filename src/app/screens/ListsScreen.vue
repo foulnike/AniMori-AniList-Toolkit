@@ -39,12 +39,18 @@ const STATUS_TABS: ReadonlyArray<{ key: string; title: string }> = [
   { key: 'DROPPED', title: 'Брошено' },
 ]
 
-/** Строка списка в виде, готовом к отрисовке. Название может быть ещё не добыто. */
+/**
+ * Строка списка в виде, готовом к отрисовке. Три названия вместо одного:
+ * русское может быть ещё не добыто или отсутствовать вовсе, а показать
+ * строку надо сразу.
+ */
 interface Row {
   mediaId: number
   score10: number
   progress: number
   title: string | null
+  romaji: string | null
+  english: string | null
 }
 
 /** Идёт ли работа со списком: подъём снимка или ответ сервера. */
@@ -90,13 +96,24 @@ function redraw(): void {
     score10: entry.score10,
     progress: entry.progress,
     title: peekRussianTitle(entry.mediaId)?.russian ?? null,
+    romaji: entry.romaji,
+    english: entry.english,
   }))
 }
 
 /**
+ * Что показать в строке. Порядок: русское, латиница, английское, номер.
+ * Номер остаётся только у записи, созданной правкой до ответа сервера:
+ * такая запись действительно известна нам одним номером.
+ */
+function titleText(row: Row): string {
+  return row.title ?? row.romaji ?? row.english ?? `Тайтл #${row.mediaId}`
+}
+
+/**
  * Добирает русские названия для показанных строк пачками.
- * Ошибка здесь не стопорит экран: без перевода строка покажет номер,
- * а список останется пригодным.
+ * Ошибка здесь не стопорит экран: без перевода строка останется
+ * на латинице, а список — пригодным.
  */
 async function fillTitles(): Promise<void> {
   const run = ++titleRun
@@ -212,7 +229,7 @@ onMounted(() => {
     <ul v-else class="am-rows">
       <li v-for="row in rows" :key="row.mediaId" class="am-row">
         <button class="am-row__open" type="button" @click="open(row.mediaId)">
-          {{ row.title ?? `Тайтл #${row.mediaId}` }}
+          {{ titleText(row) }}
         </button>
         <span class="am-row__num" title="Оценка">{{ scoreText(row.score10) }}</span>
         <span class="am-row__num" title="Просмотрено частей">{{ row.progress }}</span>
