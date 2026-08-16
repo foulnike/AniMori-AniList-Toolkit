@@ -40,7 +40,15 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
   const known = getEntry(mediaId)
   const entry = known
     ? { ...known }
-    : { mediaId, status: null, score10: 0, progress: 0, updatedAt: Date.now() }
+    : {
+        mediaId,
+        status: null,
+        score10: 0,
+        progress: 0,
+        updatedAt: Date.now(),
+        // Метки взрослого у правки нет; верную принесёт обновление списка.
+        isAdult: false,
+      }
 
   if (kind === 'status' && typeof value === 'string') entry.status = value
   if (kind === 'score' && typeof value === 'number') entry.score10 = value
