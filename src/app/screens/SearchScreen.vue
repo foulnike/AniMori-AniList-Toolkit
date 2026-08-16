@@ -115,7 +115,9 @@ function ownText(brief: MediaBrief): string {
 
 /** Название для строки: русское, латиница, английское, номер. */
 function pickTitle(brief: MediaBrief): string {
-  return peekRussianName(brief.mediaId) ?? brief.romaji ?? brief.english ?? `Тайтл #${brief.mediaId}`
+  return (
+    peekRussianName(brief.mediaId) ?? brief.romaji ?? brief.english ?? `Тайтл #${brief.mediaId}`
+  )
 }
 
 /** Выписка сервера в строку показа. */
