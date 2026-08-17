@@ -1,8 +1,7 @@
 <script setup lang="ts">
 // Пункт 3.5: списки одним экраном на оба вида. Данные, обновление и
 // снимок у аниме и манги общие, разные только подписи и счёт частей.
-// Здесь же поиск по своему списку: искать надо там, где список и лежит.
-// Поиск по чужому каталогу живёт на своём экране: там сеть и другие метки.
+// Здесь же поиск по своему списку и порядок показа: и то и другое про список.
 import { computed, onMounted, ref } from 'vue'
 
 import { initCollection, refreshFromServer } from '@/core/collection'
@@ -16,6 +15,7 @@ import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
+import { formatWord, partsShort, statusList } from '../labels'
 import { navigate } from '../router'
 
 /**
@@ -42,39 +42,17 @@ const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
   { key: 'MANGA', title: 'Манга' },
 ]
 
-/** Закладки аниме. Порядок как в привычном списке на сайте. */
-const ANIME_STATUS: ReadonlyArray<{ key: string; title: string }> = [
-  { key: 'CURRENT', title: 'Смотрю' },
-  { key: 'REPEATING', title: 'Пересматриваю' },
-  { key: 'PLANNING', title: 'В планах' },
-  { key: 'COMPLETED', title: 'Просмотрено' },
-  { key: 'PAUSED', title: 'Отложено' },
-  { key: 'DROPPED', title: 'Брошено' },
-]
+/** Порядки показа. Все считаются на месте: сети сортировка не требует. */
+type SortName = 'updated' | 'score' | 'rating' | 'nameUp' | 'nameDown' | 'parts'
 
-/** Закладки манги: ключи те же, а подписи обязаны быть про чтение. */
-const MANGA_STATUS: ReadonlyArray<{ key: string; title: string }> = [
-  { key: 'CURRENT', title: 'Читаю' },
-  { key: 'REPEATING', title: 'Перечитываю' },
-  { key: 'PLANNING', title: 'В планах' },
-  { key: 'COMPLETED', title: 'Прочитано' },
-  { key: 'PAUSED', title: 'Отложено' },
-  { key: 'DROPPED', title: 'Брошено' },
+const SORT_TABS: ReadonlyArray<{ key: SortName; title: string }> = [
+  { key: 'updated', title: 'Свежие правки' },
+  { key: 'score', title: 'Своя оценка' },
+  { key: 'rating', title: 'Оценка каталога' },
+  { key: 'nameUp', title: 'Название А—Я' },
+  { key: 'nameDown', title: 'Название Я—А' },
+  { key: 'parts', title: 'Счёт частей' },
 ]
-
-/** Вид тайтла по-русски: сервер зовёт их по-английски и заглавными. */
-const FORMAT_WORDS: Readonly<Record<string, string>> = {
-  TV: 'ТВ',
-  TV_SHORT: 'Короткий ТВ',
-  MOVIE: 'Фильм',
-  SPECIAL: 'Спешл',
-  OVA: 'OVA',
-  ONA: 'ONA',
-  MUSIC: 'Клип',
-  MANGA: 'Манга',
-  NOVEL: 'Ранобэ',
-  ONE_SHOT: 'Ваншот',
-}
 
 /** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
 interface Row {
@@ -102,13 +80,14 @@ const searchBusy = ref(false)
 const trouble = ref('')
 const kind = ref<MediaType>('ANIME')
 const activeStatus = ref<string>('CURRENT')
+const sortKey = ref<SortName>('updated')
 const word = ref('')
 const rows = ref<Row[]>([])
 const counts = ref<Map<string, number>>(new Map())
 const total = ref(0)
 
 /** Подписи закладок зависят только от вида. */
-const statusTabs = computed(() => (kind.value === 'MANGA' ? MANGA_STATUS : ANIME_STATUS))
+const statusTabs = computed(() => statusList(kind.value))
 const searching = computed(() => word.value.trim() !== '')
 const shown = computed(() =>
   searching.value ? total.value : (counts.value.get(activeStatus.value) ?? 0),
@@ -137,16 +116,19 @@ function factsText(look: MediaLook | null): string {
   if (look === null) return ''
 
   const parts: string[] = []
-  if (look.format !== null) parts.push(FORMAT_WORDS[look.format] ?? look.format)
+
+  const kindWord = formatWord(look.format)
+  if (kindWord !== null) parts.push(kindWord)
   if (look.seasonYear !== null) parts.push(String(look.seasonYear))
+
   return parts.join(' · ')
 }
 
 /** Свой счёт частей на постере. Неизвестный итог не выдумывается. */
 function ownText(entry: SnapshotEntry, parts: number | null): string | null {
-  const word = entry.type === 'MANGA' ? 'гл.' : 'эп.'
-  if (parts === null) return entry.progress > 0 ? `${entry.progress} ${word}` : null
-  return `${entry.progress} / ${parts} ${word}`
+  const short = partsShort(entry.type)
+  if (parts === null) return entry.progress > 0 ? `${entry.progress} ${short}` : null
+  return `${entry.progress} / ${parts} ${short}`
 }
 
 /** Доля пройденного для полосы. Завершённое залито целиком даже без итога. */
@@ -157,21 +139,62 @@ function donePart(entry: SnapshotEntry, parts: number | null): number {
 }
 
 /**
- * Запись памяти в плитку. Название: русское, латиница, английское, номер.
- * Номер остаётся только у записи, созданной правкой до ответа сервера.
+ * Название записи: русское, латиница, английское, номер. Номер остаётся
+ * только у записи, созданной правкой до ответа сервера.
  */
+function titleOf(entry: SnapshotEntry): string {
+  return (
+    peekRussianName(entry.mediaId) ??
+    entry.romaji ??
+    entry.english ??
+    peekLook(entry.mediaId)?.romaji ??
+    `Тайтл #${entry.mediaId}`
+  )
+}
+
+/** Средняя оценка каталога для порядка: неизвестная уходит в конец. */
+function ratingOf(entry: SnapshotEntry): number {
+  return peekLook(entry.mediaId)?.averageScore ?? -1
+}
+
+/**
+ * Порядок показа. Названия сравниваются по-русски, поэтому список может
+ * слегка переставиться, когда доберутся переводы: до них сравнивать нечего.
+ */
+function sortEntries(list: SnapshotEntry[]): SnapshotEntry[] {
+  const out = [...list]
+
+  switch (sortKey.value) {
+    case 'score':
+      out.sort((a, b) => b.score10 - a.score10 || b.updatedAt - a.updatedAt)
+      break
+    case 'rating':
+      out.sort((a, b) => ratingOf(b) - ratingOf(a) || b.updatedAt - a.updatedAt)
+      break
+    case 'parts':
+      out.sort((a, b) => b.progress - a.progress || b.updatedAt - a.updatedAt)
+      break
+    case 'nameUp':
+      out.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ru'))
+      break
+    case 'nameDown':
+      out.sort((a, b) => titleOf(b).localeCompare(titleOf(a), 'ru'))
+      break
+    default:
+      out.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  return out
+}
+
+/** Запись памяти в плитку. */
 function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
   const parts = entry.type === 'MANGA' ? (look?.chapters ?? null) : (look?.episodes ?? null)
 
   return {
     mediaId: entry.mediaId,
-    title:
-      peekRussianName(entry.mediaId) ??
-      entry.romaji ??
-      entry.english ??
-      look?.romaji ??
-      `Тайтл #${entry.mediaId}`,
+    title: titleOf(entry),
     facts: factsText(look),
     mark: entry.score10 > 0 ? `★ ${entry.score10.toFixed(1)}` : null,
     own: ownText(entry, parts),
@@ -183,25 +206,19 @@ function toRow(entry: SnapshotEntry): Row {
 }
 
 /**
- * Снимает кусок коллекции в свои плитки. При идущем поиске плитки
- * берутся из находок: закладка тогда не главная, а слово главное.
+ * Снимает кусок коллекции в свои плитки. При идущем поиске плитки берутся
+ * из находок: закладка тогда не главная, а слово главное. Порядок выбирает
+ * человек, поэтому сотня отрезается уже после сортировки всей закладки.
  */
 function redraw(): void {
   counts.value = countByStatus({ type: kind.value })
   total.value = countEntries({ type: kind.value })
 
-  if (searching.value) {
-    rows.value = foundEntries.map(toRow)
-    return
-  }
+  const picked = searching.value
+    ? foundEntries
+    : selectEntries({ type: kind.value, status: [activeStatus.value] })
 
-  const picked = selectEntries(
-    { type: kind.value, status: [activeStatus.value] },
-    { key: 'updated' },
-    { limit: PAGE_LIMIT },
-  )
-
-  rows.value = picked.map(toRow)
+  rows.value = sortEntries(picked).slice(0, PAGE_LIMIT).map(toRow)
 }
 
 /**
@@ -347,6 +364,11 @@ function pickStatus(status: string): void {
   refill()
 }
 
+/** Смена порядка: пересобираем показ, новым строкам нужны обложки и названия. */
+function pickSort(): void {
+  refill()
+}
+
 /** Переход на карточку. Номер идёт строкой: в адресе окна чисел нет. */
 function open(mediaId: number): void {
   navigate('media', { id: String(mediaId) })
@@ -412,6 +434,15 @@ onMounted(() => {
 
       <span class="am-bar__gap" />
 
+      <label class="am-sort">
+        <span class="am-sort__name">Порядок</span>
+        <select v-model="sortKey" class="am-sort__pick" @change="pickSort">
+          <option v-for="item in SORT_TABS" :key="item.key" :value="item.key">
+            {{ item.title }}
+          </option>
+        </select>
+      </label>
+
       <label class="am-search">
         <span class="am-search__mark" aria-hidden="true">⌕</span>
         <input
@@ -468,7 +499,7 @@ onMounted(() => {
     <div v-else-if="searching && rows.length === 0" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⌕</span>
       <span>В своём списке ничего не нашлось.</span>
-      <span>Поищите в каталоге на экране поиска.</span>
+      <span>Попробуйте поискать в каталоге.</span>
     </div>
 
     <div v-else-if="rows.length === 0" class="am-empty">
@@ -501,6 +532,30 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.am-sort {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--am-dim);
+}
+
+.am-sort__pick {
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--am-text);
+  cursor: pointer;
+  background: var(--am-panel-2);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+}
+
+.am-sort__pick:hover {
+  background: var(--am-hover);
+}
+
 .am-hold {
   display: flex;
   flex-direction: column;
