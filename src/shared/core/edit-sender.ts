@@ -2,7 +2,7 @@
 // Экраны зовут только queueEdit и сразу видят правку в памяти.
 // Отказ сервера память не откатывает: правда восстановится обновлением списка.
 
-import { anilistPauseRemaining, getAlToken, isAniListRateLimited } from '../api/anilist'
+import { anilistPauseRemaining, canSignAniList, isAniListRateLimited } from '../api/anilist'
 import { removeEntry, saveEntry, type EditOutcome } from '../api/anilist-edit'
 import { Logger } from '../utils/logger'
 import { dropEntry, getEntry, putEntry } from './collection'
@@ -160,7 +160,7 @@ export function flushEdits(): Promise<void> {
     try {
       // Без входа отправлять некуда: сервер отверг бы каждую правку, а попытки
       // у них считаные. Очередь ждёт входа целиком.
-      if (getAlToken() === null) return
+      if (!canSignAniList()) return
 
       // Сервер закрыт целиком — ходить некуда, и попытки тратить не на что.
       if (isAniListRateLimited()) {
@@ -236,7 +236,7 @@ export async function queueEdit(
 ): Promise<void> {
   applyToMemory(mediaId, kind, value, look)
 
-  if (getAlToken() === null) {
+  if (!canSignAniList()) {
     Logger('DB', `Правка тайтла ${mediaId} сохранена местно: вход не выполнен`)
     return
   }
