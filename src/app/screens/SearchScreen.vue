@@ -5,11 +5,14 @@
 import { computed, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
+import { rememberBrief } from '@/core/media-looks'
 import { isRussianWord, searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
+import MediaTile from '../components/MediaTile.vue'
+import { formatWord, partsShort, statusWord } from '../labels'
 import { navigate } from '../router'
 
 /** Пауза после последнего нажатия: каждая буква в сеть — сожжённый темп. */
@@ -24,39 +27,27 @@ const TITLE_CHUNK = 10
  */
 const TITLE_DEPTH = 20
 
+/** Сколько плиток-заглушек показать, пока идёт первый ответ. */
+const HOLD_COUNT = 12
+
 /** Подвкладки вида: тип решает и запрос, и раздел русского источника. */
 const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
   { key: 'ANIME', title: 'Аниме' },
   { key: 'MANGA', title: 'Манга' },
 ]
 
-/** Подписи закладок аниме для столбца «у меня». */
-const ANIME_STATUS: Readonly<Record<string, string>> = {
-  CURRENT: 'Смотрю',
-  REPEATING: 'Пересматриваю',
-  PLANNING: 'В планах',
-  COMPLETED: 'Просмотрено',
-  PAUSED: 'Отложено',
-  DROPPED: 'Брошено',
-}
-
-/** Подписи закладок манги: ключи те же, слова про чтение. */
-const MANGA_STATUS: Readonly<Record<string, string>> = {
-  CURRENT: 'Читаю',
-  REPEATING: 'Перечитываю',
-  PLANNING: 'В планах',
-  COMPLETED: 'Прочитано',
-  PAUSED: 'Отложено',
-  DROPPED: 'Брошено',
-}
-
-/** Строка выдачи. Название и подпись готовятся заранее: разметка не считает. */
+/** Плитка выдачи. Всё готовится заранее: разметка ничего не считает. */
 interface Row {
   mediaId: number
   title: string
   facts: string
-  ownStatus: string
-  score10: string
+  cover: string | null
+  color: string | null
+  score: string | null
+  mark: string | null
+  own: string | null
+  done: number
+  adult: boolean
 }
 
 const word = ref('')
@@ -77,57 +68,82 @@ let run = 0
 let titleRun = 0
 let timer: ReturnType<typeof setTimeout> | null = null
 
-/** Найденные выписки этого показа: по ним строки перерисовываются с названиями. */
+/** Найденные выписки этого показа: по ним плитки перерисовываются с названиями. */
 let briefs: MediaBrief[] = []
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/** Оценка сервера для глаз: у AniList она в сотнях, показываем как есть. */
-function scoreText(brief: MediaBrief): string {
-  return brief.averageScore === null ? '—' : String(brief.averageScore)
+/** Оценка сервера для угла постера: у AniList она в сотнях. */
+function scoreText(brief: MediaBrief): string | null {
+  return brief.averageScore === null ? null : `${brief.averageScore}%`
 }
 
-/** Короткая подпись под названием: вид, год и части. */
+/** Сколько всего частей у тайтла: у аниме серии, у манги главы. */
+function partsCount(brief: MediaBrief): number | null {
+  return brief.type === 'MANGA' ? brief.chapters : brief.episodes
+}
+
+/** Короткая подпись под названием: вид и год. Счёт частей ушёл на постер. */
 function briefFacts(brief: MediaBrief): string {
   const parts: string[] = []
 
-  if (brief.format !== null) parts.push(brief.format)
+  const kindWord = formatWord(brief.format)
+  if (kindWord !== null) parts.push(kindWord)
   if (brief.seasonYear !== null) parts.push(String(brief.seasonYear))
-
-  const count = brief.type === 'MANGA' ? brief.chapters : brief.episodes
-  if (count !== null) parts.push(brief.type === 'MANGA' ? `Глав ${count}` : `Серий ${count}`)
-
-  if (brief.isAdult) parts.push('18+')
 
   return parts.join(' · ')
 }
 
-/** Что у меня с этим тайтлом по ответу сервера. */
-function ownText(brief: MediaBrief): string {
-  const own = brief.ownEntry
-  if (!own || own.status === null) return 'не в списке'
-
-  const table = brief.type === 'MANGA' ? MANGA_STATUS : ANIME_STATUS
-  return table[own.status] ?? own.status
+/** Своя закладка по ответу сервера. Нет закладки — метки на постере не будет. */
+function markText(brief: MediaBrief): string | null {
+  return statusWord(brief.type, brief.ownEntry?.status ?? null)
 }
 
-/** Название для строки: русское, латиница, английское, номер. */
+/** Строка счёта на постере: свой прогресс, а без него — размер тайтла. */
+function ownText(brief: MediaBrief): string | null {
+  const parts = partsCount(brief)
+  const seen = brief.ownEntry?.progress ?? 0
+  const short = partsShort(brief.type)
+
+  if (seen > 0) return parts === null ? `${seen} ${short}` : `${seen} / ${parts} ${short}`
+  return parts === null ? null : `${parts} ${short}`
+}
+
+/** Доля пройденного для полосы под постером. */
+function donePart(brief: MediaBrief): number {
+  const own = brief.ownEntry
+  if (!own) return 0
+  if (own.status === 'COMPLETED') return 1
+
+  const parts = partsCount(brief)
+  const seen = own.progress ?? 0
+  if (parts === null || parts <= 0 || seen <= 0) return 0
+
+  return Math.min(1, seen / parts)
+}
+
+/** Название для плитки: русское, латиница, английское, номер. */
 function pickTitle(brief: MediaBrief): string {
   return (
     peekRussianName(brief.mediaId) ?? brief.romaji ?? brief.english ?? `Тайтл #${brief.mediaId}`
   )
 }
 
-/** Выписка сервера в строку показа. */
+/** Выписка сервера в плитку показа. */
 function toRow(brief: MediaBrief): Row {
   return {
     mediaId: brief.mediaId,
     title: pickTitle(brief),
     facts: briefFacts(brief),
-    ownStatus: ownText(brief),
-    score10: scoreText(brief),
+    cover: brief.cover,
+    color: brief.color,
+    score: scoreText(brief),
+    mark: markText(brief),
+    own: ownText(brief),
+    done: donePart(brief),
+    adult: brief.isAdult,
   }
 }
 
@@ -195,6 +211,9 @@ async function search(add = false): Promise<void> {
       return
     }
 
+    // Обложки уже в ответе: кладём их в общую память даром для списков и главной.
+    for (const brief of found.items) rememberBrief(brief)
+
     briefs = add ? [...briefs, ...found.items] : found.items
     page.value = wanted
     hasNext.value = found.hasNext
@@ -240,31 +259,36 @@ function open(mediaId: number): void {
 </script>
 
 <template>
-  <section class="am-screen">
-    <div class="am-tabs">
-      <button
-        v-for="tab in KIND_TABS"
-        :key="tab.key"
-        class="am-tab am-tab--kind"
-        :class="{ 'am-tab--on': tab.key === kind }"
-        type="button"
-        @click="pickKind(tab.key)"
-      >
-        {{ tab.title }}
-      </button>
+  <section class="am-page">
+    <div class="am-bar">
+      <div class="am-seg">
+        <button
+          v-for="tab in KIND_TABS"
+          :key="tab.key"
+          class="am-seg__btn"
+          :class="{ 'am-seg__btn--on': tab.key === kind }"
+          type="button"
+          @click="pickKind(tab.key)"
+        >
+          {{ tab.title }}
+        </button>
+      </div>
 
-      <span class="am-tabs__gap" />
+      <span class="am-bar__gap" />
 
-      <input
-        v-model="word"
-        class="am-screen__input"
-        type="search"
-        placeholder="Поиск по каталогу"
-        @input="onType"
-      />
+      <label class="am-search am-search--wide">
+        <span class="am-search__mark" aria-hidden="true">⌕</span>
+        <input
+          v-model="word"
+          class="am-input"
+          type="search"
+          placeholder="Название на любом языке"
+          @input="onType"
+        />
+      </label>
     </div>
 
-    <p class="am-screen__meta">
+    <p class="am-meta">
       <template v-if="asked === ''">
         Ищет по чужому каталогу. Свой список ищите во вкладке «Списки».
       </template>
@@ -273,209 +297,78 @@ function open(mediaId: number): void {
       <template v-if="total !== null"> Найдено {{ total }}. </template>
     </p>
 
-    <p v-if="trouble" class="am-screen__error">{{ trouble }}</p>
+    <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
-    <p v-if="busy && rows.length === 0" class="am-screen__hint">Ищем…</p>
-    <p v-else-if="asked !== '' && !busy && rows.length === 0" class="am-screen__hint">
-      Ничего не нашлось. Попробуйте другое слово или другой вид.
-    </p>
-
-    <ul v-if="rows.length > 0" class="am-rows">
-      <li v-for="row in rows" :key="row.mediaId" class="am-row">
-        <button class="am-row__main" type="button" @click="open(row.mediaId)">
-          <span class="am-row__title">{{ row.title }}</span>
-          <span class="am-row__sub">{{ row.facts }}</span>
-        </button>
-        <span class="am-row__own">{{ row.ownStatus }}</span>
-        <span class="am-row__num" title="Средняя оценка">{{ row.score10 }}</span>
+    <ul v-if="busy && rows.length === 0" class="am-grid">
+      <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
+        <span class="am-skeleton am-hold__art" />
+        <span class="am-skeleton am-hold__line" />
       </li>
     </ul>
 
-    <div v-if="hasNext" class="am-foot">
-      <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onMore">
-        Показать ещё
+    <div v-else-if="asked === ''" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⌕</span>
+      <span>Начните вводить название.</span>
+      <span>Кириллица тоже работает: русское слово уходит на Шикимори.</span>
+    </div>
+
+    <div v-else-if="rows.length === 0 && !busy" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⊘</span>
+      <span>Ничего не нашлось.</span>
+      <span>Попробуйте другое слово или другой вид.</span>
+    </div>
+
+    <ul v-else class="am-grid">
+      <MediaTile
+        v-for="row in rows"
+        :key="row.mediaId"
+        :title="row.title"
+        :facts="row.facts"
+        :cover="row.cover"
+        :color="row.color"
+        :score="row.score"
+        :mark="row.mark"
+        :own="row.own"
+        :done="row.done"
+        :adult="row.adult"
+        @open="open(row.mediaId)"
+      />
+    </ul>
+
+    <div v-if="hasNext" class="am-more">
+      <button class="am-btn am-btn--soft" type="button" :disabled="busy" @click="onMore">
+        {{ busy ? 'Грузим…' : 'Показать ещё' }}
       </button>
     </div>
   </section>
 </template>
 
 <style scoped>
-.am-screen {
+.am-search--wide {
+  min-width: 320px;
+}
+
+.am-hold {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  align-items: flex-start;
-  width: 100%;
+  gap: 9px;
 }
 
-.am-screen__hint {
-  max-width: 640px;
-  margin: 0;
-  color: var(--am-dim);
+.am-hold__art {
+  display: block;
+  aspect-ratio: 2 / 3;
 }
 
-.am-screen__meta {
-  margin: 0;
-  font-size: 13px;
-  color: var(--am-dim);
+.am-hold__line {
+  display: block;
+  width: 72%;
+  height: 12px;
+  border-radius: var(--am-r-s);
 }
 
-.am-screen__error {
-  margin: 0;
-  font-size: 13px;
-  color: #ff8a8a;
-}
-
-.am-screen__input {
-  width: 260px;
-  padding: 7px 10px;
-  font: inherit;
-  color: var(--am-text);
-  background: var(--am-panel);
-  border: 1px solid var(--am-line);
-  border-radius: 8px;
-}
-
-.am-screen__input:focus {
-  border-color: var(--am-accent);
-  outline: none;
-}
-
-.am-tabs {
+.am-more {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  width: 100%;
-  max-width: 720px;
-}
-
-.am-tabs__gap {
-  flex: 1 1 auto;
-}
-
-.am-tab {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 7px 12px;
-  font: inherit;
-  color: var(--am-text);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--am-line);
-  border-radius: 8px;
-}
-
-.am-tab:hover {
-  background: var(--am-hover);
-}
-
-.am-tab--on {
-  background: var(--am-panel);
-  border-color: var(--am-accent);
-}
-
-.am-tab--kind {
-  font-weight: 600;
-}
-
-.am-rows {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 720px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  background: var(--am-panel);
-  border: 1px solid var(--am-line);
-  border-radius: 12px;
-}
-
-.am-row {
-  display: grid;
-  grid-template-columns: 1fr 140px 52px;
-  gap: 8px;
-  align-items: center;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--am-line);
-}
-
-.am-row:last-child {
-  border-bottom: none;
-}
-
-.am-row__main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-  overflow: hidden;
-  font: inherit;
-  color: var(--am-text);
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: none;
-}
-
-.am-row__main:hover .am-row__title {
-  color: var(--am-accent);
-}
-
-.am-row__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.am-row__sub {
-  font-size: 12px;
-  color: var(--am-dim);
-}
-
-.am-row__own {
-  font-size: 12px;
-  color: var(--am-dim);
-  text-align: right;
-}
-
-.am-row__num {
-  font-size: 13px;
-  color: var(--am-dim);
-  text-align: right;
-}
-
-.am-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.am-btn {
-  padding: 8px 14px;
-  font: inherit;
-  color: #06121f;
-  cursor: pointer;
-  background: var(--am-accent);
-  border: 1px solid var(--am-accent);
-  border-radius: 8px;
-}
-
-.am-btn:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.am-btn--ghost {
-  color: var(--am-text);
-  background: transparent;
-  border-color: var(--am-line);
-}
-
-.am-btn--ghost:hover:not(:disabled) {
-  background: var(--am-hover);
+  justify-content: center;
+  padding: 6px 0 10px;
 }
 </style>
