@@ -23,6 +23,7 @@ const MAL_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int) {
 
 // Подробности карточки. Запись списка спрашиваем вместе с тайтлом: один
 // запрос вместо двух, а сверка с памятью покажет неушедшие правки.
+// Баннер и цвет обложки — для крупного вида: без них карточка серая.
 const CARD_QUERY = `query ($id: Int!) {
   Media(id: $id) {
     id
@@ -39,6 +40,7 @@ const CARD_QUERY = `query ($id: Int!) {
     genres
     isAdult
     siteUrl
+    bannerImage
     description(asHtml: false)
     title {
       romaji
@@ -46,7 +48,9 @@ const CARD_QUERY = `query ($id: Int!) {
       native
     }
     coverImage {
+      extraLarge
       large
+      color
     }
     mediaListEntry {
       status
@@ -59,6 +63,7 @@ const CARD_QUERY = `query ($id: Int!) {
 
 // Поиск по слову. Закладка хозяина идёт тем же запросом: в выдаче
 // надо сразу видеть, что из найденного уже в своём списке.
+// Обложка просится large: в сетке постеров medium заметно мылится.
 const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $perPage: Int!) {
   Page(page: $page, perPage: $perPage) {
     pageInfo {
@@ -82,7 +87,9 @@ const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $per
         native
       }
       coverImage {
+        large
         medium
+        color
       }
       mediaListEntry {
         status
@@ -123,9 +130,14 @@ interface CardReply {
     genres?: Array<string | null> | null
     isAdult?: boolean | null
     siteUrl?: string | null
+    bannerImage?: string | null
     description?: string | null
     title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
-    coverImage?: { large?: string | null } | null
+    coverImage?: {
+      extraLarge?: string | null
+      large?: string | null
+      color?: string | null
+    } | null
     mediaListEntry?: OwnReply | null
   } | null
 }
@@ -145,7 +157,7 @@ interface SearchReply {
       averageScore?: number | null
       isAdult?: boolean | null
       title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
-      coverImage?: { medium?: string | null } | null
+      coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
       mediaListEntry?: OwnReply | null
     } | null> | null
   } | null
@@ -183,6 +195,10 @@ export interface MediaCard {
   english: string | null
   native: string | null
   cover: string | null
+  /** Широкая картинка для верха карточки. Есть далеко не у всех тайтлов. */
+  banner: string | null
+  /** Основной цвет обложки: подложка и подсветка крупного вида. */
+  color: string | null
   /** Запись в списке хозяина или `null`, если тайтл в списке не числится. */
   ownEntry: ServerEntry | null
 }
@@ -206,6 +222,8 @@ export interface MediaBrief {
   english: string | null
   native: string | null
   cover: string | null
+  /** Основной цвет обложки: подложка плитки, пока картинка не приехала. */
+  color: string | null
   ownEntry: ServerEntry | null
 }
 
@@ -309,7 +327,10 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     romaji: textOrNull(media.title?.romaji),
     english: textOrNull(media.title?.english),
     native: textOrNull(media.title?.native),
-    cover: textOrNull(media.coverImage?.large),
+    // Крупный размер первым: карточка показывает обложку большой.
+    cover: textOrNull(media.coverImage?.extraLarge) ?? textOrNull(media.coverImage?.large),
+    banner: textOrNull(media.bannerImage),
+    color: textOrNull(media.coverImage?.color),
     ownEntry: ownOrNull(media.mediaListEntry),
   }
 }
@@ -356,7 +377,8 @@ export async function searchMedia(
       romaji: textOrNull(item.title?.romaji),
       english: textOrNull(item.title?.english),
       native: textOrNull(item.title?.native),
-      cover: textOrNull(item.coverImage?.medium),
+      cover: textOrNull(item.coverImage?.large) ?? textOrNull(item.coverImage?.medium),
+      color: textOrNull(item.coverImage?.color),
       ownEntry: ownOrNull(item.mediaListEntry),
     })
   }
