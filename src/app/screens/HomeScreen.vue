@@ -12,7 +12,7 @@ import {
   selectEntries,
   totalProgress,
 } from '@/core/collection-view'
-import { peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
+import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { SnapshotEntry } from '@/core/snapshot'
 import type { MediaType } from '@/core/types'
@@ -95,7 +95,9 @@ function ownText(entry: SnapshotEntry, parts: number | null): string | null {
 /** Запись памяти в плитку полки. */
 function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
-  const parts = entry.type === 'MANGA' ? (look?.chapters ?? null) : (look?.episodes ?? null)
+
+  // У идущего сезона счёт идёт от вышедшего: объявленного итога ещё нет.
+  const parts = partsOut(look, entry.type)
   const done =
     parts !== null && parts > 0 && entry.progress > 0 ? Math.min(1, entry.progress / parts) : 0
 
