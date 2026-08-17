@@ -89,7 +89,13 @@ function textOrNull(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
 }
 
-/** Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет». */
+/**
+ * Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет».
+ *
+ * Пересмотры, даты и комментарий у сервера здесь не спрашиваются и приезжают
+ * пустыми: выписки идут пачками по пятьдесят тайтлов ради обложек и вида,
+ * а правда по записи живёт в снимке и в карточке тайтла.
+ */
 function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
   if (!own) return null
 
@@ -98,6 +104,10 @@ function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
     score10: typeof own.score === 'number' ? own.score : 0,
     progress: typeof own.progress === 'number' ? own.progress : 0,
     volumes: typeof own.progressVolumes === 'number' ? own.progressVolumes : 0,
+    repeat: 0,
+    startedAt: null,
+    completedAt: null,
+    notes: null,
   }
 }
 
