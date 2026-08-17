@@ -8,7 +8,6 @@ import { loadInterfaceDictionary } from '@/api/dictionary'
 import { loadAlToken } from '@/api/anilist'
 import { amSetAccent } from '@/core/accent'
 import { IS_ANILIST, IS_SHIKI } from '@/core/constants'
-import { loadCustomLinks } from '@/core/custom-links'
 import { openDB, runGarbageCollector } from '@/core/db'
 import { loadUserDict, rebuildDictionary, setRemoteDict } from '@/core/dictionary'
 import { loadSettings, settings } from '@/core/settings'
@@ -135,10 +134,8 @@ async function bootstrap(): Promise<void> {
   if (IS_SHIKI) return
   if (!IS_ANILIST) return
 
-  // Кэши наполняются до первой отрисовки и rebuildDictionary(): читаются они синхронно.
-  await step('свои ссылки и словарь пользователя', () =>
-    Promise.all([loadCustomLinks(), loadUserDict()]),
-  )
+  // Кэш наполняется до первой отрисовки и rebuildDictionary(): читается он синхронно.
+  await step('словарь пользователя', loadUserDict)
 
   // Адблок — первым среди всего, что касается страницы: иначе баннер мигнёт.
   // В задачи смены роута НЕ входит: его наблюдатель обязан переживать переходы.
