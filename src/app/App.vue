@@ -11,6 +11,7 @@ import ListsScreen from './screens/ListsScreen.vue'
 import MediaScreen from './screens/MediaScreen.vue'
 import SearchScreen from './screens/SearchScreen.vue'
 import SettingsScreen from './screens/SettingsScreen.vue'
+import './styles/theme.css'
 
 // Полный набор имён обязателен: забытый экран уронит проверку типов,
 // а не вскроется пустым окном у пользователя.
@@ -42,31 +43,3 @@ onBeforeUnmount(() => {
     <component :is="screen" />
   </AppShell>
 </template>
-
-<style>
-:root {
-  --am-bg: #0b1622;
-  --am-panel: #101f2f;
-  --am-hover: #17293c;
-  --am-line: #1e3346;
-  --am-text: #e7edf7;
-  --am-dim: #8ba1bd;
-  --am-accent: #4c9ffe;
-}
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: system-ui, sans-serif;
-  color: var(--am-text);
-  background: var(--am-bg);
-}
-
-#app {
-  min-height: 100vh;
-}
-</style>
