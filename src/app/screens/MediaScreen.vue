@@ -291,11 +291,7 @@ watch(mediaId, () => {
             <div class="am-panel">
               <h3 class="am-h3">Моя запись</h3>
 
-              <button
-                class="am-btn am-btn--wide"
-                type="button"
-                @click="sheetOpen = true"
-              >
+              <button class="am-btn am-btn--wide" type="button" @click="sheetOpen = true">
                 {{ listLabel }}
               </button>
 
