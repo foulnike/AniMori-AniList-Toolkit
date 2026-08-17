@@ -23,8 +23,9 @@ const SNAPSHOT_FILE = 'animori-snapshot.json'
  * 2 — добавлена метка взрослого.
  * 3 — добавлены названия тайтла.
  * 4 — добавлены тип тайтла и прочитанные тома.
+ * 5 — добавлены пересмотры, даты начала и конца, личный комментарий.
  */
-export const SNAPSHOT_VERSION = 4
+export const SNAPSHOT_VERSION = 5
 
 /**
  * Задержка записи снимка: прокрутка списка меняет его десятками правок в секунду.
@@ -38,8 +39,22 @@ const SNAPSHOT_DELAY_MS = 2000
  */
 const QUEUE_LIMIT = 500
 
-/** Что именно правили в записи списка. Удаление — тоже правка, её нельзя терять. */
-export type EditKind = 'status' | 'score' | 'progress' | 'remove'
+/**
+ * Что именно правили в записи списка. Удаление — тоже правка, её нельзя терять.
+ *
+ * Поля пересчётом не сводятся в одну правку «всё сразу»: отказ сервера по одному
+ * полю не должен уронить остальные, а порядок очередь и так соблюдает.
+ */
+export type EditKind =
+  | 'status'
+  | 'score'
+  | 'progress'
+  | 'volumes'
+  | 'repeat'
+  | 'startedAt'
+  | 'completedAt'
+  | 'notes'
+  | 'remove'
 
 /**
  * Неотправленная правка. `id` свой, а не серверный: отметить принятой
@@ -75,6 +90,20 @@ export interface SnapshotEntry {
    * у AniList независимы и часто заполнено только одно из двух. У аниме ноль.
    */
   volumes: number
+  /**
+   * Сколько раз пересматривали или перечитывали. Сервер считает их отдельно
+   * от закладки: «Пересматриваю» — состояние, а это счётчик завершённых кругов.
+   */
+  repeat: number
+  /**
+   * Когда начали и когда закончили, в виде ГГГГ-ММ-ДД. Строка, а не метка
+   * времени: это календарный день без часов и пояса, и любой перевод
+   * в миллисекунды способен сдвинуть его на сутки в ту или другую сторону.
+   */
+  startedAt: string | null
+  completedAt: string | null
+  /** Личный комментарий к записи. Хранится как есть, без обрезки и разметки. */
+  notes: string | null
   /** Когда запись меняли у нас или на сервере. */
   updatedAt: number
   /**
@@ -137,6 +166,14 @@ function text(value: unknown): string | null {
 }
 
 /**
+ * Дата вида ГГГГ-ММ-ДД или null. Форма проверяется строго: файл дубля
+ * мог быть правлен руками, а поле даты в окне и сам сервер ждут ровно этот вид.
+ */
+function dateText(value: unknown): string | null {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null
+}
+
+/**
  * Тип тайтла из прочитанного. Неизвестное считается аниме:
  * таких записей подавляющее большинство, и первое же обновление исправит ошибку.
  */
@@ -156,6 +193,10 @@ function normalizeEntry(entry: SnapshotEntry): SnapshotEntry {
     score10: typeof entry.score10 === 'number' ? entry.score10 : 0,
     progress: typeof entry.progress === 'number' ? entry.progress : 0,
     volumes: typeof entry.volumes === 'number' ? entry.volumes : 0,
+    repeat: typeof entry.repeat === 'number' ? entry.repeat : 0,
+    startedAt: dateText(entry.startedAt),
+    completedAt: dateText(entry.completedAt),
+    notes: text(entry.notes),
     updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
     isAdult: entry.isAdult === true,
     romaji: text(entry.romaji),
@@ -396,7 +437,7 @@ async function writeQueue(edits: PendingEdit[]): Promise<void> {
 
 /**
  * Кладёт правку в очередь и возвращает её в готовом виде. Запись немедленная.
- * Задержки здесь нет сознательно: это единственные данные, которые негде взять заново.
+ * Задержек здесь нет сознательно: это единственные данные, которые негде взять заново.
  */
 export async function enqueueEdit(
   mediaId: number,
