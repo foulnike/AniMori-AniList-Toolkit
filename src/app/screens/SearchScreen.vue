@@ -6,7 +6,7 @@ import { computed, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
 import { rememberBrief } from '@/core/media-looks'
-import { isRussianWord, searchCatalog } from '@/core/media-search'
+import { searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
@@ -59,8 +59,6 @@ const total = ref<number | null>(null)
 const hasNext = ref(false)
 const page = ref(1)
 
-/** Путь поиска виден человеку: чей ответ он читает — вопрос не праздный. */
-const viaShikimori = computed(() => isRussianWord(word.value))
 const asked = computed(() => word.value.trim())
 
 /** Номера идущих работ: ответ на устаревший вопрос в выдачу не попадает. */
@@ -153,7 +151,7 @@ function redraw(): void {
 
 /**
  * Добирает русские названия тем строкам, где их ещё нет. Русский путь сюда
- * почти не заходит: имена пришли вместе с находками Шикимори.
+ * почти не заходит: имена пришли вместе с находками.
  */
 async function fillTitles(): Promise<void> {
   const mine = ++titleRun
@@ -288,14 +286,7 @@ function open(mediaId: number): void {
       </label>
     </div>
 
-    <p class="am-meta">
-      <template v-if="asked === ''">
-        Ищет по чужому каталогу. Свой список ищите во вкладке «Списки».
-      </template>
-      <template v-else-if="viaShikimori"> Русское слово ищется через Шикимори. </template>
-      <template v-else> Поиск по каталогу AniList. </template>
-      <template v-if="total !== null"> Найдено {{ total }}. </template>
-    </p>
+    <p v-if="total !== null" class="am-meta">Найдено {{ total }}</p>
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
@@ -309,7 +300,7 @@ function open(mediaId: number): void {
     <div v-else-if="asked === ''" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⌕</span>
       <span>Начните вводить название.</span>
-      <span>Кириллица тоже работает: русское слово уходит на Шикимори.</span>
+      <span>Можно по-русски, по-английски или на латинице.</span>
     </div>
 
     <div v-else-if="rows.length === 0 && !busy" class="am-empty">
