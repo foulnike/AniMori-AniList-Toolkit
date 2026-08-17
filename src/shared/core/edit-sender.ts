@@ -31,6 +31,14 @@ let sweepInFlight: Promise<void> | null = null
 /** Таймер фонового разбора. */
 let sweepTimer: number | undefined
 
+/**
+ * Строка правки в значение снимка. Пустая строка — это «стереть»:
+ * очередь везёт только строки и числа, а null у нас занят удалением записи.
+ */
+function orNull(value: string): string | null {
+  return value === '' ? null : value
+}
+
 /** Кладёт правку в память, чтобы экран обновился до ответа сервера. */
 function applyToMemory(mediaId: number, kind: EditKind, value: string | number | null): void {
   if (kind === 'remove') {
@@ -51,6 +59,10 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
         score10: 0,
         progress: 0,
         volumes: 0,
+        repeat: 0,
+        startedAt: null,
+        completedAt: null,
+        notes: null,
         updatedAt: Date.now(),
         isAdult: false,
         romaji: null,
@@ -60,6 +72,11 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
   if (kind === 'status' && typeof value === 'string') entry.status = value
   if (kind === 'score' && typeof value === 'number') entry.score10 = value
   if (kind === 'progress' && typeof value === 'number') entry.progress = value
+  if (kind === 'volumes' && typeof value === 'number') entry.volumes = value
+  if (kind === 'repeat' && typeof value === 'number') entry.repeat = value
+  if (kind === 'startedAt' && typeof value === 'string') entry.startedAt = orNull(value)
+  if (kind === 'completedAt' && typeof value === 'string') entry.completedAt = orNull(value)
+  if (kind === 'notes' && typeof value === 'string') entry.notes = orNull(value)
 
   entry.updatedAt = Date.now()
   putEntry(entry)
@@ -76,6 +93,23 @@ function sendOne(edit: PendingEdit): Promise<EditOutcome> {
   }
   if (edit.kind === 'progress' && typeof edit.value === 'number') {
     return saveEntry(edit.mediaId, { progress: edit.value })
+  }
+  if (edit.kind === 'volumes' && typeof edit.value === 'number') {
+    return saveEntry(edit.mediaId, { volumes: edit.value })
+  }
+  if (edit.kind === 'repeat' && typeof edit.value === 'number') {
+    return saveEntry(edit.mediaId, { repeat: edit.value })
+  }
+  // Ключ передаётся всегда, даже со значением null: именно так дата стирается.
+  if (edit.kind === 'startedAt' && typeof edit.value === 'string') {
+    return saveEntry(edit.mediaId, { startedAt: orNull(edit.value) })
+  }
+  if (edit.kind === 'completedAt' && typeof edit.value === 'string') {
+    return saveEntry(edit.mediaId, { completedAt: orNull(edit.value) })
+  }
+  // Комментарий стирается пустой строкой, так что её и шлём как есть.
+  if (edit.kind === 'notes' && typeof edit.value === 'string') {
+    return saveEntry(edit.mediaId, { notes: edit.value })
   }
 
   // Значение не того вида: отправлять нечего, держать тоже незачем.
