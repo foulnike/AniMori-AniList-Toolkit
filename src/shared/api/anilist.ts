@@ -40,6 +40,12 @@ let serverFailStreak = 0
 /** Копия токена в памяти: заполняется loadAlToken() до первого запроса. */
 let alTokenCache = ''
 
+/**
+ * Есть ли пропуск у самой оболочки. В десктопе токен лежит в Rust и разметке
+ * не виден совсем, так что без этого флажка клиент считал бы, что входа нет.
+ */
+let shellSigned = false
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -119,11 +125,29 @@ export function getAlToken(): string | null {
 }
 
 /**
- * Есть ли чем подписать запрос. В десктопе пропуск лежит в оболочке и разметке
- * не виден, так что здесь это ответ только про наш собственный токен.
+ * Сообщает клиенту, есть ли пропуск у оболочки. Зовёт единственное место,
+ * которое знает про вызовы Rust — src/app/auth/session.ts.
+ *
+ * Сам токен сюда не передаётся сознательно: пропуск в разметке не должен
+ * появляться вообще, а для выбора между подписанным и публичным запросом
+ * достаточно знать сам факт.
  */
-function canSign(): boolean {
-  return getAlToken() !== null
+export function setShellSigned(value: boolean): void {
+  if (shellSigned === value) return
+
+  shellSigned = value
+  Logger('INFO', `AniList: пропуск в оболочке ${value ? 'есть' : 'снят'}`)
+}
+
+/**
+ * Есть ли чем подписать запрос. Два источника и оба нужны: свой токен
+ * в скрипте и пропуск оболочки в настольном приложении.
+ *
+ * Спрашивают те, кому без подписи идти в сеть вовсе незачем: список
+ * и очередь правок.
+ */
+export function canSignAniList(): boolean {
+  return shellSigned || getAlToken() !== null
 }
 
 /**
@@ -239,7 +263,7 @@ export async function anilistQuery<T = unknown>(
 
   // Подписать нечем: мост на такую просьбу отказывает целиком, и запрос,
   // которому пропуск был нужен лишь для своей закладки, не ушёл бы вовсе.
-  const signed = useAuth && canSign()
+  const signed = useAuth && canSignAniList()
   if (useAuth && !signed) {
     Logger('API', 'AniList: вход не выполнен, запрос идёт без подписи')
   }
