@@ -1,6 +1,6 @@
 <!--
-  Панель «Ссылки»: тумблеры внешних источников, их домены и свои шаблоны адресов.
-  Идентификаторы set_extlinks, set_link_*, set_*_domain и am-custom-* сохранены.
+  Панель «Ссылки»: тумблеры внешних источников и их домены.
+  Идентификаторы set_extlinks, set_link_* и set_*_domain сохранены.
   Запись идёт по change, а не на каждое нажатие: normalizeDomain резал бы адрес на лету.
 -->
 <template>
@@ -66,94 +66,11 @@
       @change="onDomainChange('mangalib', $event)"
     />
   </div>
-
-  <div class="amk-card">
-    <div class="amk-card-title">Свои ссылки</div>
-    <div id="am-custom-links-list" style="display: flex; flex-direction: column; gap: 10px">
-      <div v-for="(link, index) in customLinks" :key="index" class="am-cl-row">
-        <div style="display: flex; gap: 8px; align-items: center">
-          <input
-            class="amk-input"
-            placeholder="Название"
-            style="flex: 1"
-            :value="link.name"
-            @change="onLinkFieldChange(index, 'name', $event)"
-          />
-          <button
-            class="amk-btn amk-btn-ghost am-cl-del"
-            title="Удалить"
-            @click="removeCustomLink(index)"
-          >
-            ✕
-          </button>
-        </div>
-        <input
-          class="amk-input amk-mono"
-          :placeholder="CUSTOM_URL_EXAMPLE"
-          style="margin-top: 6px"
-          :value="link.url"
-          @change="onLinkFieldChange(index, 'url', $event)"
-        />
-        <div class="am-cl-swatches">
-          <span
-            v-for="color in CL_COLORS"
-            :key="color"
-            class="am-cl-sw"
-            :class="{ active: link.color === color }"
-            :style="{ background: 'rgb(' + color + ')' }"
-            @click="setCustomLinkColor(index, color)"
-          ></span>
-        </div>
-      </div>
-    </div>
-    <button
-      class="amk-btn amk-btn-ghost"
-      id="am-custom-add"
-      style="width: 100%; margin-top: 10px"
-      @click="addCustomLink()"
-    >
-      ＋ Добавить свою ссылку
-    </button>
-    <div class="amk-row-hint" style="padding: 10px 2px 2px; line-height: 1.5">
-      В URL-шаблоне подставляются:
-      <code
-        style="
-          background: rgba(var(--color-text-light), 0.12);
-          padding: 1px 5px;
-          border-radius: 4px;
-        "
-        >{ru}</code
-      >
-      — русское название,
-      <code
-        style="
-          background: rgba(var(--color-text-light), 0.12);
-          padding: 1px 5px;
-          border-radius: 4px;
-        "
-        >{romaji}</code
-      >
-      — ромадзи,
-      <code
-        style="
-          background: rgba(var(--color-text-light), 0.12);
-          padding: 1px 5px;
-          border-radius: 4px;
-        "
-        >{query}</code
-      >
-      — авто (ru → romaji). Всё кодируется автоматически.
-    </div>
-  </div>
 </template>
 
 <script setup lang="ts">
-import { CL_COLORS } from '@/core/custom-links'
 import {
-  CUSTOM_URL_EXAMPLE,
-  addCustomLink,
   animegoDomain,
-  customLinks,
   enableExtLinks,
   enableLinkAnimego,
   enableLinkMangalib,
@@ -161,9 +78,6 @@ import {
   enableLinkYummy,
   mangalibDomain,
   normalizeDomain,
-  persistCustomLinks,
-  removeCustomLink,
-  setCustomLinkColor,
   yummyDomain,
 } from './settings-state'
 
@@ -177,12 +91,5 @@ function onDomainChange(which: 'yummy' | 'animego' | 'mangalib', e: Event): void
   if (which === 'yummy') yummyDomain.value = normalized
   else if (which === 'animego') animegoDomain.value = normalized
   else mangalibDomain.value = normalized
-}
-
-function onLinkFieldChange(index: number, field: 'name' | 'url', e: Event): void {
-  const link = customLinks.value[index]
-  if (!link) return
-  link[field] = inputValue(e).trim()
-  persistCustomLinks()
 }
 </script>
