@@ -1,24 +1,26 @@
 <script setup lang="ts">
 // Пункт 3.5: списки одним экраном на оба вида. Данные, обновление и
-// снимок у аниме и манги общие, разные только подписи и столбец томов.
+// снимок у аниме и манги общие, разные только подписи и счёт частей.
 // Здесь же поиск по своему списку: искать надо там, где список и лежит.
-// Поиск по чужому каталогу живёт на своём экране: там сеть и другие столбцы.
+// Поиск по чужому каталогу живёт на своём экране: там сеть и другие метки.
 import { computed, onMounted, ref } from 'vue'
 
 import { initCollection, refreshFromServer } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
 import { startEditSender } from '@/core/edit-sender'
+import { peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { searchOwnList } from '@/core/media-search'
-import { peekRussianTitle, prefetchRussianTitles } from '@/core/media-title'
+import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { SnapshotEntry } from '@/core/snapshot'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
+import MediaTile from '../components/MediaTile.vue'
 import { navigate } from '../router'
 
 /**
  * Сколько записей рисуется за раз. Полный список бывает на тысячи записей,
- * а каждая требует русского названия — то есть обращения к чужому сервису.
+ * а каждая требует обложки и русского названия.
  */
 const PAGE_LIMIT = 100
 
@@ -30,6 +32,9 @@ const FOUND_LIMIT = 60
 
 /** Пауза после последнего нажатия. Поиск идёт в памяти, поэтому пауза короткая. */
 const TYPING_PAUSE_MS = 250
+
+/** Сколько плиток-заглушек показать на время подъёма списка. */
+const HOLD_COUNT = 18
 
 /** Подвкладки вида. Сервер знает только эти два типа записей. */
 const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
@@ -57,25 +62,39 @@ const MANGA_STATUS: ReadonlyArray<{ key: string; title: string }> = [
   { key: 'DROPPED', title: 'Брошено' },
 ]
 
-/**
- * Строка списка в виде, готовом к отрисовке. Три названия вместо одного:
- * русское может быть ещё не добыто, а строку надо показать сразу.
- */
+/** Вид тайтла по-русски: сервер зовёт их по-английски и заглавными. */
+const FORMAT_WORDS: Readonly<Record<string, string>> = {
+  TV: 'ТВ',
+  TV_SHORT: 'Короткий ТВ',
+  MOVIE: 'Фильм',
+  SPECIAL: 'Спешл',
+  OVA: 'OVA',
+  ONA: 'ONA',
+  MUSIC: 'Клип',
+  MANGA: 'Манга',
+  NOVEL: 'Ранобэ',
+  ONE_SHOT: 'Ваншот',
+}
+
+/** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
 interface Row {
   mediaId: number
-  score10: number
-  progress: number
-  volumes: number
-  title: string | null
-  romaji: string | null
-  english: string | null
+  title: string
+  facts: string
+  mark: string | null
+  own: string | null
+  done: number
+  cover: string | null
+  color: string | null
+  adult: boolean
 }
 
 /** Идёт ли работа со списком: подъём снимка или ответ сервера. */
 const busy = ref(true)
 
-/** Идёт ли добор названий. Кнопки списка он держать не должен. */
+/** Идёт ли добор названий или обложек. Кнопки списка он держать не должен. */
 const titlesBusy = ref(false)
+const looksBusy = ref(false)
 
 /** Идёт ли отбор по слову. На кириллице перед отбором поднимается склад. */
 const searchBusy = ref(false)
@@ -88,19 +107,20 @@ const rows = ref<Row[]>([])
 const counts = ref<Map<string, number>>(new Map())
 const total = ref(0)
 
-/** Подписи закладок и столбцов зависят только от вида. */
+/** Подписи закладок зависят только от вида. */
 const statusTabs = computed(() => (kind.value === 'MANGA' ? MANGA_STATUS : ANIME_STATUS))
-const isManga = computed(() => kind.value === 'MANGA')
 const searching = computed(() => word.value.trim() !== '')
+const shown = computed(() => (searching.value ? total.value : (counts.value.get(activeStatus.value) ?? 0)))
 
 /**
  * Найденные записи последнего поиска. Не реактивные сознательно:
- * по ним перерисовываются строки, когда добрались названия.
+ * по ним перерисовываются плитки, когда добрались обложки и названия.
  */
 let foundEntries: SnapshotEntry[] = []
 
 /** Номера идущих работ: старый цикл видит, что его ответ больше не нужен. */
 let titleRun = 0
+let lookRun = 0
 let searchRun = 0
 
 /** Таймер паузы набора. */
@@ -110,21 +130,58 @@ function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/** Запись памяти в строку показа. Ссылки на записи в разметку не передаются. */
+/** Короткая подпись под названием: вид и год. Больше в две строки не влезает. */
+function factsText(look: MediaLook | null): string {
+  if (look === null) return ''
+
+  const parts: string[] = []
+  if (look.format !== null) parts.push(FORMAT_WORDS[look.format] ?? look.format)
+  if (look.seasonYear !== null) parts.push(String(look.seasonYear))
+  return parts.join(' · ')
+}
+
+/** Свой счёт частей на постере. Неизвестный итог не выдумывается. */
+function ownText(entry: SnapshotEntry, parts: number | null): string | null {
+  const word = entry.type === 'MANGA' ? 'гл.' : 'эп.'
+  if (parts === null) return entry.progress > 0 ? `${entry.progress} ${word}` : null
+  return `${entry.progress} / ${parts} ${word}`
+}
+
+/** Доля пройденного для полосы. Завершённое залито целиком даже без итога. */
+function donePart(entry: SnapshotEntry, parts: number | null): number {
+  if (entry.status === 'COMPLETED') return 1
+  if (parts === null || parts <= 0 || entry.progress <= 0) return 0
+  return Math.min(1, entry.progress / parts)
+}
+
+/**
+ * Запись памяти в плитку. Название: русское, латиница, английское, номер.
+ * Номер остаётся только у записи, созданной правкой до ответа сервера.
+ */
 function toRow(entry: SnapshotEntry): Row {
+  const look = peekLook(entry.mediaId)
+  const parts = entry.type === 'MANGA' ? (look?.chapters ?? null) : (look?.episodes ?? null)
+
   return {
     mediaId: entry.mediaId,
-    score10: entry.score10,
-    progress: entry.progress,
-    volumes: entry.volumes,
-    title: peekRussianTitle(entry.mediaId)?.russian ?? null,
-    romaji: entry.romaji,
-    english: entry.english,
+    title:
+      peekRussianName(entry.mediaId) ??
+      entry.romaji ??
+      entry.english ??
+      look?.romaji ??
+      `Тайтл #${entry.mediaId}`,
+    facts: factsText(look),
+    mark: entry.score10 > 0 ? `★ ${entry.score10.toFixed(1)}` : null,
+    own: ownText(entry, parts),
+    done: donePart(entry, parts),
+    cover: look?.cover ?? null,
+    color: look?.color ?? null,
+    adult: entry.isAdult,
   }
 }
 
 /**
- * Снимает кусок коллекции в свои строки. При идущем поиске строки
+ * Снимает кусок коллекции в свои плитки. При идущем поиске плитки
  * берутся из находок: закладка тогда не главная, а слово главное.
  */
 function redraw(): void {
@@ -146,26 +203,44 @@ function redraw(): void {
 }
 
 /**
- * Что показать в строке. Порядок: русское, латиница, английское, номер.
- * Номер остаётся только у записи, созданной правкой до ответа сервера.
+ * Добирает обложки для показанных плиток. Сотня строк стоит двух
+ * запросов, а возврат в ту же закладку — ни одного.
  */
-function titleText(row: Row): string {
-  return row.title ?? row.romaji ?? row.english ?? `Тайтл #${row.mediaId}`
-}
+async function fillLooks(): Promise<void> {
+  const mine = ++lookRun
+  const asked = kind.value
+  const wanted = rows.value
+    .filter((row) => peekLook(row.mediaId) === null)
+    .map((row) => row.mediaId)
 
-/** Оценка для глаз: ноль у AniList значит «оценки нет», а не «ноль баллов». */
-function scoreText(score10: number): string {
-  return score10 > 0 ? score10.toFixed(1) : '—'
+  if (wanted.length === 0) return
+
+  looksBusy.value = true
+
+  try {
+    await warmLooks(wanted, asked)
+    if (mine !== lookRun) return
+
+    redraw()
+  } catch (e) {
+    // Без обложек список живой: на плитке останется первая буква названия.
+    Logger('WARN', 'Списки: обложки добрать не вышло', e)
+  } finally {
+    if (mine === lookRun) looksBusy.value = false
+  }
 }
 
 /**
- * Добирает русские названия для показанных строк пачками. Ошибка здесь
- * не стопорит экран: без перевода строка останется на латинице.
+ * Добирает русские названия для показанных плиток пачками. Ошибка здесь
+ * не стопорит экран: без перевода название останется на латинице.
  */
 async function fillTitles(): Promise<void> {
-  const run = ++titleRun
+  const mine = ++titleRun
   const asked = kind.value
-  const wanted = rows.value.filter((row) => row.title === null).map((row) => row.mediaId)
+  const wanted = rows.value
+    .filter((row) => peekRussianName(row.mediaId) === null)
+    .map((row) => row.mediaId)
+
   if (wanted.length === 0) return
 
   titlesBusy.value = true
@@ -173,19 +248,26 @@ async function fillTitles(): Promise<void> {
   try {
     for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
       // Закладку или вид успели сменить: остаток пачек этому показу не нужен.
-      if (run !== titleRun) return
+      if (mine !== titleRun) return
 
       // Тип обязателен: у Шикимори аниме и манга лежат в разных разделах.
       await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), asked)
-      if (run !== titleRun) return
+      if (mine !== titleRun) return
 
       redraw()
     }
   } catch (e) {
     Logger('WARN', 'Списки: названия добрать не вышло', e)
   } finally {
-    if (run === titleRun) titlesBusy.value = false
+    if (mine === titleRun) titlesBusy.value = false
   }
+}
+
+/** Отрисовка и два добора вслед. Сами доборы зовут только redraw — круга нет. */
+function refill(): void {
+  redraw()
+  void fillLooks()
+  void fillTitles()
 }
 
 /**
@@ -193,12 +275,12 @@ async function fillTitles(): Promise<void> {
  * но на кириллице сначала поднимает склад русских названий.
  */
 async function runSearch(): Promise<void> {
-  const run = ++searchRun
+  const mine = ++searchRun
   const asked = word.value.trim()
 
   if (asked === '') {
     foundEntries = []
-    redraw()
+    refill()
     return
   }
 
@@ -206,17 +288,15 @@ async function runSearch(): Promise<void> {
 
   try {
     const found = await searchOwnList(asked, kind.value, FOUND_LIMIT)
-    if (run !== searchRun) return
+    if (mine !== searchRun) return
 
     foundEntries = found
-    redraw()
+    refill()
   } catch (e) {
     Logger('WARN', 'Списки: поиск по своему списку не удался', e)
   } finally {
-    if (run === searchRun) searchBusy.value = false
+    if (mine === searchRun) searchBusy.value = false
   }
-
-  void fillTitles()
 }
 
 /** Набор слова: поиск ждёт короткую паузу, чтобы не бегать на каждую букву. */
@@ -239,8 +319,7 @@ function onClear(): void {
   word.value = ''
   foundEntries = []
   searchRun++
-  redraw()
-  void fillTitles()
+  refill()
 }
 
 /** Переключение вида. Сети не требует: в памяти лежат оба вида сразу. */
@@ -255,8 +334,7 @@ function pickKind(next: MediaType): void {
     return
   }
 
-  redraw()
-  void fillTitles()
+  refill()
 }
 
 /** Переключение закладки статуса. */
@@ -264,8 +342,7 @@ function pickStatus(status: string): void {
   if (activeStatus.value === status) return
 
   activeStatus.value = status
-  redraw()
-  void fillTitles()
+  refill()
 }
 
 /** Переход на карточку. Номер идёт строкой: в адресе окна чисел нет. */
@@ -283,14 +360,12 @@ async function pull(): Promise<void> {
 
   try {
     await refreshFromServer()
-    redraw()
+    refill()
   } catch (e) {
     trouble.value = describe(e)
   } finally {
     busy.value = false
   }
-
-  void fillTitles()
 }
 
 function onRefresh(): void {
@@ -302,7 +377,7 @@ onMounted(() => {
     try {
       // Сначала снимок и отрисовка, потом сеть: список виден даже при лежащем API.
       await initCollection()
-      redraw()
+      refill()
 
       // Отправщик запускается только после подъёма: до него в памяти править нечего.
       startEditSender()
@@ -318,261 +393,127 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="am-screen">
-    <div class="am-tabs">
-      <button
-        v-for="tab in KIND_TABS"
-        :key="tab.key"
-        class="am-tab am-tab--kind"
-        :class="{ 'am-tab--on': tab.key === kind }"
-        type="button"
-        @click="pickKind(tab.key)"
-      >
-        {{ tab.title }}
+  <section class="am-page">
+    <div class="am-bar">
+      <div class="am-seg">
+        <button
+          v-for="tab in KIND_TABS"
+          :key="tab.key"
+          class="am-seg__btn"
+          :class="{ 'am-seg__btn--on': tab.key === kind }"
+          type="button"
+          @click="pickKind(tab.key)"
+        >
+          {{ tab.title }}
+        </button>
+      </div>
+
+      <span class="am-bar__gap" />
+
+      <label class="am-search">
+        <span class="am-search__mark" aria-hidden="true">⌕</span>
+        <input
+          v-model="word"
+          class="am-input"
+          type="search"
+          placeholder="Поиск по своему списку"
+          @input="onType"
+        />
+      </label>
+
+      <button v-if="searching" class="am-btn am-btn--ghost" type="button" @click="onClear">
+        Сбросить
       </button>
 
-      <span class="am-tabs__gap" />
-
-      <input
-        v-model="word"
-        class="am-screen__input"
-        type="search"
-        placeholder="Поиск по своему списку"
-        @input="onType"
-      />
-
-      <button v-if="searching" class="am-tab" type="button" @click="onClear">Сбросить</button>
+      <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onRefresh">
+        {{ busy ? 'Обновляем…' : 'Обновить' }}
+      </button>
     </div>
 
-    <div v-if="!searching" class="am-tabs">
+    <div v-if="!searching" class="am-bar">
       <button
         v-for="tab in statusTabs"
         :key="tab.key"
-        class="am-tab"
-        :class="{ 'am-tab--on': tab.key === activeStatus }"
+        class="am-chip"
+        :class="{ 'am-chip--on': tab.key === activeStatus }"
         type="button"
         @click="pickStatus(tab.key)"
       >
         {{ tab.title }}
-        <span class="am-tab__num">{{ counts.get(tab.key) ?? 0 }}</span>
+        <span class="am-chip__num">{{ counts.get(tab.key) ?? 0 }}</span>
       </button>
     </div>
 
-    <p v-if="trouble" class="am-screen__error">{{ trouble }}</p>
+    <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
-    <p v-if="busy && total === 0" class="am-screen__hint">Список загружается…</p>
-    <p v-else-if="total === 0" class="am-screen__hint">
-      Записей пока нет. Войдите в AniList на экране настроек и обновите список.
-    </p>
-    <p v-else-if="searchBusy && rows.length === 0" class="am-screen__hint">Ищем…</p>
-    <p v-else-if="searching && rows.length === 0" class="am-screen__hint">
-      В своём списке ничего не нашлось. Поищите в каталоге на экране поиска.
-    </p>
-    <p v-else-if="rows.length === 0" class="am-screen__hint">В этой закладке записей нет.</p>
-
-    <ul v-else class="am-rows">
-      <li
-        v-for="row in rows"
-        :key="row.mediaId"
-        class="am-row"
-        :class="{ 'am-row--manga': isManga }"
-      >
-        <button class="am-row__open" type="button" @click="open(row.mediaId)">
-          {{ titleText(row) }}
-        </button>
-        <span class="am-row__num" title="Оценка">{{ scoreText(row.score10) }}</span>
-        <span class="am-row__num" :title="isManga ? 'Прочитано глав' : 'Просмотрено частей'">
-          {{ row.progress }}
-        </span>
-        <span v-if="isManga" class="am-row__num" title="Прочитано томов">{{ row.volumes }}</span>
+    <ul v-if="busy && rows.length === 0" class="am-grid">
+      <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
+        <span class="am-skeleton am-hold__art" />
+        <span class="am-skeleton am-hold__line" />
       </li>
     </ul>
 
-    <div class="am-foot">
-      <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onRefresh">
-        Обновить с сервера
-      </button>
-      <span v-if="searching" class="am-screen__meta">
-        Нашлось {{ rows.length }} из {{ total }}
-        <template v-if="searchBusy"> · ищем…</template>
-        <template v-if="titlesBusy"> · названия догружаются…</template>
-      </span>
-      <span v-else class="am-screen__meta">
-        Всего {{ total }} · показано {{ rows.length }} из
-        {{ counts.get(activeStatus) ?? 0 }}
-        <template v-if="titlesBusy"> · названия догружаются…</template>
-      </span>
+    <div v-else-if="total === 0" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⊘</span>
+      <span>Записей пока нет.</span>
+      <span>Войдите в AniList на экране настроек и обновите список.</span>
     </div>
+
+    <div v-else-if="searchBusy && rows.length === 0" class="am-empty">
+      <span>Ищем…</span>
+    </div>
+
+    <div v-else-if="searching && rows.length === 0" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⌕</span>
+      <span>В своём списке ничего не нашлось.</span>
+      <span>Поищите в каталоге на экране поиска.</span>
+    </div>
+
+    <div v-else-if="rows.length === 0" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⊘</span>
+      <span>В этой закладке записей нет.</span>
+    </div>
+
+    <ul v-else class="am-grid">
+      <MediaTile
+        v-for="row in rows"
+        :key="row.mediaId"
+        :title="row.title"
+        :facts="row.facts"
+        :cover="row.cover"
+        :color="row.color"
+        :mark="row.mark"
+        :own="row.own"
+        :done="row.done"
+        :adult="row.adult"
+        @open="open(row.mediaId)"
+      />
+    </ul>
+
+    <p class="am-meta">
+      Всего {{ total }} · показано {{ rows.length }} из {{ shown }}
+      <template v-if="looksBusy"> · обложки грузятся…</template>
+      <template v-if="titlesBusy"> · названия грузятся…</template>
+    </p>
   </section>
 </template>
 
 <style scoped>
-.am-screen {
+.am-hold {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  align-items: flex-start;
-  width: 100%;
+  gap: 9px;
 }
 
-.am-screen__hint {
-  max-width: 640px;
-  margin: 0;
-  color: var(--am-dim);
+.am-hold__art {
+  display: block;
+  aspect-ratio: 2 / 3;
 }
 
-.am-screen__meta {
-  font-size: 13px;
-  color: var(--am-dim);
-}
-
-.am-screen__error {
-  margin: 0;
-  font-size: 13px;
-  color: #ff8a8a;
-}
-
-.am-screen__input {
-  width: 260px;
-  padding: 7px 10px;
-  font: inherit;
-  color: var(--am-text);
-  background: var(--am-panel);
-  border: 1px solid var(--am-line);
-  border-radius: 8px;
-}
-
-.am-screen__input:focus {
-  border-color: var(--am-accent);
-  outline: none;
-}
-
-.am-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  width: 100%;
-  max-width: 720px;
-}
-
-.am-tabs__gap {
-  flex: 1 1 auto;
-}
-
-.am-tab {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 7px 12px;
-  font: inherit;
-  color: var(--am-text);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--am-line);
-  border-radius: 8px;
-}
-
-.am-tab:hover {
-  background: var(--am-hover);
-}
-
-.am-tab--on {
-  background: var(--am-panel);
-  border-color: var(--am-accent);
-}
-
-.am-tab--kind {
-  font-weight: 600;
-}
-
-.am-tab__num {
-  font-size: 12px;
-  color: var(--am-dim);
-}
-
-.am-rows {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 720px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  background: var(--am-panel);
-  border: 1px solid var(--am-line);
-  border-radius: 12px;
-}
-
-.am-row {
-  display: grid;
-  grid-template-columns: 1fr 52px 52px;
-  gap: 8px;
-  align-items: center;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--am-line);
-}
-
-.am-row--manga {
-  grid-template-columns: 1fr 52px 52px 52px;
-}
-
-.am-row:last-child {
-  border-bottom: none;
-}
-
-.am-row__open {
-  padding: 6px 0;
-  overflow: hidden;
-  font: inherit;
-  color: var(--am-text);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-  background: transparent;
-  border: none;
-}
-
-.am-row__open:hover {
-  color: var(--am-accent);
-}
-
-.am-row__num {
-  font-size: 13px;
-  color: var(--am-dim);
-  text-align: right;
-}
-
-.am-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.am-btn {
-  padding: 8px 14px;
-  font: inherit;
-  color: #06121f;
-  cursor: pointer;
-  background: var(--am-accent);
-  border: 1px solid var(--am-accent);
-  border-radius: 8px;
-}
-
-.am-btn:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.am-btn--ghost {
-  color: var(--am-text);
-  background: transparent;
-  border-color: var(--am-line);
-}
-
-.am-btn--ghost:hover:not(:disabled) {
-  background: var(--am-hover);
+.am-hold__line {
+  display: block;
+  width: 72%;
+  height: 12px;
+  border-radius: var(--am-r-s);
 }
 </style>
