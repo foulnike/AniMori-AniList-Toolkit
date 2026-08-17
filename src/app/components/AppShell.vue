@@ -16,13 +16,30 @@ const title = computed(() => SCREEN_TITLES[active.value])
 // на экранах из меню он увёл бы в пустую историю окна.
 // Кнопка живёт только здесь: вторая в карточке была дублём.
 const canGoBack = computed(() => active.value === 'media')
+
+/** Обновление окна целиком, как в браузере: одна кнопка на все экраны. */
+function onReload(): void {
+  window.location.reload()
+}
 </script>
 
 <template>
   <div class="am-shell">
     <aside class="am-side">
       <div class="am-side__brand">
-        <span class="am-side__logo" aria-hidden="true">A</span>
+        <svg class="am-side__logo" viewBox="0 0 32 32" role="img" aria-label="AniMori">
+          <defs>
+            <linearGradient id="am-logo-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#58a6ff" />
+              <stop offset="1" stop-color="#a486ff" />
+            </linearGradient>
+          </defs>
+
+          <rect width="32" height="32" rx="9" fill="url(#am-logo-grad)" />
+          <path d="M16 5.5 22 15.5 10 15.5Z" fill="#08111c" />
+          <path d="M16 11.5 25.5 25 6.5 25Z" fill="#08111c" />
+        </svg>
+
         <span class="am-side__name">AniMori</span>
       </div>
 
@@ -51,6 +68,12 @@ const canGoBack = computed(() => active.value === 'media')
           <span>Назад</span>
         </button>
         <h1 class="am-top__title">{{ title }}</h1>
+
+        <span class="am-top__gap" />
+
+        <button class="am-top__icon" type="button" title="Обновить окно" @click="onReload">
+          <span aria-hidden="true">⟳</span>
+        </button>
       </header>
 
       <main class="am-view">
@@ -89,16 +112,9 @@ const canGoBack = computed(() => active.value === 'media')
 }
 
 .am-side__logo {
-  display: flex;
   flex: none;
-  align-items: center;
-  justify-content: center;
   width: 32px;
   height: 32px;
-  font-size: 17px;
-  font-weight: 700;
-  color: #08111c;
-  background: linear-gradient(140deg, var(--am-accent), var(--am-accent-2));
   border-radius: 10px;
   box-shadow: 0 6px 16px rgba(88, 166, 255, 0.35);
 }
@@ -201,6 +217,33 @@ const canGoBack = computed(() => active.value === 'media')
   font-size: 17px;
   font-weight: 650;
   letter-spacing: -0.01em;
+}
+
+.am-top__gap {
+  flex: 1;
+}
+
+/* Круглая кнопка справа: обновляет окно целиком. */
+.am-top__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+}
+
+.am-top__icon:hover {
+  color: var(--am-text);
+  background: var(--am-hover);
+  border-color: var(--am-accent);
 }
 
 .am-view {
