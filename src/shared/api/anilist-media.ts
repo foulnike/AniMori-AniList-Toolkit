@@ -24,6 +24,7 @@ const MAL_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int) {
 // Подробности карточки. Запись списка спрашиваем вместе с тайтлом: один
 // запрос вместо двух, а сверка с памятью покажет неушедшие правки.
 // Баннер и цвет обложки — для крупного вида: без них карточка серая.
+// Ближайшая серия — для счёта вышедшего у идущего сезона.
 // Пересмотры, даты и комментарий нужны окну правки: оно открывается из карточки
 // и своих запросов не делает.
 const CARD_QUERY = `query ($id: Int!) {
@@ -44,6 +45,10 @@ const CARD_QUERY = `query ($id: Int!) {
     siteUrl
     bannerImage
     description(asHtml: false)
+    nextAiringEpisode {
+      episode
+      airingAt
+    }
     title {
       romaji
       english
@@ -97,6 +102,10 @@ const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $per
       seasonYear
       averageScore
       isAdult
+      nextAiringEpisode {
+        episode
+        airingAt
+      }
       title {
         romaji
         english
@@ -130,6 +139,12 @@ interface FuzzyReply {
   day?: number | null
 }
 
+/** Ближайшая серия: номер и срок выхода в секундах. */
+interface AiringReply {
+  episode?: number | null
+  airingAt?: number | null
+}
+
 interface OwnReply {
   status?: string | null
   score?: number | null
@@ -159,6 +174,7 @@ interface CardReply {
     siteUrl?: string | null
     bannerImage?: string | null
     description?: string | null
+    nextAiringEpisode?: AiringReply | null
     title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
     coverImage?: {
       extraLarge?: string | null
@@ -183,6 +199,7 @@ interface SearchReply {
       seasonYear?: number | null
       averageScore?: number | null
       isAdult?: boolean | null
+      nextAiringEpisode?: AiringReply | null
       title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
       coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
       mediaListEntry?: OwnReply | null
@@ -236,6 +253,10 @@ export interface MediaCard {
   banner: string | null
   /** Основной цвет обложки: подложка и подсветка крупного вида. */
   color: string | null
+  /** Номер серии, которая ещё только выйдет. У завершённого его нет. */
+  airingEpisode: number | null
+  /** Срок выхода той серии в секундах. */
+  airingAt: number | null
   /** Запись в списке хозяина или `null`, если тайтл в списке не числится. */
   ownEntry: ServerEntry | null
 }
@@ -261,6 +282,10 @@ export interface MediaBrief {
   cover: string | null
   /** Основной цвет обложки: подложка плитки, пока картинка не приехала. */
   color: string | null
+  /** Номер серии, которая ещё только выйдет: вышло на одну меньше. */
+  airingEpisode: number | null
+  /** Срок выхода той серии в секундах: по нему видно, что облик отстал. */
+  airingAt: number | null
   ownEntry: ServerEntry | null
 }
 
@@ -391,6 +416,8 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     cover: textOrNull(media.coverImage?.extraLarge) ?? textOrNull(media.coverImage?.large),
     banner: textOrNull(media.bannerImage),
     color: textOrNull(media.coverImage?.color),
+    airingEpisode: countOrNull(media.nextAiringEpisode?.episode),
+    airingAt: countOrNull(media.nextAiringEpisode?.airingAt),
     ownEntry: ownOrNull(media.mediaListEntry),
   }
 }
@@ -439,6 +466,8 @@ export async function searchMedia(
       native: textOrNull(item.title?.native),
       cover: textOrNull(item.coverImage?.large) ?? textOrNull(item.coverImage?.medium),
       color: textOrNull(item.coverImage?.color),
+      airingEpisode: countOrNull(item.nextAiringEpisode?.episode),
+      airingAt: countOrNull(item.nextAiringEpisode?.airingAt),
       ownEntry: ownOrNull(item.mediaListEntry),
     })
   }
