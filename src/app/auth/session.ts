@@ -3,11 +3,13 @@
 // вся платформа спрятана за мостом.
 //
 // Самого токена здесь нет и не будет: он живёт в Rust (src-tauri/src/auth.rs),
-// а запросы к API пойдут оттуда же в пункте 2.3.
+// а запросы к API идут оттуда же.
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { computed, ref, type ComputedRef } from 'vue'
+
+import { setShellSigned } from '@/api/anilist'
 
 /// Форма ответа команд входа. Совпадает с AuthStatus в auth.rs.
 export type AuthStatus = {
@@ -36,10 +38,21 @@ export function isDesktop(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-/// Спросить состояние входа у Rust. Зовётся при открытии настроек.
+/// Запоминает состояние и сообщает о нём клиенту AniList.
+///
+/// Без этого общий код судил бы о входе по своему токену в разметке,
+/// которого в настольном приложении нет и не должно быть: свой список
+/// оставался бы пустым даже после успешного входа.
+function remember(status: AuthStatus): void {
+  state.value = status
+  setShellSigned(status.authorized)
+}
+
+/// Спросить состояние входа у Rust. Зовётся на старте приложения
+/// и при каждом открытии настроек.
 export async function refreshAuth(): Promise<void> {
   if (!isDesktop()) return
-  state.value = await invoke<AuthStatus>('animori_auth_status')
+  remember(await invoke<AuthStatus>('animori_auth_status'))
 }
 
 /// Начать вход: Rust поднимает приёмник и открывает окно с формой входа
@@ -51,19 +64,22 @@ export async function startLogin(): Promise<LoginStart> {
 /// Запасной путь: токен, вставленный руками. Срок не передаётся: его нет
 /// ни в токене, ни у человека перед глазами.
 export async function submitToken(token: string): Promise<void> {
-  state.value = await invoke<AuthStatus>('animori_auth_submit', { token, expiresIn: null })
+  remember(await invoke<AuthStatus>('animori_auth_submit', { token, expiresIn: null }))
 }
 
 /// Выйти из аккаунта.
 export async function logout(): Promise<void> {
-  state.value = await invoke<AuthStatus>('animori_auth_logout')
+  remember(await invoke<AuthStatus>('animori_auth_logout'))
 }
 
 /// Подписка на событие входа. Возвращает отключатель — так же, как startRouter.
+///
+/// Вход случается в стороннем окне, и событие — единственный способ узнать
+/// об успехе сразу, а не при следующем заходе в настройки.
 export async function watchAuth(): Promise<() => void> {
   if (!isDesktop()) return () => {}
 
   return listen<AuthStatus>(EVENT_CHANGED, (event) => {
-    state.value = event.payload
+    remember(event.payload)
   })
 }
