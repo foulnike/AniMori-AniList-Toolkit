@@ -1,0 +1,426 @@
+/* Токены вида и общие части разметки: цвета, кнопки, поля, сетки. */
+/* Один источник правды для всех экранов: местные стили — только про своё. */
+/* Тема пока одна, тёмная: светлая придёт вместе с настройками вида. */
+
+:root {
+  color-scheme: dark;
+
+  --am-bg: #080b11;
+  --am-bg-2: #0b1018;
+  --am-panel: #10161f;
+  --am-panel-2: #151d29;
+  --am-hover: #1b2532;
+  --am-line: #1f2a38;
+  --am-line-soft: rgba(255, 255, 255, 0.07);
+
+  --am-text: #e9eef8;
+  --am-dim: #94a4bc;
+  --am-faint: #6b7c95;
+
+  --am-accent: #58a6ff;
+  --am-accent-2: #a486ff;
+  --am-accent-soft: rgba(88, 166, 255, 0.14);
+  --am-good: #3ddc97;
+  --am-warn: #ffc75a;
+  --am-bad: #ff7a7a;
+
+  --am-r-s: 8px;
+  --am-r-m: 12px;
+  --am-r-l: 16px;
+  --am-r-xl: 22px;
+
+  --am-sh-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --am-sh-2: 0 18px 40px rgba(2, 5, 10, 0.55);
+
+  /* Полотно широкое, но не бесконечное: на четырёх килопикселях
+     строка во всю ширину не читается. */
+  --am-page-max: 1720px;
+
+  /* Нижняя ширина плитки в сетке постеров. */
+  --am-tile: 168px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--am-text);
+  background-color: var(--am-bg);
+  /* Подсветка сверху даёт глубину: плоский тёмный фон выглядит мёртвым. */
+  background-image:
+    radial-gradient(1200px 600px at 12% -10%, rgba(88, 166, 255, 0.1), transparent 60%),
+    radial-gradient(1000px 500px at 88% -20%, rgba(164, 134, 255, 0.09), transparent 60%);
+  background-repeat: no-repeat;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100%;
+}
+
+img {
+  display: block;
+}
+
+::selection {
+  background: var(--am-accent-soft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--am-accent);
+  outline-offset: 2px;
+}
+
+/* Полосы прокрутки системного вида в тёмном окне бьют по глазам. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #24313f;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #33445a;
+  background-clip: content-box;
+}
+
+/* Полотно экрана: все экраны начинаются с него. */
+.am-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+}
+
+/* Шапка раздела: название слева, действия справа. */
+.am-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+}
+
+.am-bar__gap {
+  flex: 1 1 auto;
+}
+
+.am-h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.am-h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.am-dim {
+  color: var(--am-dim);
+}
+
+.am-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--am-dim);
+}
+
+.am-error {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #ffd4d4;
+  background: rgba(255, 122, 122, 0.1);
+  border: 1px solid rgba(255, 122, 122, 0.3);
+  border-radius: var(--am-r-m);
+}
+
+/* Пустое место: не голая строка, а объяснение в рамке. */
+.am-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  padding: 44px 20px;
+  color: var(--am-dim);
+  text-align: center;
+  background: var(--am-panel);
+  border: 1px dashed var(--am-line);
+  border-radius: var(--am-r-l);
+}
+
+.am-empty__mark {
+  font-size: 26px;
+  opacity: 0.7;
+}
+
+/* Панель: любой блок со своим фоном. */
+.am-panel {
+  padding: 18px;
+  background: var(--am-panel);
+  border: 1px solid var(--am-line);
+  border-radius: var(--am-r-l);
+  box-shadow: var(--am-sh-1);
+}
+
+/* Кнопки. Главная залита акцентом, остальные тише. */
+.am-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 16px;
+  font: inherit;
+  font-weight: 600;
+  color: #06121f;
+  white-space: nowrap;
+  cursor: pointer;
+  background: linear-gradient(180deg, #6fb2ff, var(--am-accent));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  box-shadow: var(--am-sh-1);
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease,
+    background 0.12s ease;
+}
+
+.am-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.am-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.am-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.am-btn--ghost {
+  color: var(--am-text);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--am-line);
+  box-shadow: none;
+}
+
+.am-btn--ghost:hover:not(:disabled) {
+  background: var(--am-hover);
+}
+
+.am-btn--soft {
+  color: var(--am-accent);
+  background: var(--am-accent-soft);
+  border-color: rgba(88, 166, 255, 0.3);
+  box-shadow: none;
+}
+
+.am-btn--wide {
+  width: 100%;
+}
+
+/* Поле ввода и поисковая строка с значком. */
+.am-input {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  color: var(--am-text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+}
+
+.am-input::placeholder {
+  color: var(--am-faint);
+}
+
+.am-input:focus {
+  background: var(--am-panel-2);
+  border-color: var(--am-accent);
+  outline: none;
+}
+
+.am-search {
+  position: relative;
+  display: flex;
+  flex: 0 1 340px;
+  align-items: center;
+  min-width: 220px;
+}
+
+.am-search__mark {
+  position: absolute;
+  left: 13px;
+  font-size: 14px;
+  color: var(--am-faint);
+  pointer-events: none;
+}
+
+.am-search .am-input {
+  padding-left: 34px;
+}
+
+/* Закладка-пилюля со счётчиком. */
+.am-chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--am-dim);
+  white-space: nowrap;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.am-chip:hover {
+  color: var(--am-text);
+  background: var(--am-hover);
+}
+
+.am-chip--on {
+  color: #06121f;
+  font-weight: 600;
+  background: var(--am-accent);
+  border-color: transparent;
+}
+
+.am-chip__num {
+  font-size: 12px;
+  color: inherit;
+  opacity: 0.72;
+}
+
+/* Переключатель двух видов: Аниме и Манга. */
+.am-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+}
+
+.am-seg__btn {
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+}
+
+.am-seg__btn:hover {
+  color: var(--am-text);
+}
+
+.am-seg__btn--on {
+  color: var(--am-text);
+  background: var(--am-panel-2);
+  box-shadow: var(--am-sh-1);
+}
+
+/* Сетка постеров: тянется на всю ширину окна сама. */
+.am-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--am-tile), 1fr));
+  gap: 22px 18px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Полка: ряд постеров с боковой прокруткой для главной. */
+.am-rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(var(--am-tile), 1fr);
+  gap: 18px;
+  width: 100%;
+  margin: 0;
+  padding: 2px 2px 10px;
+  overflow-x: auto;
+  list-style: none;
+}
+
+/* Полоса счёта частей. */
+.am-line {
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
+.am-line__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--am-accent), var(--am-accent-2));
+  border-radius: 999px;
+}
+
+/* Заглушка на время ожидания. */
+.am-skeleton {
+  background: linear-gradient(90deg, #131c27 25%, #1b2634 37%, #131c27 63%);
+  background-size: 400% 100%;
+  border-radius: var(--am-r-m);
+  animation: am-shine 1.4s ease infinite;
+}
+
+@keyframes am-shine {
+  0% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
