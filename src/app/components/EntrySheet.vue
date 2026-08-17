@@ -276,7 +276,7 @@ onBeforeUnmount(() => {
 }
 
 .am-row__name {
-  font-size: 12.5px
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--am-dim);
 }
