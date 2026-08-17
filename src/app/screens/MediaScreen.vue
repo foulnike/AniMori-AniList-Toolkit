@@ -333,8 +333,7 @@ watch(mediaId, () => {
               </span>
 
               <p v-if="card.type === 'MANGA'" class="am-meta">
-                Прочитано томов: {{ volumes }}. Правка томов появится вместе с её видом в
-                очереди.
+                Прочитано томов: {{ volumes }}. Правка томов появится вместе с её видом в очереди.
               </p>
 
               <p v-if="drifted" class="am-meta">

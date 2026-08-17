@@ -110,7 +110,9 @@ const total = ref(0)
 /** Подписи закладок зависят только от вида. */
 const statusTabs = computed(() => (kind.value === 'MANGA' ? MANGA_STATUS : ANIME_STATUS))
 const searching = computed(() => word.value.trim() !== '')
-const shown = computed(() => (searching.value ? total.value : (counts.value.get(activeStatus.value) ?? 0)))
+const shown = computed(() =>
+  searching.value ? total.value : (counts.value.get(activeStatus.value) ?? 0),
+)
 
 /**
  * Найденные записи последнего поиска. Не реактивные сознательно:

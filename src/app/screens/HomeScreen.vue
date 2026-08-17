@@ -119,11 +119,7 @@ function toRow(entry: SnapshotEntry): Row {
 
 /** Что человек смотрит или читает сейчас, свежее — впереди. */
 function pickShelf(type: MediaType, limit: number): SnapshotEntry[] {
-  return selectEntries(
-    { type, status: ['CURRENT', 'REPEATING'] },
-    { key: 'updated' },
-    { limit },
-  )
+  return selectEntries({ type, status: ['CURRENT', 'REPEATING'] }, { key: 'updated' }, { limit })
 }
 
 /** Сводка по памяти. Средняя с одним знаком: два здесь ничего не добавляют. */
@@ -243,15 +239,13 @@ onMounted(() => {
       <div class="am-hey__text">
         <h2 class="am-hey__title">Списки и каталог в одном окне</h2>
         <p class="am-hey__sub">
-          Список живёт в памяти и открывается без сети, правки уходят очередью, а
-          кириллица ищется через Шикимори.
+          Список живёт в памяти и открывается без сети, правки уходят очередью, а кириллица ищется
+          через Шикимори.
         </p>
 
         <div class="am-hey__acts">
           <button class="am-btn" type="button" @click="toLists">Мои списки</button>
-          <button class="am-btn am-btn--ghost" type="button" @click="toSearch">
-            Найти тайтл
-          </button>
+          <button class="am-btn am-btn--ghost" type="button" @click="toSearch">Найти тайтл</button>
         </div>
       </div>
     </div>
