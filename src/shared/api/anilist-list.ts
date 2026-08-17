@@ -4,7 +4,7 @@
 
 import type { MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
-import { anilistQuery, getAlToken } from './anilist'
+import { anilistQuery, canSignAniList } from './anilist'
 
 /** Кто вошёл. Коллекция запрашивается по номеру пользователя, а не по пропуску. */
 export interface ViewerInfo {
@@ -195,11 +195,14 @@ function toEntry(value: unknown): RawListEntry | null {
  * Кто сейчас вошёл. Отсутствие ответа ошибкой не считается: без входа
  * приложение работает, просто без своего списка.
  *
- * Без пропуска сеть не тревожится вовсе: ответ известен заранее, а место
+ * Без подписи сеть не тревожится вовсе: ответ известен заранее, а место
  * в темпе нужно поиску и карточкам, которые работают и без входа.
+ *
+ * Спрашивается общий признак подписи, а не свой токен: в настольном
+ * приложении пропуск лежит в Rust, и разметка его не видит принципиально.
  */
 export async function fetchViewer(): Promise<ViewerInfo | null> {
-  if (getAlToken() === null) {
+  if (!canSignAniList()) {
     Logger('INFO', 'AniList: вход не выполнен, хозяина у сервера не спрашиваем')
     return null
   }
