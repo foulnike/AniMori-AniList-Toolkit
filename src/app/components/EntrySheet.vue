@@ -436,7 +436,7 @@ onBeforeUnmount(() => {
 }
 
 .am-field__name {
-  font-size: 12.5px
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--am-dim);
