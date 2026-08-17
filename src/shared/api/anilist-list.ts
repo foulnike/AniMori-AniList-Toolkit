@@ -4,7 +4,7 @@
 
 import type { MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
-import { anilistQuery } from './anilist'
+import { anilistQuery, getAlToken } from './anilist'
 
 /** Кто вошёл. Коллекция запрашивается по номеру пользователя, а не по пропуску. */
 export interface ViewerInfo {
@@ -194,8 +194,16 @@ function toEntry(value: unknown): RawListEntry | null {
 /**
  * Кто сейчас вошёл. Отсутствие ответа ошибкой не считается: без входа
  * приложение работает, просто без своего списка.
+ *
+ * Без пропуска сеть не тревожится вовсе: ответ известен заранее, а место
+ * в темпе нужно поиску и карточкам, которые работают и без входа.
  */
 export async function fetchViewer(): Promise<ViewerInfo | null> {
+  if (getAlToken() === null) {
+    Logger('INFO', 'AniList: вход не выполнен, хозяина у сервера не спрашиваем')
+    return null
+  }
+
   const reply = await anilistQuery<ViewerReply>(VIEWER_QUERY, {}, true)
   const viewer = reply.data?.Viewer
 
