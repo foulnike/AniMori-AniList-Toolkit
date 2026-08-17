@@ -2,7 +2,7 @@
 // Пункт 3.5: списки одним экраном на оба вида. Данные, обновление и
 // снимок у аниме и манги общие, разные только подписи и счёт частей.
 // Здесь же поиск по своему списку и порядок показа: и то и другое про список.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { initCollection, refreshFromServer } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
@@ -19,8 +19,9 @@ import { formatWord, partsShort, statusList } from '../labels'
 import { navigate } from '../router'
 
 /**
- * Сколько записей рисуется за раз. Полный список бывает на тысячи записей,
- * а каждая требует обложки и русского названия.
+ * Сколько записей рисуется за раз и на сколько растёт потолок при доборе.
+ * Полный список бывает на тысячи записей, а каждая требует обложки
+ * и русского названия, поэтому сразу всё мы не рисуем.
  */
 const PAGE_LIMIT = 100
 
@@ -35,6 +36,9 @@ const TYPING_PAUSE_MS = 250
 
 /** Сколько плиток-заглушек показать на время подъёма списка. */
 const HOLD_COUNT = 18
+
+/** За сколько до конца списка заказывать добор: раньше видного края. */
+const TAIL_MARGIN = '600px'
 
 /** Подвкладки вида. Сервер знает только эти два типа записей. */
 const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
@@ -86,12 +90,30 @@ const rows = ref<Row[]>([])
 const counts = ref<Map<string, number>>(new Map())
 const total = ref(0)
 
+/**
+ * Сколько строк показываем сейчас. Растёт шагом PAGE_LIMIT по добору,
+ * а на любой смене отбора возвращается к первой сотне.
+ */
+const limit = ref(PAGE_LIMIT)
+
+/** Сколько строк отобралось до обрезки потолком. */
+const picked = ref(0)
+
+/** Метка конца списка: по её появлению в окне заказывается добор. */
+const tailMark = ref<HTMLElement | null>(null)
+
 /** Подписи закладок зависят только от вида. */
 const statusTabs = computed(() => statusList(kind.value))
 const searching = computed(() => word.value.trim() !== '')
 const shown = computed(() =>
   searching.value ? total.value : (counts.value.get(activeStatus.value) ?? 0),
 )
+
+/** Остался ли хвост за потолком. */
+const hasMore = computed(() => picked.value > rows.value.length)
+
+/** Сколько ещё скрыто: число на кнопке честнее голого «ещё». */
+const restCount = computed(() => Math.max(0, picked.value - rows.value.length))
 
 /**
  * Найденные записи последнего поиска. Не реактивные сознательно:
@@ -106,6 +128,9 @@ let searchRun = 0
 
 /** Таймер паузы набора. */
 let timer: ReturnType<typeof setTimeout> | null = null
+
+/** Смотритель за меткой конца списка. */
+let watcher: IntersectionObserver | null = null
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -208,17 +233,18 @@ function toRow(entry: SnapshotEntry): Row {
 /**
  * Снимает кусок коллекции в свои плитки. При идущем поиске плитки берутся
  * из находок: закладка тогда не главная, а слово главное. Порядок выбирает
- * человек, поэтому сотня отрезается уже после сортировки всей закладки.
+ * человек, поэтому потолок отрезается уже после сортировки всей закладки.
  */
 function redraw(): void {
   counts.value = countByStatus({ type: kind.value })
   total.value = countEntries({ type: kind.value })
 
-  const picked = searching.value
+  const list = searching.value
     ? foundEntries
     : selectEntries({ type: kind.value, status: [activeStatus.value] })
 
-  rows.value = sortEntries(picked).slice(0, PAGE_LIMIT).map(toRow)
+  picked.value = list.length
+  rows.value = sortEntries(list).slice(0, limit.value).map(toRow)
 }
 
 /**
@@ -289,6 +315,19 @@ function refill(): void {
   void fillTitles()
 }
 
+/** Возврат к первой сотне: любая смена отбора начинает показ сначала. */
+function resetLimit(): void {
+  limit.value = PAGE_LIMIT
+}
+
+/** Добор следующей сотни. За концом списка ничего не делает. */
+function showMore(): void {
+  if (!hasMore.value) return
+
+  limit.value += PAGE_LIMIT
+  refill()
+}
+
 /**
  * Отбор по слову по всем закладкам выбранного вида. Сети не требует,
  * но на кириллице сначала поднимает склад русских названий.
@@ -296,6 +335,8 @@ function refill(): void {
 async function runSearch(): Promise<void> {
   const mine = ++searchRun
   const asked = word.value.trim()
+
+  resetLimit()
 
   if (asked === '') {
     foundEntries = []
@@ -338,6 +379,7 @@ function onClear(): void {
   word.value = ''
   foundEntries = []
   searchRun++
+  resetLimit()
   refill()
 }
 
@@ -347,6 +389,7 @@ function pickKind(next: MediaType): void {
 
   kind.value = next
   activeStatus.value = 'CURRENT'
+  resetLimit()
 
   if (searching.value) {
     void runSearch()
@@ -361,11 +404,13 @@ function pickStatus(status: string): void {
   if (activeStatus.value === status) return
 
   activeStatus.value = status
+  resetLimit()
   refill()
 }
 
 /** Смена порядка: пересобираем показ, новым строкам нужны обложки и названия. */
 function pickSort(): void {
+  resetLimit()
   refill()
 }
 
@@ -397,6 +442,19 @@ function onRefresh(): void {
 }
 
 onMounted(() => {
+  // Смотритель за концом списка: добор заказывается заранее, до самого края.
+  // На старых окружениях смотрителя может не быть: останется кнопка.
+  if (tailMark.value !== null && typeof IntersectionObserver !== 'undefined') {
+    watcher = new IntersectionObserver(
+      (marks) => {
+        if (marks.some((mark) => mark.isIntersecting)) showMore()
+      },
+      { rootMargin: TAIL_MARGIN },
+    )
+
+    watcher.observe(tailMark.value)
+  }
+
   void (async () => {
     try {
       // Сначала снимок и отрисовка, потом сеть: список виден даже при лежащем API.
@@ -413,6 +471,13 @@ onMounted(() => {
 
     await pull()
   })()
+})
+
+onBeforeUnmount(() => {
+  if (timer !== null) clearTimeout(timer)
+
+  watcher?.disconnect()
+  watcher = null
 })
 </script>
 
@@ -523,6 +588,13 @@ onMounted(() => {
       />
     </ul>
 
+    <!-- Метка конца списка живёт всегда: смотритель берёт её один раз при сборке. -->
+    <div ref="tailMark" class="am-tail">
+      <button v-if="hasMore" class="am-btn am-btn--soft" type="button" @click="showMore">
+        Показать ещё · осталось {{ restCount }}
+      </button>
+    </div>
+
     <p class="am-meta">
       Всего {{ total }} · показано {{ rows.length }} из {{ shown }}
       <template v-if="looksBusy"> · обложки грузятся…</template>
@@ -554,6 +626,13 @@ onMounted(() => {
 
 .am-sort__pick:hover {
   background: var(--am-hover);
+}
+
+/* Конец списка: место под кнопку добора и сама метка для смотрителя. */
+.am-tail {
+  display: flex;
+  justify-content: center;
+  min-height: 8px;
 }
 
 .am-hold {
