@@ -10,7 +10,7 @@ import { Logger } from '../utils/logger'
 import type { MediaType, ShikiCacheRecord } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи, а не номер источника. */
-const KEY_PREFIX = 'LOOK1_'
+const KEY_PREFIX = 'LOOK2_'
 
 /** По скольку тайтлов спрашиваем за раз: потолок страницы у AniList. */
 const LOOK_CHUNK = 50
@@ -29,6 +29,10 @@ export interface MediaLook {
   averageScore: number | null
   romaji: string | null
   english: string | null
+  /** Номер серии, которая ещё только выйдет. У завершённого его нет. */
+  airingEpisode: number | null
+  /** Срок выхода той серии в секундах: по нему видно, что облик отстал. */
+  airingAt: number | null
 }
 
 /** Знание этого запуска. `null` значит «спрашивали, сервер тайтла не знает». */
@@ -44,6 +48,38 @@ function cacheKey(mediaId: number): string {
   return `${KEY_PREFIX}${mediaId}`
 }
 
+/**
+ * Сколько частей уже вышло. У манги это главы, у аниме — серии.
+ *
+ * У онгоинга объявленного итога часто нет вовсе, зато известен номер
+ * ближайшей серии: вышло ровно на одну меньше. Без этого счёта
+ * полоса у идущего сезона всегда стояла на нуле.
+ */
+export function partsOut(
+  look: {
+    episodes: number | null
+    chapters: number | null
+    airingEpisode: number | null
+  } | null,
+  type: MediaType,
+): number | null {
+  if (look === null) return null
+  if (type === 'MANGA') return look.chapters
+
+  const aired = look.airingEpisode === null ? null : look.airingEpisode - 1
+  if (aired !== null && aired > 0) return aired
+
+  return look.episodes
+}
+
+/**
+ * Отстал ли облик от сетки выхода. Хранение бессрочное, поэтому у онгоинга
+ * старение считается не по времени записи, а по сроку ближайшей серии.
+ */
+function airedOut(look: MediaLook): boolean {
+  return look.airingAt !== null && look.airingAt * 1000 <= Date.now()
+}
+
 /** Читает облик со склада. Протухшая запись считается отсутствующей. */
 async function readCache(mediaId: number): Promise<MediaLook | null> {
   asked.add(mediaId)
@@ -53,7 +89,12 @@ async function readCache(mediaId: number): Promise<MediaLook | null> {
   if (Date.now() - record.ts > CACHE_TIME) return null
 
   const data = record.data
-  return data && typeof data === 'object' ? data : null
+  if (!data || typeof data !== 'object') return null
+
+  // Серия уже вышла: счёт в записи отстал, облик берётся из сети заново.
+  if (airedOut(data)) return null
+
+  return data
 }
 
 /** Кладёт облик на склад. Сама картинка не хранится — только её адрес. */
@@ -73,6 +114,8 @@ function fromBrief(brief: MediaBrief): MediaLook {
     averageScore: brief.averageScore,
     romaji: brief.romaji,
     english: brief.english,
+    airingEpisode: brief.airingEpisode,
+    airingAt: brief.airingAt,
   }
 }
 
@@ -103,7 +146,10 @@ export async function warmLooks(mediaIds: number[], type: MediaType): Promise<nu
   const unknown: number[] = []
 
   for (const mediaId of mediaIds) {
-    if (memory.has(mediaId)) continue
+    const known = memory.get(mediaId)
+
+    // У онгоинга знание запуска тоже устаревает: окно живёт днями.
+    if (known !== undefined && !(known !== null && airedOut(known))) continue
 
     if (!asked.has(mediaId)) {
       try {

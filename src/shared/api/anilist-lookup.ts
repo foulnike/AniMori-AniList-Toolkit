@@ -15,6 +15,7 @@ type LookupField = 'idMal_in' | 'id_in'
 
 // Тело запроса одно на два пути: поля выписки совпадают с поиском
 // по слову, различается только то, по чему сервер отбирал.
+// Ближайшая серия нужна счёту онгоинга: итога у него ещё нет.
 function lookupQuery(field: LookupField): string {
   return `query ($ids: [Int], $type: MediaType, $perPage: Int!) {
   Page(page: 1, perPage: $perPage) {
@@ -29,6 +30,10 @@ function lookupQuery(field: LookupField): string {
       seasonYear
       averageScore
       isAdult
+      nextAiringEpisode {
+        episode
+        airingAt
+      }
       title {
         romaji
         english
@@ -57,6 +62,12 @@ interface OwnReply {
   progressVolumes?: number | null
 }
 
+/** Ближайшая серия: номер и срок выхода в секундах. */
+interface AiringReply {
+  episode?: number | null
+  airingAt?: number | null
+}
+
 interface MediaReply {
   id?: number
   idMal?: number | null
@@ -68,6 +79,7 @@ interface MediaReply {
   seasonYear?: number | null
   averageScore?: number | null
   isAdult?: boolean | null
+  nextAiringEpisode?: AiringReply | null
   title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
   coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
   mediaListEntry?: OwnReply | null
@@ -126,6 +138,8 @@ function toBrief(item: MediaReply | null): MediaBrief | null {
     seasonYear: countOrNull(item.seasonYear),
     averageScore: countOrNull(item.averageScore),
     isAdult: item.isAdult === true,
+    airingEpisode: countOrNull(item.nextAiringEpisode?.episode),
+    airingAt: countOrNull(item.nextAiringEpisode?.airingAt),
     romaji: textOrNull(item.title?.romaji),
     english: textOrNull(item.title?.english),
     native: textOrNull(item.title?.native),
