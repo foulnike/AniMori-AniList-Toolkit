@@ -47,10 +47,16 @@ const manualOpen = ref(false)
 // из него берётся срок ожидания для подсказки.
 const login = ref<LoginStart | null>(null)
 
-// Сброс и обновление идут молча, и без явного ответа человек не поймёт,
+// Сброс и перенос идут молча, и без явного ответа человек не поймёт,
 // случилось ли что-нибудь вообще.
 const note = ref('')
 const cleared = ref(false)
+
+/**
+ * Спрошено ли подтверждение переноса. Перенос замещает список целиком,
+ * а такое не делают одним промахом мыши.
+ */
+const asking = ref(false)
 
 const listCount = ref(0)
 const usedSize = ref('')
@@ -109,15 +115,30 @@ function onManual(): void {
   })
 }
 
-// Полное обновление: оба типа целиком. Удалённое на сайте уйдёт и у нас —
-// только здесь и только так.
+/**
+ * Перенос списка с AniList: оба типа целиком и с заменой местного.
+ * Зовётся только из подтверждения и никогда сам по входу.
+ */
 function onPull(): void {
+  asking.value = false
+
   void guard(async () => {
     note.value = ''
     const count = await refreshFromServer()
     await readState()
-    note.value = `Список обновлён: записей ${count}.`
+    note.value = `Список перенесён с AniList: записей ${count}.`
   })
+}
+
+/** Нажатие на кнопку переноса: сначала вопрос, действие потом. */
+function onAsk(): void {
+  note.value = ''
+  error.value = ''
+  asking.value = true
+}
+
+function onCancel(): void {
+  asking.value = false
 }
 
 // Память сбрасывается только руками. Перезагрузка не дёргается сама:
@@ -184,7 +205,7 @@ onBeforeUnmount(() => {
             {{
               authStatus.authorized
                 ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
-                : 'Подключите аккаунт, чтобы видеть и править свои списки. Поиск и карточки работают и без него.'
+                : 'Подключите аккаунт, чтобы перенести свой список и править его на AniList. Поиск, карточки и свои записи работают и без него.'
             }}
           </p>
 
@@ -199,8 +220,14 @@ onBeforeUnmount(() => {
               Подключить аккаунт
             </button>
             <template v-else>
-              <button class="am-btn" type="button" :disabled="busy" @click="onPull">
-                Обновить список
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="busy"
+                title="Забрать список с AniList и заменить им местный"
+                @click="onAsk"
+              >
+                {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
               </button>
               <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onLogout">
                 Отключить
@@ -215,6 +242,21 @@ onBeforeUnmount(() => {
             >
               Ввести токен
             </button>
+          </div>
+
+          <!-- Вопрос перед заменой: человек видит, что будет с местными записями. -->
+          <div v-if="asking" class="am-ask">
+            <p class="am-ask__text">
+              Список с AniList заменит местный целиком. Записи, добавленные здесь без входа,
+              будут потеряны, если их нет на AniList. Сейчас у нас записей: {{ listCount }}.
+            </p>
+
+            <div class="am-row">
+              <button class="am-btn" type="button" :disabled="busy" @click="onPull">
+                Перенести и заменить
+              </button>
+              <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+            </div>
           </div>
 
           <!-- Показывается только после нажатия: до него окна входа нет и ждать
@@ -319,6 +361,23 @@ onBeforeUnmount(() => {
 .am-field {
   flex: 1 1 240px;
   min-width: 200px;
+}
+
+/* Вопрос перед заменой списка: отделён рамкой, но без крика. */
+.am-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 13px 15px;
+  background: rgba(255, 190, 90, 0.07);
+  border: 1px solid rgba(255, 190, 90, 0.35);
+  border-radius: var(--am-r-m);
+}
+
+.am-ask__text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--am-dim);
 }
 
 /* Исход действия: виден сразу и не путается с пояснениями рядом. */
