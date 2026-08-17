@@ -11,6 +11,12 @@ const ANILIST_HOST = 'anilist.co'
 /** Имя узла MyAnimeList. */
 const MAL_HOST = 'myanimelist.net'
 
+/**
+ * Первое зеркало Шикимори. Запасное имя не украшение: взятие по номеру
+ * считается возможно пустым, а ссылка без узла вела бы в никуда.
+ */
+const SHIKI_HOST = SHIKI_DOMAINS[0] ?? 'shikimori.io'
+
 /** Одна ссылка хвоста описания. */
 export interface MediaLink {
   /** Ключ для перебора в разметке. */
@@ -93,7 +99,7 @@ export function mediaLinks(input: MediaLinksInput): MediaLink[] {
     list.push({
       key: 'shiki',
       text: 'Шикимори',
-      url: pageUrl(SHIKI_DOMAINS[0], shikiKind(input.type), malId),
+      url: pageUrl(SHIKI_HOST, shikiKind(input.type), malId),
       hint: 'Открыть карточку на Шикимори',
     })
   }
