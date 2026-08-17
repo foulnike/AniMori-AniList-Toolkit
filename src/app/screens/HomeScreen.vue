@@ -237,11 +237,8 @@ onMounted(() => {
   <section class="am-page">
     <div class="am-hey">
       <div class="am-hey__text">
-        <h2 class="am-hey__title">Списки и каталог в одном окне</h2>
-        <p class="am-hey__sub">
-          Список живёт в памяти и открывается без сети, правки уходят очередью, а кириллица ищется
-          через Шикимори.
-        </p>
+        <h2 class="am-hey__title">С возвращением</h2>
+        <p class="am-hey__sub">Продолжайте с того места, где остановились.</p>
 
         <div class="am-hey__acts">
           <button class="am-btn" type="button" @click="toLists">Мои списки</button>
@@ -407,6 +404,13 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* Постер на полке всегда одного размера: две записи
+   не должны раздуваться на всю ширину окна. */
+.am-rail {
+  grid-auto-columns: 152px;
+  justify-content: start;
 }
 
 .am-hold {
