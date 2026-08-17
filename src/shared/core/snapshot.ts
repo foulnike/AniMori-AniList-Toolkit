@@ -124,6 +124,9 @@ export interface SnapshotEntry {
 /**
  * Снимок целиком. Пишется и читается одной записью: атомарность вместо транзакций.
  * `userId` хранится рядом, иначе после смены входа покажем чужой список.
+ *
+ * userId равный null значит «список местный»: так выглядит и первый запуск
+ * без входа, и список, отвязанный от счёта по просьбе хозяина.
  */
 export interface UserSnapshot {
   version: number
@@ -476,6 +479,24 @@ export async function markEditAccepted(id: string): Promise<void> {
   if (left.length === queue.length) return
 
   await writeQueue(left)
+}
+
+/**
+ * Выбрасывает очередь целиком и возвращает число выброшенных правок.
+ * Нужно при отвязке счёта: правки адресованы прежнему счёту, отправлять их
+ * после отвязки некуда, а при следующем входе они улетели бы на сервер сами.
+ *
+ * Сами записи списка при этом остаются: правки уже накачены на память,
+ * и человек теряет не свои данные, а только их доставку на сайт.
+ */
+export async function clearEditQueue(): Promise<number> {
+  const queue = await readEditQueue()
+  if (queue.length === 0) return 0
+
+  await writeQueue([])
+  Logger('DB', `Очередь правок выброшена: правок ${queue.length}`)
+
+  return queue.length
 }
 
 /**
