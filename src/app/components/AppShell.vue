@@ -7,40 +7,56 @@ import { computed } from 'vue'
 import { currentRoute, goBack, navigate } from '../router'
 import { MENU, SCREEN_TITLES } from '../router/routes'
 
+const version = __ANIMORI_VERSION__
+
 const active = computed(() => currentRoute.value.name)
 const title = computed(() => SCREEN_TITLES[active.value])
 
 // «Назад» нужен только там, куда пришли изнутри приложения:
 // на экранах из меню он увёл бы в пустую историю окна.
+// Кнопка живёт только здесь: вторая в карточке была дублём.
 const canGoBack = computed(() => active.value === 'media')
 </script>
 
 <template>
   <div class="am-shell">
-    <nav class="am-shell__menu">
-      <span class="am-shell__brand">AniMori</span>
-      <button
-        v-for="item in MENU"
-        :key="item.name"
-        class="am-shell__item"
-        :class="{ 'am-shell__item--active': item.name === active }"
-        type="button"
-        @click="navigate(item.name)"
-      >
-        <span class="am-shell__icon" aria-hidden="true">{{ item.icon }}</span>
-        <span>{{ item.title }}</span>
-      </button>
-    </nav>
+    <aside class="am-side">
+      <div class="am-side__brand">
+        <span class="am-side__logo" aria-hidden="true">A</span>
+        <span class="am-side__name">AniMori</span>
+      </div>
 
-    <div class="am-shell__body">
-      <header class="am-shell__head">
-        <button v-if="canGoBack" class="am-shell__back" type="button" @click="goBack">
-          ← Назад
+      <nav class="am-side__menu">
+        <button
+          v-for="item in MENU"
+          :key="item.name"
+          class="am-side__item"
+          :class="{ 'am-side__item--on': item.name === active }"
+          type="button"
+          :title="item.title"
+          @click="navigate(item.name)"
+        >
+          <span class="am-side__icon" aria-hidden="true">{{ item.icon }}</span>
+          <span class="am-side__text">{{ item.title }}</span>
         </button>
-        <h1 class="am-shell__title">{{ title }}</h1>
+      </nav>
+
+      <span class="am-side__foot">{{ version }}</span>
+    </aside>
+
+    <div class="am-body">
+      <header class="am-top">
+        <button v-if="canGoBack" class="am-top__back" type="button" @click="goBack">
+          <span aria-hidden="true">←</span>
+          <span>Назад</span>
+        </button>
+        <h1 class="am-top__title">{{ title }}</h1>
       </header>
-      <main class="am-shell__view">
-        <slot />
+
+      <main class="am-view">
+        <div class="am-view__hold">
+          <slot />
+        </div>
       </main>
     </div>
   </div>
@@ -49,96 +65,183 @@ const canGoBack = computed(() => active.value === 'media')
 <style scoped>
 .am-shell {
   display: grid;
-  grid-template-columns: 208px 1fr;
+  grid-template-columns: 236px minmax(0, 1fr);
   min-height: 100vh;
 }
 
-.am-shell__menu {
+.am-side {
+  position: sticky;
+  top: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px 12px;
-  background: var(--am-panel);
+  gap: 18px;
+  height: 100vh;
+  padding: 20px 14px;
+  background: linear-gradient(180deg, rgba(21, 29, 41, 0.92), rgba(11, 16, 24, 0.92));
   border-right: 1px solid var(--am-line);
 }
 
-.am-shell__brand {
-  padding: 4px 10px 16px;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.am-shell__item {
+.am-side__brand {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 9px 10px;
+  padding: 0 6px;
+}
+
+.am-side__logo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #08111c;
+  background: linear-gradient(140deg, var(--am-accent), var(--am-accent-2));
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(88, 166, 255, 0.35);
+}
+
+.am-side__name {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.am-side__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.am-side__item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
   font: inherit;
+  font-weight: 550;
   color: var(--am-dim);
   text-align: left;
   cursor: pointer;
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--am-r-m);
+  transition:
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
-.am-shell__item:hover {
+.am-side__item:hover {
   color: var(--am-text);
-  background: var(--am-hover);
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.am-shell__item:focus-visible {
-  outline: 2px solid var(--am-accent);
-  outline-offset: 1px;
-}
-
-.am-shell__item--active {
+.am-side__item--on {
   color: var(--am-text);
-  background: var(--am-hover);
+  background: var(--am-accent-soft);
+  box-shadow: inset 2px 0 0 var(--am-accent);
 }
 
-.am-shell__icon {
+.am-side__icon {
   width: 18px;
+  font-size: 16px;
   text-align: center;
 }
 
-.am-shell__body {
+.am-side__foot {
+  margin-top: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--am-faint);
+}
+
+.am-body {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.am-shell__head {
+/* Шапка держится сверху: при сетке в тысячу плиток вернуться к ней иначе долго. */
+.am-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
-  gap: 12px;
+  gap: 14px;
   align-items: center;
-  padding: 14px 24px;
+  padding: 14px 32px;
+  background: rgba(8, 11, 17, 0.82);
   border-bottom: 1px solid var(--am-line);
+  backdrop-filter: blur(10px);
 }
 
-.am-shell__back {
-  padding: 5px 10px;
+.am-top__back {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  padding: 7px 14px;
   font: inherit;
+  font-size: 13px;
   color: var(--am-dim);
   cursor: pointer;
-  background: none;
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--am-line);
-  border-radius: 8px;
+  border-radius: 999px;
 }
 
-.am-shell__back:hover {
+.am-top__back:hover {
   color: var(--am-text);
+  background: var(--am-hover);
 }
 
-.am-shell__title {
+.am-top__title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
-.am-shell__view {
+.am-view {
   flex: 1;
-  padding: 24px;
+  width: 100%;
+  padding: 26px 32px 64px;
+}
+
+/* Потолок ширины с центровкой: без него на широком окне
+   строка текста тянулась бы метрами. */
+.am-view__hold {
+  width: 100%;
+  max-width: var(--am-page-max);
+  margin: 0 auto;
+}
+
+/* Узкое окно: меню сжимается до значков, содержимое остаётся главным. */
+@media (max-width: 1080px) {
+  .am-shell {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .am-side {
+    padding: 20px 10px;
+  }
+
+  .am-side__name,
+  .am-side__text,
+  .am-side__foot {
+    display: none;
+  }
+
+  .am-side__item {
+    justify-content: center;
+    padding: 11px 0;
+  }
+
+  .am-top,
+  .am-view {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
 }
 </style>
