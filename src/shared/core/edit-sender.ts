@@ -2,7 +2,7 @@
 // Экраны зовут только queueEdit и сразу видят правку в памяти.
 // Отказ сервера память не откатывает: правда восстановится обновлением списка.
 
-import { anilistPauseRemaining, isAniListRateLimited } from '../api/anilist'
+import { anilistPauseRemaining, getAlToken, isAniListRateLimited } from '../api/anilist'
 import { removeEntry, saveEntry, type EditOutcome } from '../api/anilist-edit'
 import { Logger } from '../utils/logger'
 import { dropEntry, getEntry, putEntry } from './collection'
@@ -15,6 +15,7 @@ import {
   type PendingEdit,
   type SnapshotEntry,
 } from './snapshot'
+import type { MediaType } from './types'
 
 /**
  * Потолок попыток. После него правка выкидывается: вечная правка
@@ -32,6 +33,18 @@ let sweepInFlight: Promise<void> | null = null
 let sweepTimer: number | undefined
 
 /**
+ * Облик тайтла: то, что запись о себе знать не может, а показ требует.
+ * Экран берёт его из карточки или плитки и передаёт с правкой, иначе
+ * запись, созданная без входа, навсегда осталась бы «Тайтл #id».
+ */
+export type EntryLook = {
+  type: MediaType
+  romaji: string | null
+  english: string | null
+  isAdult: boolean
+}
+
+/**
  * Строка правки в значение снимка. Пустая строка — это «стереть»:
  * очередь везёт только строки и числа, а null у нас занят удалением записи.
  */
@@ -39,8 +52,19 @@ function orNull(value: string): string | null {
   return value === '' ? null : value
 }
 
-/** Кладёт правку в память, чтобы экран обновился до ответа сервера. */
-function applyToMemory(mediaId: number, kind: EditKind, value: string | number | null): void {
+/**
+ * Кладёт правку в память, чтобы экран обновился до ответа сервера.
+ *
+ * @param look Облик тайтла, если экран его знает. Новой записи он даёт имя
+ * и тип, известной — заполняет пустоты. Занятые поля не трогаются: ответ
+ * сервера точнее плитки, с которой пришла правка.
+ */
+function applyToMemory(
+  mediaId: number,
+  kind: EditKind,
+  value: string | number | null,
+  look?: EntryLook,
+): void {
   if (kind === 'remove') {
     dropEntry(mediaId)
     return
@@ -53,8 +77,9 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
     ? { ...known }
     : {
         mediaId,
-        // Правка знает только номер тайтла; тип, метку и имена принесёт обновление списка.
-        type: 'ANIME',
+        // Без облика от экрана остаётся подставка: таких записей большинство,
+        // а обновление списка поле всё равно поправит.
+        type: look?.type ?? 'ANIME',
         status: null,
         score10: 0,
         progress: 0,
@@ -64,10 +89,17 @@ function applyToMemory(mediaId: number, kind: EditKind, value: string | number |
         completedAt: null,
         notes: null,
         updatedAt: Date.now(),
-        isAdult: false,
-        romaji: null,
-        english: null,
+        isAdult: look?.isAdult ?? false,
+        romaji: look?.romaji ?? null,
+        english: look?.english ?? null,
       }
+
+  // Известной записи облик только дополняет пустоты: имя с плитки не должно
+  // затирать имя из ответа сервера.
+  if (known && look) {
+    if (entry.romaji === null) entry.romaji = look.romaji
+    if (entry.english === null) entry.english = look.english
+  }
 
   if (kind === 'status' && typeof value === 'string') entry.status = value
   if (kind === 'score' && typeof value === 'number') entry.score10 = value
@@ -126,6 +158,10 @@ export function flushEdits(): Promise<void> {
 
   sweepInFlight = (async () => {
     try {
+      // Без входа отправлять некуда: сервер отверг бы каждую правку, а попытки
+      // у них считаные. Очередь ждёт входа целиком.
+      if (getAlToken() === null) return
+
       // Сервер закрыт целиком — ходить некуда, и попытки тратить не на что.
       if (isAniListRateLimited()) {
         const left = Math.ceil(anilistPauseRemaining() / 1000)
@@ -184,13 +220,27 @@ export function flushEdits(): Promise<void> {
 /**
  * Единственная точка входа для экранов. Память меняется сразу,
  * очередь пишется немедленно, отправка идёт своим ходом.
+ *
+ * Без входа правка дальше памяти и снимка не идёт: пункт 3.14, свой список
+ * ведётся без учётной записи. Складывать её в очередь нельзя — к моменту
+ * входа она была бы уже выброшена по числу попыток, а перенос списка
+ * с сервера всё равно делается отдельным действием и заменяет местное.
+ *
+ * @param look Облик тайтла, если экран его знает: тип, имена и метка взрослого.
  */
 export async function queueEdit(
   mediaId: number,
   kind: EditKind,
   value: string | number | null,
+  look?: EntryLook,
 ): Promise<void> {
-  applyToMemory(mediaId, kind, value)
+  applyToMemory(mediaId, kind, value, look)
+
+  if (getAlToken() === null) {
+    Logger('DB', `Правка тайтла ${mediaId} сохранена местно: вход не выполнен`)
+    return
+  }
+
   await enqueueEdit(mediaId, kind, value)
   void flushEdits()
 }
