@@ -87,7 +87,7 @@ const repeatWord = computed<string>(() =>
   card.value?.type === 'MANGA' ? 'Перечитывания' : 'Пересмотры',
 )
 
-/** Надпись главной кнопки: своя закладка, а без неё — приглашение добавить. */
+/** Надпись главной кнопки: своя закладка, а без неё приглашение добавить. */
 const listLabel = computed<string>(() => {
   const word = statusWord(card.value?.type ?? 'ANIME', status.value === '' ? null : status.value)
   return word ?? 'Добавить в список'
@@ -656,7 +656,7 @@ watch(mediaId, () => {
 
 /* Панель записи дышит: между блоками воздух, а не слипшиеся строки. */
 .am-mine {
-  gap: 16px;
+  gap: 20px;
 }
 
 /* Главная кнопка крупная и надпись у неё по центру: с дивана и пультом
@@ -667,10 +667,13 @@ watch(mediaId, () => {
   font-weight: 650;
 }
 
+/* Полоса стоит отдельно от кнопки и плиток: вплотную к ним она
+   читалась как часть кнопки. */
 .am-mine__bar {
   display: flex;
   gap: 10px;
   align-items: center;
+  padding: 2px 0 6px;
 }
 
 .am-mine__share {
