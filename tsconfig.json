@@ -33,6 +33,10 @@
       // Здесь порядок строк ни на что не влияет: выигрывает самый точный шаблон,
       // но порядок повторяет конфиг сборки, чтобы сверка шла глазами.
       "@/core/lifecycle": ["src/userscript/lifecycle"],
+      // Пункт 3.6б: словарь и его база живут в слое скрипта: подмена слов нужна
+      // только внутри чужой страницы. Имена остались старыми — как у lifecycle.
+      "@/core/dictionary": ["src/userscript/dictionary"],
+      "@/api/dictionary": ["src/userscript/dictionary-remote"],
       "@/features/adblock": ["src/shared/adblock/index"],
       "@/features/adblock/*": ["src/shared/adblock/*"],
       "@/api/*": ["src/shared/api/*"],
