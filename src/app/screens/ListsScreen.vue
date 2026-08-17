@@ -497,18 +497,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <span class="am-bar__gap" />
-
-      <label class="am-sort">
-        <span class="am-sort__name">Порядок</span>
-        <select v-model="sortKey" class="am-sort__pick" @change="pickSort">
-          <option v-for="item in SORT_TABS" :key="item.key" :value="item.key">
-            {{ item.title }}
-          </option>
-        </select>
-      </label>
-
-      <label class="am-search">
+      <label class="am-search am-search--wide">
         <span class="am-search__mark" aria-hidden="true">⌕</span>
         <input
           v-model="word"
@@ -519,12 +508,21 @@ onBeforeUnmount(() => {
         />
       </label>
 
+      <label class="am-sort">
+        <span class="am-sort__mark" aria-hidden="true">⇅</span>
+        <select v-model="sortKey" class="am-sort__pick" @change="pickSort">
+          <option v-for="item in SORT_TABS" :key="item.key" :value="item.key">
+            {{ item.title }}
+          </option>
+        </select>
+      </label>
+
       <button v-if="searching" class="am-btn am-btn--ghost" type="button" @click="onClear">
         Сбросить
       </button>
 
       <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onRefresh">
-        {{ busy ? 'Обновляем…' : 'Обновить' }}
+        {{ busy ? 'Обновляем…' : 'Обновить список' }}
       </button>
     </div>
 
@@ -604,24 +602,38 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Поиск занимает всё свободное место ряда вместо распорки между частями. */
+.am-search--wide {
+  flex: 1 1 320px;
+}
+
+/* Выбор порядка выглядит такой же пилюлей, как кнопки и поле рядом. */
 .am-sort {
+  position: relative;
   display: inline-flex;
   flex: none;
-  gap: 8px;
   align-items: center;
+}
+
+.am-sort__mark {
+  position: absolute;
+  left: 13px;
   font-size: 13px;
-  color: var(--am-dim);
+  color: var(--am-faint);
+  pointer-events: none;
 }
 
 .am-sort__pick {
-  padding: 8px 14px;
+  min-height: var(--am-ctl);
+  padding: 0 14px 0 32px;
   font: inherit;
   font-size: 13px;
   color: var(--am-text);
   cursor: pointer;
-  background: var(--am-panel-2);
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--am-line);
   border-radius: 999px;
+  appearance: none;
 }
 
 .am-sort__pick:hover {
