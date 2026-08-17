@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Пункт 3.4: карточка тайтла. Номер из адреса, подробности с сервера,
 // а состояние списка — из памяти: там правда свежее чужого ответа.
-// Правки уходят в очередь отправщика, сети этот экран не касается.
+// Настройки записи живут в окне правки, отсюда оно только открывается.
 import { computed, onMounted, ref, watch } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
@@ -10,16 +10,17 @@ import { queueEdit } from '@/core/edit-sender'
 import { getRussianTitle, type RussianTitle } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
 
-import { formatWord, partsWord as partsWordFor, statusList } from '../labels'
+import EntrySheet from '../components/EntrySheet.vue'
+import { formatWord, partsWord as partsWordFor, statusWord } from '../labels'
 import { currentRoute } from '../router'
-
-/** Шаг оценки. Десятибалльная шкала у AniList дробная, половины достаточно. */
-const SCORE_STEP = 0.5
 
 const card = ref<MediaCard | null>(null)
 const russian = ref<RussianTitle | null>(null)
 const busy = ref(true)
 const trouble = ref('')
+
+/** Открыто ли окно правки записи. */
+const sheetOpen = ref(false)
 
 /** Счётчик правок этого показа: заставляет пересчитать взятое из памяти. */
 const editStamp = ref(0)
@@ -31,9 +32,6 @@ const mediaId = computed<number>(() => {
   const raw = Number(currentRoute.value.params.id ?? '')
   return Number.isFinite(raw) && raw > 0 ? raw : 0
 })
-
-/** Закладки под тип тайтла. До ответа сервера считаем тайтл аниме. */
-const statuses = computed(() => statusList(card.value?.type ?? 'ANIME'))
 
 /** Своя запись из памяти. Счётчик правок в зависимостях не случаен: */
 /** мап коллекции вне реактивности Vue, сам он пересчёт не закажет. */
@@ -59,6 +57,12 @@ const partsTotal = computed<number | null>(() =>
 /** Подпись строки счёта: «Главы» у манги и «Эпизоды» у аниме. */
 const partsWord = computed<string>(() => partsWordFor(card.value?.type ?? 'ANIME'))
 
+/** Надпись главной кнопки: своя закладка, а без неё — приглашение добавить. */
+const listLabel = computed<string>(() => {
+  const word = statusWord(card.value?.type ?? 'ANIME', status.value === '' ? null : status.value)
+  return word ?? 'Добавить в список'
+})
+
 /** Главное название: русское, латиница, английское, номер. */
 const mainTitle = computed<string>(
   () =>
@@ -77,7 +81,7 @@ const heroStyle = computed(() => {
   return { backgroundImage: `linear-gradient(120deg, ${tone}, #0b1018)` }
 })
 
-/** Доля пройденного для полосы в панели правки. */
+/** Доля пройденного для полосы в сводке. */
 const donePart = computed<string>(() => {
   const total = partsTotal.value
   if (total === null || total <= 0) return status.value === 'COMPLETED' ? '100%' : '0%'
@@ -150,6 +154,7 @@ async function load(): Promise<void> {
   card.value = null
   russian.value = null
   trouble.value = ''
+  sheetOpen.value = false
 
   if (id === 0) {
     busy.value = false
@@ -198,31 +203,17 @@ async function send(kind: 'status' | 'score' | 'progress', value: string | numbe
   }
 }
 
-function onStatus(event: Event): void {
-  const next = (event.target as HTMLSelectElement).value
-  if (next === '' || next === status.value) return
-  void send('status', next)
+function onPickStatus(value: string): void {
+  if (value === status.value) return
+  void send('status', value)
 }
 
-/** Оценка по шагу шкалы, с обрезкой по краям: сервер знает только 0—10. */
-function bumpScore(delta: number): void {
-  const next = Math.round((score10.value + delta) / SCORE_STEP) * SCORE_STEP
-  const fixed = Math.min(10, Math.max(0, Math.round(next * 10) / 10))
-  if (fixed === score10.value) return
-  void send('score', fixed)
+function onPickScore(value: number): void {
+  void send('score', value)
 }
 
-/** Счёт частей. Выше известного итога не пускаем: такую правку сервер отвергнет. */
-function bumpProgress(delta: number): void {
-  const total = partsTotal.value
-  const next = progress.value + delta
-  const fixed = Math.max(0, total === null ? next : Math.min(total, next))
-  if (fixed === progress.value) return
-  void send('progress', fixed)
-}
-
-function onReload(): void {
-  void load()
+function onPickProgress(value: number): void {
+  void send('progress', value)
 }
 
 onMounted(() => {
@@ -298,47 +289,38 @@ watch(mediaId, () => {
 
           <aside class="am-split__side">
             <div class="am-panel">
-              <h3 class="am-h3">Моё состояние</h3>
+              <h3 class="am-h3">Моя запись</h3>
 
-              <label class="am-set">
-                <span class="am-set__name">Закладка</span>
-                <select class="am-pick" :value="status" @change="onStatus">
-                  <option value="" disabled>не в списке</option>
-                  <option v-for="item in statuses" :key="item.key" :value="item.key">
-                    {{ item.title }}
-                  </option>
-                </select>
-              </label>
+              <button
+                class="am-btn am-btn--wide"
+                type="button"
+                @click="sheetOpen = true"
+              >
+                {{ listLabel }}
+              </button>
 
-              <div class="am-set">
-                <span class="am-set__name">Оценка</span>
-                <div class="am-set__pick">
-                  <button class="am-step" type="button" @click="bumpScore(-SCORE_STEP)">−</button>
-                  <span class="am-set__value">{{ scoreText(score10) }}</span>
-                  <button class="am-step" type="button" @click="bumpScore(SCORE_STEP)">+</button>
+              <dl class="am-facts">
+                <div class="am-facts__row">
+                  <dt class="am-facts__name">Оценка</dt>
+                  <dd class="am-facts__value">{{ scoreText(score10) }}</dd>
                 </div>
-              </div>
 
-              <div class="am-set">
-                <span class="am-set__name">{{ partsWord }}</span>
-                <div class="am-set__pick">
-                  <button class="am-step" type="button" @click="bumpProgress(-1)">−</button>
-                  <span class="am-set__value">{{ partsText }}</span>
-                  <button class="am-step" type="button" @click="bumpProgress(1)">+</button>
+                <div class="am-facts__row">
+                  <dt class="am-facts__name">{{ partsWord }}</dt>
+                  <dd class="am-facts__value">{{ partsText }}</dd>
                 </div>
-              </div>
+
+                <div v-if="card.type === 'MANGA'" class="am-facts__row">
+                  <dt class="am-facts__name">Тома</dt>
+                  <dd class="am-facts__value">{{ volumes }}</dd>
+                </div>
+              </dl>
 
               <span class="am-line">
                 <span class="am-line__fill" :style="{ width: donePart }" />
               </span>
 
-              <p v-if="card.type === 'MANGA'" class="am-meta">
-                Прочитано томов: {{ volumes }}. Правка томов появится вместе с её видом в очереди.
-              </p>
-
-              <p v-if="drifted" class="am-meta">
-                Состояние расходится с сервером: правка ещё в очереди на отправку.
-              </p>
+              <p v-if="drifted" class="am-meta">Правка сохранена и ждёт отправки на AniList.</p>
             </div>
 
             <div class="am-panel">
@@ -348,18 +330,24 @@ watch(mediaId, () => {
                 <template v-if="card.malId"> · MAL #{{ card.malId }}</template>
                 <template v-if="russian"> · описание: {{ russian.sourceName }}</template>
               </p>
-
-              <button
-                class="am-btn am-btn--soft am-btn--wide"
-                type="button"
-                :disabled="busy"
-                @click="onReload"
-              >
-                {{ busy ? 'Обновляем…' : 'Обновить карточку' }}
-              </button>
             </div>
           </aside>
         </div>
+
+        <EntrySheet
+          v-if="sheetOpen"
+          :type="card.type"
+          :title="mainTitle"
+          :status="status"
+          :score10="score10"
+          :progress="progress"
+          :volumes="volumes"
+          :parts-total="partsTotal"
+          @close="sheetOpen = false"
+          @status="onPickStatus"
+          @score="onPickScore"
+          @progress="onPickProgress"
+        />
       </template>
     </template>
   </section>
@@ -510,62 +498,39 @@ watch(mediaId, () => {
   min-width: 0;
 }
 
+/* Описание занимает всю панель: на широком окне текст
+   рассыпается колонками, а не тянется одной длинной строкой. */
 .am-about {
-  max-width: 78ch;
   margin: 0;
   line-height: 1.6;
   color: #d7e0ee;
   white-space: pre-line;
+  column-width: 46ch;
+  column-gap: 38px;
 }
 
-.am-set {
+.am-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.am-facts__row {
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
 }
 
-.am-set__name {
+.am-facts__name {
   font-size: 13px;
   color: var(--am-dim);
 }
 
-.am-set__pick {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.am-set__value {
-  min-width: 68px;
+.am-facts__value {
+  margin: 0;
   font-weight: 600;
-  text-align: center;
-}
-
-.am-pick {
-  padding: 7px 10px;
-  font: inherit;
-  color: var(--am-text);
-  background: var(--am-bg-2);
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-s);
-}
-
-.am-step {
-  width: 32px;
-  height: 32px;
-  font: inherit;
-  font-size: 16px;
-  color: var(--am-text);
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-s);
-}
-
-.am-step:hover {
-  background: var(--am-hover);
-  border-color: var(--am-accent);
 }
 
 @media (max-width: 1180px) {
