@@ -85,6 +85,18 @@ const searchBusy = ref(false)
 
 const trouble = ref('')
 
+/**
+ * Исход переноса словами. Перенос бывает раз в месяц, и человек должен
+ * увидеть, что он случился: молча меняется слишком много.
+ */
+const note = ref('')
+
+/**
+ * Спрошено ли подтверждение переноса. Замена списка целиком не делается
+ * одним промахом мыши, поэтому кнопка сначала спрашивает.
+ */
+const asking = ref(false)
+
 // Вид, закладка, порядок и слово берутся из памяти между показами:
 // иначе возврат с карточки открывал чужую закладку и чужой вид.
 const kind = keptKind
@@ -428,16 +440,20 @@ function open(mediaId: number): void {
 }
 
 /**
- * Забирает список с сервера. Отказ сети показанные данные не стирает.
- * Обновление тянет оба вида сразу: два порядка обновления путали бы снимок.
+ * Переносит список с AniList с заменой местного. Зовётся только из
+ * подтверждения: сам по себе экран в сеть за списком не ходит.
+ *
+ * Отказ показанные данные не стирает: у нас остаётся прежний снимок.
  */
 async function pull(): Promise<void> {
   busy.value = true
   trouble.value = ''
+  note.value = ''
 
   try {
-    await refreshFromServer()
+    const count = await refreshFromServer()
     refill()
+    note.value = `Список перенесён с AniList: записей ${count}.`
   } catch (e) {
     trouble.value = describe(e)
   } finally {
@@ -445,7 +461,19 @@ async function pull(): Promise<void> {
   }
 }
 
-function onRefresh(): void {
+/** Нажатие на кнопку переноса: сначала вопрос, действие потом. */
+function onAsk(): void {
+  note.value = ''
+  trouble.value = ''
+  asking.value = true
+}
+
+function onCancel(): void {
+  asking.value = false
+}
+
+function onConfirm(): void {
+  asking.value = false
   void pull()
 }
 
@@ -465,7 +493,8 @@ onMounted(() => {
 
   void (async () => {
     try {
-      // Сначала снимок и отрисовка, потом сеть: список виден даже при лежащем API.
+      // Только снимок с диска: в сеть за списком экран сам не ходит.
+      // Перенос заменяет список целиком, и решать это человеку, а не открытию экрана.
       await initCollection()
       refill()
 
@@ -473,11 +502,9 @@ onMounted(() => {
       startEditSender()
     } catch (e) {
       trouble.value = describe(e)
+    } finally {
       busy.value = false
-      return
     }
-
-    await pull()
   })()
 })
 
@@ -529,9 +556,28 @@ onBeforeUnmount(() => {
         Сбросить
       </button>
 
-      <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onRefresh">
-        {{ busy ? 'Обновляем…' : 'Обновить список' }}
+      <button
+        class="am-btn am-btn--ghost"
+        type="button"
+        :disabled="busy"
+        title="Забрать список с AniList и заменить им местный"
+        @click="onAsk"
+      >
+        {{ busy ? 'Переносим…' : 'Перенести с AniList' }}
       </button>
+    </div>
+
+    <!-- Вопрос перед заменой: видно, что именно случится с местными записями. -->
+    <div v-if="asking" class="am-panel am-ask">
+      <p class="am-ask__text">
+        Список с AniList заменит местный целиком. Записи, добавленные здесь без входа, будут
+        потеряны, если их нет на AniList.
+      </p>
+
+      <div class="am-ask__acts">
+        <button class="am-btn" type="button" @click="onConfirm">Перенести и заменить</button>
+        <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+      </div>
     </div>
 
     <div v-if="!searching" class="am-bar">
@@ -549,6 +595,7 @@ onBeforeUnmount(() => {
     </div>
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
+    <p v-if="note" class="am-done">{{ note }}</p>
 
     <ul v-if="busy && rows.length === 0" class="am-grid">
       <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
@@ -560,7 +607,7 @@ onBeforeUnmount(() => {
     <div v-else-if="total === 0" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⊘</span>
       <span>Записей пока нет.</span>
-      <span>Войдите в AniList на экране настроек и обновите список.</span>
+      <span>Добавьте тайтл из поиска или перенесите список с AniList.</span>
     </div>
 
     <div v-else-if="searchBusy && rows.length === 0" class="am-empty">
@@ -637,6 +684,37 @@ onBeforeUnmount(() => {
 /* Общий вид выбора живёт в .am-pick, здесь только место под значок. */
 .am-sort__pick {
   padding-left: 32px;
+}
+
+/* Вопрос перед заменой списка: заметнее обычной панели, но без крика. */
+.am-ask {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-color: rgba(255, 190, 90, 0.35);
+}
+
+.am-ask__text {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--am-dim);
+}
+
+.am-ask__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Исход переноса: тем же тоном, каким настройки отвечают о своих действиях. */
+.am-done {
+  margin: 0;
+  font-size: 13px;
+  color: var(--am-good);
 }
 
 /* Конец списка: место под кнопку добора и сама метка для смотрителя. */
