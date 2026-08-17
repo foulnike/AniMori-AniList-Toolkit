@@ -277,14 +277,7 @@ function onOpen(url: string): void {
 
 /** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
 type CardEdit =
-  | 'status'
-  | 'score'
-  | 'progress'
-  | 'volumes'
-  | 'repeat'
-  | 'startedAt'
-  | 'completedAt'
-  | 'notes'
+  'status' | 'score' | 'progress' | 'volumes' | 'repeat' | 'startedAt' | 'completedAt' | 'notes'
 
 /** Отправляет одну правку в очередь и обновляет показ по памяти. */
 async function send(kind: CardEdit, value: string | number): Promise<void> {
