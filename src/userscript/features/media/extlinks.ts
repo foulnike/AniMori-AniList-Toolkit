@@ -108,7 +108,11 @@ function buildLinks(ctx: MediaContext): HTMLElement | null {
 
   if (settings.enableLinkRutracker && romaji) {
     list.appendChild(
-      createExtLink('RuTracker', 'orange', searchUrl('rutracker.org', '/forum/tracker.php?nm=', romaji)),
+      createExtLink(
+        'RuTracker',
+        'orange',
+        searchUrl('rutracker.org', '/forum/tracker.php?nm=', romaji),
+      ),
     )
     added++
   }
