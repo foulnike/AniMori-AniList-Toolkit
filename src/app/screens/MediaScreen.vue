@@ -10,29 +10,11 @@ import { queueEdit } from '@/core/edit-sender'
 import { getRussianTitle, type RussianTitle } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
 
-import { currentRoute, goBack } from '../router'
+import { formatWord, partsWord as partsWordFor, statusList } from '../labels'
+import { currentRoute } from '../router'
 
 /** Шаг оценки. Десятибалльная шкала у AniList дробная, половины достаточно. */
 const SCORE_STEP = 0.5
-
-/** Закладки аниме и манги: ключи сервера общие, подписи разные. */
-const ANIME_STATUSES: ReadonlyArray<{ key: string; title: string }> = [
-  { key: 'CURRENT', title: 'Смотрю' },
-  { key: 'REPEATING', title: 'Пересматриваю' },
-  { key: 'PLANNING', title: 'В планах' },
-  { key: 'COMPLETED', title: 'Просмотрено' },
-  { key: 'PAUSED', title: 'Отложено' },
-  { key: 'DROPPED', title: 'Брошено' },
-]
-
-const MANGA_STATUSES: ReadonlyArray<{ key: string; title: string }> = [
-  { key: 'CURRENT', title: 'Читаю' },
-  { key: 'REPEATING', title: 'Перечитываю' },
-  { key: 'PLANNING', title: 'В планах' },
-  { key: 'COMPLETED', title: 'Прочитано' },
-  { key: 'PAUSED', title: 'Отложено' },
-  { key: 'DROPPED', title: 'Брошено' },
-]
 
 const card = ref<MediaCard | null>(null)
 const russian = ref<RussianTitle | null>(null)
@@ -51,7 +33,7 @@ const mediaId = computed<number>(() => {
 })
 
 /** Закладки под тип тайтла. До ответа сервера считаем тайтл аниме. */
-const statuses = computed(() => (card.value?.type === 'MANGA' ? MANGA_STATUSES : ANIME_STATUSES))
+const statuses = computed(() => statusList(card.value?.type ?? 'ANIME'))
 
 /** Своя запись из памяти. Счётчик правок в зависимостях не случаен: */
 /** мап коллекции вне реактивности Vue, сам он пересчёт не закажет. */
@@ -74,8 +56,8 @@ const partsTotal = computed<number | null>(() =>
   card.value?.type === 'MANGA' ? (card.value?.chapters ?? null) : (card.value?.episodes ?? null),
 )
 
-/** Подпись строки счёта: «Глав» у манги и «Эпизодов» у аниме. */
-const partsWord = computed<string>(() => (card.value?.type === 'MANGA' ? 'Главы' : 'Эпизоды'))
+/** Подпись строки счёта: «Главы» у манги и «Эпизоды» у аниме. */
+const partsWord = computed<string>(() => partsWordFor(card.value?.type ?? 'ANIME'))
 
 /** Главное название: русское, латиница, английское, номер. */
 const mainTitle = computed<string>(
@@ -85,6 +67,24 @@ const mainTitle = computed<string>(
     card.value?.english ??
     `Тайтл #${mediaId.value}`,
 )
+
+/** Подложка героя: баннер сервера, а без него тон обложки. */
+const heroStyle = computed(() => {
+  const banner = card.value?.banner
+  if (banner) return { backgroundImage: `url("${banner}")` }
+
+  const tone = card.value?.color ?? '#1b2534'
+  return { backgroundImage: `linear-gradient(120deg, ${tone}, #0b1018)` }
+})
+
+/** Доля пройденного для полосы в панели правки. */
+const donePart = computed<string>(() => {
+  const total = partsTotal.value
+  if (total === null || total <= 0) return status.value === 'COMPLETED' ? '100%' : '0%'
+
+  const part = Math.min(1, Math.max(0, progress.value / total))
+  return `${Math.round(part * 100)}%`
+})
 
 /**
  * Разошлось ли наше состояние с сервером. Говорится вслух: чаще всего это
@@ -109,6 +109,23 @@ const about = computed<string>(() => {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .trim()
+})
+
+/** Факты пилюлями под названием: только то, что сервер впрямь назвал. */
+const facts = computed<string[]>(() => {
+  const found = card.value
+  if (found === null) return []
+
+  const list: string[] = []
+  const kindWord = formatWord(found.format)
+  if (kindWord !== null) list.push(kindWord)
+  if (found.seasonYear !== null) list.push(String(found.seasonYear))
+  if (partsTotal.value !== null) list.push(`${partsWord.value}: ${partsTotal.value}`)
+  if (found.volumes) list.push(`Тома: ${found.volumes}`)
+  if (found.duration) list.push(`${found.duration} мин`)
+  if (found.averageScore !== null) list.push(`Средняя ${found.averageScore}%`)
+
+  return list
 })
 
 function describe(e: unknown): string {
@@ -204,10 +221,6 @@ function bumpProgress(delta: number): void {
   void send('progress', fixed)
 }
 
-function onBack(): void {
-  goBack()
-}
-
 function onReload(): void {
   void load()
 }
@@ -223,87 +236,130 @@ watch(mediaId, () => {
 </script>
 
 <template>
-  <section class="am-card">
-    <button class="am-card__back" type="button" @click="onBack">← Назад</button>
-
-    <p v-if="mediaId === 0" class="am-card__hint">
-      Тайтл не выбран: в адресе нет номера. Откройте карточку из списков.
-    </p>
+  <section class="am-page">
+    <div v-if="mediaId === 0" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⊘</span>
+      <span>Тайтл не выбран: в адресе нет номера.</span>
+      <span>Откройте карточку из списков или поиска.</span>
+    </div>
 
     <template v-else>
-      <p v-if="trouble" class="am-card__error">{{ trouble }}</p>
-      <p v-if="busy" class="am-card__hint">Карточка загружается…</p>
+      <p v-if="trouble" class="am-error">{{ trouble }}</p>
+
+      <div v-if="busy && !card" class="am-wait">
+        <span class="am-skeleton am-wait__hero" />
+        <span class="am-skeleton am-wait__line" />
+        <span class="am-skeleton am-wait__line am-wait__line--short" />
+      </div>
 
       <template v-if="card">
-        <div class="am-card__head">
-          <img v-if="card.cover" class="am-card__cover" :src="card.cover" :alt="mainTitle" />
+        <div class="am-hero">
+          <div class="am-hero__art" :style="heroStyle" />
+          <div class="am-hero__veil" />
 
-          <div class="am-card__about">
-            <h2 class="am-card__title">{{ mainTitle }}</h2>
-            <p v-if="card.romaji" class="am-card__sub">{{ card.romaji }}</p>
-            <p v-if="card.native" class="am-card__sub">{{ card.native }}</p>
+          <div class="am-hero__body">
+            <img
+              v-if="card.cover"
+              class="am-hero__cover"
+              :src="card.cover"
+              :alt="mainTitle"
+              decoding="async"
+            />
+            <span v-else class="am-hero__cover am-hero__cover--empty" aria-hidden="true">?</span>
 
-            <ul class="am-facts">
-              <li v-if="card.format">{{ card.format }}</li>
-              <li v-if="card.seasonYear">{{ card.seasonYear }}</li>
-              <li v-if="partsTotal !== null">{{ partsWord }}: {{ partsTotal }}</li>
-              <li v-if="card.volumes">Тома: {{ card.volumes }}</li>
-              <li v-if="card.duration">{{ card.duration }} мин</li>
-              <li v-if="card.averageScore">Средняя {{ card.averageScore }} из 100</li>
-              <li v-if="card.isAdult" class="am-facts__mark">18+</li>
-            </ul>
+            <div class="am-hero__text">
+              <h2 class="am-hero__title">{{ mainTitle }}</h2>
+              <p v-if="card.romaji" class="am-hero__sub">{{ card.romaji }}</p>
+              <p v-if="card.native" class="am-hero__sub">{{ card.native }}</p>
 
-            <p v-if="card.genres.length > 0" class="am-card__genres">
-              {{ card.genres.join(' · ') }}
-            </p>
+              <ul class="am-pills">
+                <li v-for="item in facts" :key="item" class="am-pill">{{ item }}</li>
+                <li v-if="card.isAdult" class="am-pill am-pill--adult">18+</li>
+              </ul>
+
+              <ul v-if="card.genres.length > 0" class="am-pills">
+                <li v-for="genre in card.genres" :key="genre" class="am-pill am-pill--soft">
+                  {{ genre }}
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
 
-        <div class="am-edit">
-          <label class="am-edit__row">
-            <span class="am-edit__name">Закладка</span>
-            <select class="am-edit__pick" :value="status" @change="onStatus">
-              <option value="" disabled>не в списке</option>
-              <option v-for="item in statuses" :key="item.key" :value="item.key">
-                {{ item.title }}
-              </option>
-            </select>
-          </label>
+        <div class="am-split">
+          <div class="am-split__main">
+            <div v-if="about" class="am-panel">
+              <h3 class="am-h3">Описание</h3>
+              <p class="am-about">{{ about }}</p>
+            </div>
 
-          <div class="am-edit__row">
-            <span class="am-edit__name">Оценка</span>
-            <button class="am-step" type="button" @click="bumpScore(-SCORE_STEP)">−</button>
-            <span class="am-edit__value">{{ scoreText(score10) }}</span>
-            <button class="am-step" type="button" @click="bumpScore(SCORE_STEP)">+</button>
+            <div v-else class="am-panel am-dim">Описания ни один источник не дал.</div>
           </div>
 
-          <div class="am-edit__row">
-            <span class="am-edit__name">{{ partsWord }}</span>
-            <button class="am-step" type="button" @click="bumpProgress(-1)">−</button>
-            <span class="am-edit__value">{{ partsText }}</span>
-            <button class="am-step" type="button" @click="bumpProgress(1)">+</button>
-          </div>
+          <aside class="am-split__side">
+            <div class="am-panel">
+              <h3 class="am-h3">Моё состояние</h3>
 
-          <p v-if="card.type === 'MANGA'" class="am-card__hint">
-            Прочитано томов: {{ volumes }}. Правка томов появится вместе с её видом в очереди.
-          </p>
+              <label class="am-set">
+                <span class="am-set__name">Закладка</span>
+                <select class="am-pick" :value="status" @change="onStatus">
+                  <option value="" disabled>не в списке</option>
+                  <option v-for="item in statuses" :key="item.key" :value="item.key">
+                    {{ item.title }}
+                  </option>
+                </select>
+              </label>
 
-          <p v-if="drifted" class="am-card__hint">
-            Состояние расходится с сервером: правка ещё в очереди на отправку.
-          </p>
-        </div>
+              <div class="am-set">
+                <span class="am-set__name">Оценка</span>
+                <div class="am-set__pick">
+                  <button class="am-step" type="button" @click="bumpScore(-SCORE_STEP)">−</button>
+                  <span class="am-set__value">{{ scoreText(score10) }}</span>
+                  <button class="am-step" type="button" @click="bumpScore(SCORE_STEP)">+</button>
+                </div>
+              </div>
 
-        <p v-if="about" class="am-card__text">{{ about }}</p>
+              <div class="am-set">
+                <span class="am-set__name">{{ partsWord }}</span>
+                <div class="am-set__pick">
+                  <button class="am-step" type="button" @click="bumpProgress(-1)">−</button>
+                  <span class="am-set__value">{{ partsText }}</span>
+                  <button class="am-step" type="button" @click="bumpProgress(1)">+</button>
+                </div>
+              </div>
 
-        <div class="am-card__foot">
-          <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onReload">
-            Обновить карточку
-          </button>
-          <span class="am-card__meta">
-            AniList #{{ card.mediaId }}
-            <template v-if="card.malId"> · MAL #{{ card.malId }}</template>
-            <template v-if="russian"> · описание: {{ russian.sourceName }}</template>
-          </span>
+              <span class="am-line">
+                <span class="am-line__fill" :style="{ width: donePart }" />
+              </span>
+
+              <p v-if="card.type === 'MANGA'" class="am-meta">
+                Прочитано томов: {{ volumes }}. Правка томов появится вместе с её видом в
+                очереди.
+              </p>
+
+              <p v-if="drifted" class="am-meta">
+                Состояние расходится с сервером: правка ещё в очереди на отправку.
+              </p>
+            </div>
+
+            <div class="am-panel">
+              <h3 class="am-h3">Справка</h3>
+              <p class="am-meta">
+                AniList #{{ card.mediaId }}
+                <template v-if="card.malId"> · MAL #{{ card.malId }}</template>
+                <template v-if="russian"> · описание: {{ russian.sourceName }}</template>
+              </p>
+
+              <button
+                class="am-btn am-btn--soft am-btn--wide"
+                type="button"
+                :disabled="busy"
+                @click="onReload"
+              >
+                {{ busy ? 'Обновляем…' : 'Обновить карточку' }}
+              </button>
+            </div>
+          </aside>
         </div>
       </template>
     </template>
@@ -311,183 +367,224 @@ watch(mediaId, () => {
 </template>
 
 <style scoped>
-.am-card {
+.am-wait {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  align-items: flex-start;
-  width: 100%;
-  max-width: 720px;
+  gap: 12px;
 }
 
-.am-card__back {
-  padding: 6px 10px;
-  font: inherit;
-  color: var(--am-dim);
-  cursor: pointer;
-  background: transparent;
+.am-wait__hero {
+  display: block;
+  height: 280px;
+  border-radius: var(--am-r-xl);
+}
+
+.am-wait__line {
+  display: block;
+  width: 60%;
+  height: 14px;
+  border-radius: var(--am-r-s);
+}
+
+.am-wait__line--short {
+  width: 34%;
+}
+
+/* Герой карточки: баннер фоном, текст поверх тёмной завеси. */
+.am-hero {
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--am-line);
-  border-radius: 8px;
+  border-radius: var(--am-r-xl);
+  box-shadow: var(--am-sh-2);
 }
 
-.am-card__back:hover {
-  color: var(--am-text);
-  background: var(--am-hover);
+.am-hero__art {
+  position: absolute;
+  inset: 0;
+  background-position: center 22%;
+  background-size: cover;
+  filter: saturate(1.05);
 }
 
-.am-card__head {
+.am-hero__veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(6, 9, 15, 0.35) 0%, rgba(6, 9, 15, 0.86) 62%, var(--am-bg-2) 100%),
+    linear-gradient(90deg, rgba(6, 9, 15, 0.8) 0%, rgba(6, 9, 15, 0.25) 60%);
+}
+
+.am-hero__body {
+  position: relative;
   display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  width: 100%;
+  gap: 26px;
+  align-items: flex-end;
+  padding: 78px 30px 26px;
 }
 
-.am-card__cover {
-  width: 148px;
-  border: 1px solid var(--am-line);
-  border-radius: 10px;
+.am-hero__cover {
+  flex: none;
+  width: 208px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-l);
+  box-shadow: 0 26px 54px rgba(2, 5, 10, 0.72);
 }
 
-.am-card__about {
+.am-hero__cover--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  color: rgba(255, 255, 255, 0.3);
+  background: linear-gradient(160deg, #1b2534, #0f151e);
+}
+
+.am-hero__text {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 6px;
 }
 
-.am-card__title {
+.am-hero__title {
   margin: 0;
-  font-size: 20px;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.6);
 }
 
-.am-card__sub {
+.am-hero__sub {
   margin: 0;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--am-dim);
 }
 
-.am-facts {
+.am-pills {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 6px;
   margin: 4px 0 0;
   padding: 0;
-  font-size: 13px;
-  color: var(--am-dim);
   list-style: none;
 }
 
-.am-facts__mark {
-  color: #ff8a8a;
+.am-pill {
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 550;
+  color: #e6edf8;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--am-line-soft);
+  border-radius: 999px;
 }
 
-.am-card__genres {
+.am-pill--soft {
+  color: var(--am-dim);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.am-pill--adult {
+  color: #ffd9d9;
+  background: rgba(255, 90, 90, 0.24);
+  border-color: rgba(255, 90, 90, 0.4);
+}
+
+/* Широкое окно делится надвое, узкое складывается в одну колонку. */
+.am-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+
+.am-split__main,
+.am-split__side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.am-about {
+  max-width: 78ch;
   margin: 0;
+  line-height: 1.6;
+  color: #d7e0ee;
+  white-space: pre-line;
+}
+
+.am-set {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.am-set__name {
   font-size: 13px;
   color: var(--am-dim);
 }
 
-.am-edit {
+.am-set__pick {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  padding: 12px;
-  background: var(--am-panel);
-  border: 1px solid var(--am-line);
-  border-radius: 12px;
-}
-
-.am-edit__row {
-  display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
 }
 
-.am-edit__name {
-  min-width: 96px;
-  font-size: 13px;
-  color: var(--am-dim);
+.am-set__value {
+  min-width: 68px;
+  font-weight: 600;
+  text-align: center;
 }
 
-.am-edit__value {
-  min-width: 72px;
-}
-
-.am-edit__pick {
-  padding: 6px 8px;
+.am-pick {
+  padding: 7px 10px;
   font: inherit;
   color: var(--am-text);
-  background: var(--am-bg);
+  background: var(--am-bg-2);
   border: 1px solid var(--am-line);
-  border-radius: 8px;
+  border-radius: var(--am-r-s);
 }
 
 .am-step {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   font: inherit;
+  font-size: 16px;
   color: var(--am-text);
   cursor: pointer;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--am-line);
-  border-radius: 8px;
+  border-radius: var(--am-r-s);
 }
 
 .am-step:hover {
   background: var(--am-hover);
+  border-color: var(--am-accent);
 }
 
-.am-card__text {
-  margin: 0;
-  white-space: pre-line;
-}
+@media (max-width: 1180px) {
+  .am-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.am-card__hint {
-  margin: 0;
-  font-size: 13px;
-  color: var(--am-dim);
-}
+  .am-hero__body {
+    gap: 18px;
+    padding: 60px 20px 20px;
+  }
 
-.am-card__error {
-  margin: 0;
-  font-size: 13px;
-  color: #ff8a8a;
-}
+  .am-hero__cover {
+    width: 148px;
+  }
 
-.am-card__foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.am-card__meta {
-  font-size: 13px;
-  color: var(--am-dim);
-}
-
-.am-btn {
-  padding: 8px 14px;
-  font: inherit;
-  color: #06121f;
-  cursor: pointer;
-  background: var(--am-accent);
-  border: 1px solid var(--am-accent);
-  border-radius: 8px;
-}
-
-.am-btn:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.am-btn--ghost {
-  color: var(--am-text);
-  background: transparent;
-  border-color: var(--am-line);
-}
-
-.am-btn--ghost:hover:not(:disabled) {
-  background: var(--am-hover);
+  .am-hero__title {
+    font-size: 24px;
+  }
 }
 </style>
