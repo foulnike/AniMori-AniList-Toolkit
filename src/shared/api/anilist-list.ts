@@ -28,6 +28,14 @@ export interface RawListEntry {
   progress: number
   /** Прочитано томов. У аниме всегда ноль — это штатно. */
   volumes: number
+  /** Сколько раз пересматривали или перечитывали. */
+  repeat: number
+  /** Дата начала в виде ГГГГ-ММ-ДД или null. Неполную дату не отдаём. */
+  startedAt: string | null
+  /** Дата завершения в виде ГГГГ-ММ-ДД или null. */
+  completedAt: string | null
+  /** Личный комментарий к записи. Пустая строка равносильна отсутствию. */
+  notes: string | null
   updatedAt: number
   /** Взрослый тайтл по мнению AniList. Отбор — забота экранов, не этого слоя. */
   isAdult: boolean
@@ -50,6 +58,9 @@ const VIEWER_QUERY = `query {
  *
  * Названия и признак взрослого берутся здесь же: отдельный запрос за ними
  * означал бы второй обход всей коллекции пачками по пятьдесят тайтлов.
+ *
+ * Пересмотры, даты и комментарий стоят почти ничего в весе ответа, а без них
+ * окно правки показывало бы пустоту вместо того, что человек уже вписал.
  */
 const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
   MediaListCollection(userId: $userId, type: $type) {
@@ -60,6 +71,18 @@ const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
         score(format: POINT_10_DECIMAL)
         progress
         progressVolumes
+        repeat
+        notes
+        startedAt {
+          year
+          month
+          day
+        }
+        completedAt {
+          year
+          month
+          day
+        }
         updatedAt
         media {
           isAdult
@@ -111,6 +134,35 @@ function readTitle(value: unknown, key: 'romaji' | 'english'): string | null {
   return typeof text === 'string' && text.length > 0 ? text : null
 }
 
+/** Две цифры с нулём впереди: месяц и день в дате пишутся ровно так. */
+function pad(value: number): string {
+  return value < 10 ? `0${value}` : String(value)
+}
+
+/**
+ * Нечёткая дата AniList в строку ГГГГ-ММ-ДД. Неполная дата отбрасывается:
+ * ни поле даты в окне правки, ни обратная отправка её не примут, а выдуманный
+ * первый день месяца — это уже не то, что человек записал.
+ */
+function readFuzzy(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return null
+
+  const date = value as Record<string, unknown>
+  const year = date.year
+  const month = date.month
+  const day = date.day
+
+  if (typeof year !== 'number' || typeof month !== 'number' || typeof day !== 'number') return null
+  if (year <= 0 || month <= 0 || day <= 0) return null
+
+  return `${year}-${pad(month)}-${pad(day)}`
+}
+
+/** Строка или null. Пустой комментарий равносилен отсутствию комментария. */
+function readText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
 /**
  * Годна ли запись списка. Без номера тайтла запись бесполезна:
  * ни показать, ни слить с правкой её всё равно не получится.
@@ -128,6 +180,10 @@ function toEntry(value: unknown): RawListEntry | null {
     score: num(raw.score, 0),
     progress: num(raw.progress, 0),
     volumes: num(raw.progressVolumes, 0),
+    repeat: num(raw.repeat, 0),
+    startedAt: readFuzzy(raw.startedAt),
+    completedAt: readFuzzy(raw.completedAt),
+    notes: readText(raw.notes),
     updatedAt: num(raw.updatedAt, 0) * 1000,
     isAdult: readAdult(raw.media),
     romaji: readTitle(raw.media, 'romaji'),
