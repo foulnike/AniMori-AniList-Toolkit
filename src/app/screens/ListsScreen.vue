@@ -18,6 +18,8 @@ import MediaTile from '../components/MediaTile.vue'
 import { formatWord, partsShort, statusList } from '../labels'
 import { navigate } from '../router'
 
+import { keptKind, keptSort, keptStatus, keptWord, type SortName } from './lists-keep'
+
 /**
  * Сколько записей рисуется за раз и на сколько растёт потолок при доборе.
  * Полный список бывает на тысячи записей, а каждая требует обложки
@@ -47,15 +49,12 @@ const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
 ]
 
 /** Порядки показа. Все считаются на месте: сети сортировка не требует. */
-type SortName = 'updated' | 'score' | 'rating' | 'nameUp' | 'nameDown' | 'parts'
-
 const SORT_TABS: ReadonlyArray<{ key: SortName; title: string }> = [
   { key: 'updated', title: 'Свежие правки' },
   { key: 'score', title: 'Своя оценка' },
   { key: 'rating', title: 'Оценка каталога' },
   { key: 'nameUp', title: 'Название А—Я' },
   { key: 'nameDown', title: 'Название Я—А' },
-  { key: 'parts', title: 'Счёт частей' },
 ]
 
 /** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
@@ -64,6 +63,9 @@ interface Row {
   title: string
   facts: string
   mark: string | null
+  repeat: number
+  note: string | null
+  ongoing: boolean
   own: string | null
   done: number
   cover: string | null
@@ -82,10 +84,14 @@ const looksBusy = ref(false)
 const searchBusy = ref(false)
 
 const trouble = ref('')
-const kind = ref<MediaType>('ANIME')
-const activeStatus = ref<string>('CURRENT')
-const sortKey = ref<SortName>('updated')
-const word = ref('')
+
+// Вид, закладка, порядок и слово берутся из памяти между показами:
+// иначе возврат с карточки открывал чужую закладку и чужой вид.
+const kind = keptKind
+const activeStatus = keptStatus
+const sortKey = keptSort
+const word = keptWord
+
 const rows = ref<Row[]>([])
 const counts = ref<Map<string, number>>(new Map())
 const total = ref(0)
@@ -196,9 +202,6 @@ function sortEntries(list: SnapshotEntry[]): SnapshotEntry[] {
     case 'rating':
       out.sort((a, b) => ratingOf(b) - ratingOf(a) || b.updatedAt - a.updatedAt)
       break
-    case 'parts':
-      out.sort((a, b) => b.progress - a.progress || b.updatedAt - a.updatedAt)
-      break
     case 'nameUp':
       out.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ru'))
       break
@@ -224,6 +227,9 @@ function toRow(entry: SnapshotEntry): Row {
     title: titleOf(entry),
     facts: factsText(look),
     mark: entry.score10 > 0 ? `★ ${entry.score10.toFixed(1)}` : null,
+    repeat: entry.repeat,
+    note: entry.notes,
+    ongoing: (look?.airingEpisode ?? null) !== null,
     own: ownText(entry, parts),
     done: donePart(entry, parts),
     cover: look?.cover ?? null,
@@ -512,7 +518,7 @@ onBeforeUnmount(() => {
 
       <label class="am-sort">
         <span class="am-sort__mark" aria-hidden="true">⇅</span>
-        <select v-model="sortKey" class="am-sort__pick" @change="pickSort">
+        <select v-model="sortKey" class="am-pick am-sort__pick" @change="pickSort">
           <option v-for="item in SORT_TABS" :key="item.key" :value="item.key">
             {{ item.title }}
           </option>
@@ -581,6 +587,9 @@ onBeforeUnmount(() => {
         :cover="row.cover"
         :color="row.color"
         :mark="row.mark"
+        :repeat="row.repeat"
+        :note="row.note"
+        :ongoing="row.ongoing"
         :own="row.own"
         :done="row.done"
         :adult="row.adult"
@@ -625,21 +634,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* Общий вид выбора живёт в .am-pick, здесь только место под значок. */
 .am-sort__pick {
-  min-height: var(--am-ctl);
-  padding: 0 14px 0 32px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--am-text);
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
-  appearance: none;
-}
-
-.am-sort__pick:hover {
-  background: var(--am-hover);
+  padding-left: 32px;
 }
 
 /* Конец списка: место под кнопку добора и сама метка для смотрителя. */
