@@ -7,7 +7,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
 import { Bridge } from '@/bridge'
 import { getEntry } from '@/core/collection'
-import { queueEdit } from '@/core/edit-sender'
+import { queueEdit, type EntryLook } from '@/core/edit-sender'
 import { partsOut } from '@/core/media-looks'
 import { getRussianTitle, type RussianTitle } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
@@ -41,6 +41,23 @@ const mediaId = computed<number>(() => {
 const own = computed(() => {
   void editStamp.value
   return mediaId.value > 0 ? getEntry(mediaId.value) : undefined
+})
+
+/**
+ * Облик тайтла для записи списка: тип, латинские имена и метка взрослого.
+ * Идёт вместе с правкой, иначе запись, созданная без входа, останется
+ * безымянной: имена и метку до сих пор приносил только ответ сервера.
+ */
+const look = computed<EntryLook | undefined>(() => {
+  const found = card.value
+  if (found === null) return undefined
+
+  return {
+    type: found.type,
+    romaji: found.romaji,
+    english: found.english,
+    isAdult: found.isAdult,
+  }
 })
 
 /** Статус для выбора: память главнее ответа, ответ — запас на первый показ. */
@@ -284,7 +301,8 @@ async function send(kind: CardEdit, value: string | number): Promise<void> {
   if (mediaId.value === 0) return
 
   try {
-    await queueEdit(mediaId.value, kind, value)
+    // Облик идёт вместе с правкой: без входа его больше взять негде.
+    await queueEdit(mediaId.value, kind, value, look.value)
     editStamp.value += 1
   } catch (e) {
     trouble.value = describe(e)
