@@ -1,15 +1,13 @@
-// Виджет внешних ссылок: поиск тайтла по встроенным сервисам и своим шаблонам.
+// Виджет внешних ссылок: поиск тайтла по встроенным сервисам.
 // Домены сервисов берутся из настроек, а не из кода: зеркала регулярно переезжают.
 
 import { amApplyAccentToDom } from '@/core/accent'
-import { getCustomLinks } from '@/core/custom-links'
 import { settings } from '@/core/settings'
 import { applyMarquee } from '@/utils/dom'
 import { Logger } from '@/utils/logger'
 import type { MediaContext, MediaWidget } from './types'
 
 const BOX_SELECTOR = '.animori-extlinks'
-const NEUTRAL_TRIPLE = '120,130,150'
 
 type ThemeToken = 'blue' | 'red' | 'green' | 'orange' | 'pink' | 'purple'
 
@@ -23,12 +21,8 @@ const TOKEN_FALLBACK: Record<ThemeToken, string> = {
   purple: '183, 148, 244',
 }
 
-// Встроенные сервисы красятся токеном темы, свои ссылки — своим триплетом.
-type ColorSpec = { token: ThemeToken } | { triple: string }
-
-function colorValue(spec: ColorSpec): string {
-  if ('token' in spec) return `var(--color-${spec.token}, ${TOKEN_FALLBACK[spec.token]})`
-  return spec.triple.trim() || NEUTRAL_TRIPLE
+function colorValue(token: ThemeToken): string {
+  return `var(--color-${token}, ${TOKEN_FALLBACK[token]})`
 }
 
 function hostOf(href: string): string {
@@ -41,16 +35,16 @@ function hostOf(href: string): string {
 
 function createExtLink(
   name: string,
-  spec: ColorSpec,
+  token: ThemeToken,
   href: string,
-  opts: { custom?: boolean; domain?: string } = {},
+  opts: { domain?: string } = {},
 ): HTMLAnchorElement {
   const link = document.createElement('a')
   link.href = href
   link.target = '_blank'
   link.rel = 'noopener noreferrer'
   link.className = 'am-extlink'
-  link.style.setProperty('--c', colorValue(spec))
+  link.style.setProperty('--c', colorValue(token))
 
   const avatar = document.createElement('span')
   avatar.className = 'am-extlink-av'
@@ -62,12 +56,6 @@ function createExtLink(
   const nameSpan = document.createElement('span')
   nameSpan.className = 'am-extlink-name'
   nameSpan.appendChild(document.createTextNode(name))
-  if (opts.custom) {
-    const tag = document.createElement('span')
-    tag.className = 'am-extlink-tag'
-    tag.textContent = 'своя'
-    nameSpan.appendChild(tag)
-  }
 
   const domainSpan = document.createElement('span')
   domainSpan.className = 'am-extlink-domain'
@@ -120,11 +108,7 @@ function buildLinks(ctx: MediaContext): HTMLElement | null {
 
   if (settings.enableLinkRutracker && romaji) {
     list.appendChild(
-      createExtLink(
-        'RuTracker',
-        { token: 'orange' },
-        searchUrl('rutracker.org', '/forum/tracker.php?nm=', romaji),
-      ),
+      createExtLink('RuTracker', 'orange', searchUrl('rutracker.org', '/forum/tracker.php?nm=', romaji)),
     )
     added++
   }
@@ -135,7 +119,7 @@ function buildLinks(ctx: MediaContext): HTMLElement | null {
       list.appendChild(
         createExtLink(
           'YummyAnime',
-          { token: 'pink' },
+          'pink',
           searchUrl(domain, '/index.php?do=search&subaction=search&story=', ruTitle),
           { domain },
         ),
@@ -145,39 +129,21 @@ function buildLinks(ctx: MediaContext): HTMLElement | null {
     if (settings.enableLinkAnimego) {
       const domain = cleanDomain(settings.animegoDomain, 'animego.org')
       list.appendChild(
-        createExtLink(
-          'AnimeGO',
-          { token: 'purple' },
-          searchUrl(domain, '/search/anime?q=', ruTitle),
-          {
-            domain,
-          },
-        ),
+        createExtLink('AnimeGO', 'purple', searchUrl(domain, '/search/anime?q=', ruTitle), {
+          domain,
+        }),
       )
       added++
     }
   } else if (settings.enableLinkMangalib) {
     const domain = cleanDomain(settings.mangalibDomain, 'mangalib.me')
     list.appendChild(
-      createExtLink('MangaLib', { token: 'blue' }, searchUrl(domain, '/ru/catalog?q=', ruTitle), {
+      createExtLink('MangaLib', 'blue', searchUrl(domain, '/ru/catalog?q=', ruTitle), {
         domain,
       }),
     )
     added++
   }
-
-  // Свои ссылки: шаблоны {ru}, {romaji} и {query}.
-  getCustomLinks().forEach((custom) => {
-    if (!custom || !custom.name || !custom.url) return
-    const url = String(custom.url)
-      .replace(/\{ru\}/g, encodeURIComponent(ruTitle))
-      .replace(/\{romaji\}/g, encodeURIComponent(romaji))
-      .replace(/\{query\}/g, encodeURIComponent(ruTitle || romaji))
-    list.appendChild(
-      createExtLink(custom.name, { triple: custom.color || NEUTRAL_TRIPLE }, url, { custom: true }),
-    )
-    added++
-  })
 
   return added > 0 ? list : null
 }
