@@ -5,6 +5,7 @@
 import { fetchUserList, fetchViewer, type RawListEntry } from '../api/anilist-list'
 import { Logger } from '../utils/logger'
 import {
+  clearEditQueue,
   emptySnapshot,
   markSnapshotDirty,
   ownSnapshot,
@@ -27,7 +28,10 @@ import type { MediaType } from './types'
  */
 const entries = new Map<number, SnapshotEntry>()
 
-/** Чей список сейчас в памяти. null — вход не выполнен или снимок пуст. */
+/**
+ * Чей список сейчас в памяти. null — список местный: либо входа не было
+ * вовсе, либо счёт отвязали. Записи при этом равно наши и равно живые.
+ */
 let ownerUserId: number | null = null
 
 /** Поднят ли снимок с диска. Повторный подъём затёр бы свежие правки. */
@@ -247,7 +251,7 @@ export function entryCount(): number {
   return entries.size
 }
 
-/** Чей список сейчас в памяти. */
+/** Чей список сейчас в памяти. null значит «местный». */
 export function currentUserId(): number | null {
   return ownerUserId
 }
@@ -276,10 +280,40 @@ export function dropEntry(mediaId: number): void {
 }
 
 /**
- * Забывает список целиком: выход из учётной записи.
- * Снимок и его дубль перезаписываются сразу: чужой список не должен пережить выход.
+ * Отвязывает список от счёта AniList, оставляя записи на месте (пункт 3.16).
+ * Возвращает число оставшихся записей: экрану есть что сказать человеку.
+ *
+ * Выход из счёта и удаление списка — разные желания. Список ведётся и без
+ * входа, так что отвязка отнимает только связь с сайтом, а не данные.
+ *
+ * Очередь выбрасывается: правки адресованы прежнему счёту и на память уже
+ * накачены, а при следующем входе они улетели бы на сайт без спроса.
+ *
+ * Снимок переписывается сразу и с дублем: иначе на диске останется прежний
+ * хозяин, и первый же запуск снова счтёт список чужим.
+ */
+export async function unlinkCollection(): Promise<number> {
+  const dropped = await clearEditQueue()
+  ownerUserId = null
+  await saveSnapshotNow({ backup: true })
+
+  Logger(
+    'DB',
+    `Коллекция отвязана от счёта: записей ${entries.size}, выброшено правок ${dropped}`,
+  )
+
+  return entries.size
+}
+
+/**
+ * Забывает список целиком: удаление данных по прямой просьбе хозяина.
+ * Выход из счёта сюда не ведёт и вести не должен: для него есть unlinkCollection.
+ *
+ * Снимок и его дубль переписываются сразу, очередь выбрасывается:
+ * правки к удалённым записям воскресили бы часть списка после его удаления.
  */
 export async function forgetCollection(): Promise<void> {
+  await clearEditQueue()
   entries.clear()
   ownerUserId = null
   await saveSnapshotNow({ backup: true })
