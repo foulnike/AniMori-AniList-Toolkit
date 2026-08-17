@@ -14,16 +14,50 @@ export interface EditOutcome {
   retry: boolean
 }
 
-/** Что меняем в записи. Незаданное сервер оставляет как было. */
+/**
+ * Что меняем в записи. Незаданное сервер оставляет как было.
+ *
+ * У дат три состояния, а не два: ключа нет — не трогаем, строка — ставим,
+ * null — стираем. Поэтому они разбираются через наличие ключа, а не типа.
+ */
 export interface EntryPatch {
   status?: string
   score10?: number
   progress?: number
+  /** Прочитано томов. У аниме не шлётся вовсе. */
+  volumes?: number
+  /** Сколько раз пересмотрели или перечитали. */
+  repeat?: number
+  /** Дата вида ГГГГ-ММ-ДД или null, чтобы стереть. */
+  startedAt?: string | null
+  completedAt?: string | null
+  /** Личный комментарий. Пустая строка стирает его на сервере. */
+  notes?: string
 }
 
 const SAVE_MUTATION = `
-mutation ($mediaId: Int!, $status: MediaListStatus, $score: Float, $progress: Int) {
-  SaveMediaListEntry(mediaId: $mediaId, status: $status, score: $score, progress: $progress) {
+mutation (
+  $mediaId: Int!
+  $status: MediaListStatus
+  $score: Float
+  $progress: Int
+  $progressVolumes: Int
+  $repeat: Int
+  $startedAt: FuzzyDateInput
+  $completedAt: FuzzyDateInput
+  $notes: String
+) {
+  SaveMediaListEntry(
+    mediaId: $mediaId
+    status: $status
+    score: $score
+    progress: $progress
+    progressVolumes: $progressVolumes
+    repeat: $repeat
+    startedAt: $startedAt
+    completedAt: $completedAt
+    notes: $notes
+  ) {
     id
     mediaId
   }
@@ -58,24 +92,54 @@ interface DeleteReply {
   DeleteMediaListEntry?: { deleted?: boolean } | null
 }
 
-/** Принято без оговорок. */
-const DONE: EditOutcome = { ok: true, retry: false }
+/** Нечёткая дата сервера: тройка чисел, любое из них может быть пустым. */
+interface FuzzyDate {
+  year: number | null
+  month: number | null
+  day: number | null
+}
 
-/** Отказ по содержанию: повтор даст тот же ответ, правку надо бросить. */
-const REFUSED: EditOutcome = { ok: false, retry: false }
+/** Пустая нечёткая дата — именно она стирает дату на сервере. */
+const BLANK_DATE: FuzzyDate = { year: null, month: null, day: null }
 
-/** Временная помеха: сеть, темп или падение сервера. Повторим позже. */
-const LATER: EditOutcome = { ok: false, retry: true }
+/**
+ * Переводит ГГГГ-ММ-ДД в тройку чисел. Без меток времени сознательно:
+ * это календарный день, и прогон через Date сдвинул бы его на сутки
+ * у всех, кто западнее Гринвича. Непонятная строка считается очисткой.
+ */
+function toFuzzy(value: string | null): FuzzyDate {
+  if (!value) return BLANK_DATE
+
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!parts) {
+    Logger('WARN', `Правка: дата непонятного вида «${value}» — шлём очистку`)
+    return BLANK_DATE
+  }
+
+  return {
+    year: Number(parts[1]),
+    month: Number(parts[2]),
+    day: Number(parts[3]),
+  }
+}
 
 /**
  * Отправляет одну правку записи. Незаданные поля не шлём вовсе:
  * переданный null стёр бы чужое поле, которого пользователь не трогал.
+ *
+ * Даты проверяются по наличию ключа, а не по типу значения: только так можно
+ * отличить «не задано» от «стереть».
  */
 export async function saveEntry(mediaId: number, patch: EntryPatch): Promise<EditOutcome> {
   const variables: Record<string, unknown> = { mediaId }
   if (typeof patch.status === 'string') variables.status = patch.status
   if (typeof patch.score10 === 'number') variables.score = patch.score10
   if (typeof patch.progress === 'number') variables.progress = patch.progress
+  if (typeof patch.volumes === 'number') variables.progressVolumes = patch.volumes
+  if (typeof patch.repeat === 'number') variables.repeat = patch.repeat
+  if ('startedAt' in patch) variables.startedAt = toFuzzy(patch.startedAt ?? null)
+  if ('completedAt' in patch) variables.completedAt = toFuzzy(patch.completedAt ?? null)
+  if (typeof patch.notes === 'string') variables.notes = patch.notes
 
   try {
     const reply = await anilistQuery<SaveReply>(SAVE_MUTATION, variables, true)
@@ -94,6 +158,15 @@ export async function saveEntry(mediaId: number, patch: EntryPatch): Promise<Edi
     return LATER
   }
 }
+
+/** Принято без оговорок. */
+const DONE: EditOutcome = { ok: true, retry: false }
+
+/** Отказ по содержанию: повтор даст тот же ответ, правку надо бросить. */
+const REFUSED: EditOutcome = { ok: false, retry: false }
+
+/** Временная помеха: сеть, темп или падение сервера. Повторим позже. */
+const LATER: EditOutcome = { ok: false, retry: true }
 
 /**
  * Убирает запись из списка. Два запроса: сначала номер записи,
