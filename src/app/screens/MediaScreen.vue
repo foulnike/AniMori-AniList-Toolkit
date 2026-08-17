@@ -5,6 +5,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
+import { Bridge } from '@/bridge'
 import { getEntry } from '@/core/collection'
 import { queueEdit } from '@/core/edit-sender'
 import { partsOut } from '@/core/media-looks'
@@ -13,6 +14,7 @@ import { Logger } from '@/utils/logger'
 
 import EntrySheet from '../components/EntrySheet.vue'
 import { formatWord, partsWord as partsWordFor, statusWord } from '../labels'
+import { mediaLinks, type MediaLink } from '../media-links'
 import { currentRoute } from '../router'
 
 const card = ref<MediaCard | null>(null)
@@ -152,18 +154,20 @@ const about = computed<string>(() => {
 })
 
 /**
- * Бледный хвост под описанием: номера и источник текста. Отдельной
- * панели ради одной строчки не нужно: справка уместна рядом с текстом.
+ * Бледный хвост под описанием: номера каталогов и источник текста,
+ * теперь ссылками. Сборка адресов — в media-links.ts.
  */
-const aboutTail = computed<string>(() => {
+const aboutLinks = computed<MediaLink[]>(() => {
   const found = card.value
-  if (found === null) return ''
+  if (found === null) return []
 
-  const parts = [`AniList #${found.mediaId}`]
-  if (found.malId !== null) parts.push(`MAL #${found.malId}`)
-  if (russian.value !== null) parts.push(`описание: ${russian.value.sourceName}`)
-
-  return parts.join(' · ')
+  return mediaLinks({
+    mediaId: found.mediaId,
+    malId: found.malId,
+    type: found.type,
+    sourceUrl: russian.value?.url ?? null,
+    sourceName: russian.value?.sourceName ?? null,
+  })
 })
 
 /** Факты пилюлями под названием: только то, что сервер впрямь назвал. */
@@ -259,6 +263,16 @@ async function load(): Promise<void> {
     // Без русского названия карточка живая: останется латиница.
     Logger('WARN', `Карточка ${id}: русское название не добылось`, e)
   }
+}
+
+/**
+ * Уводит наружу через оболочку: в WebView2 переход в новом окне молча
+ * отбрасывается, а переход в том же окне унёс бы само приложение.
+ */
+function onOpen(url: string): void {
+  void Bridge.shell.openExternal(url).catch((e) => {
+    Logger('WARN', `Карточка: внешняя ссылка не открылась (${url})`, e)
+  })
 }
 
 /** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
@@ -385,7 +399,18 @@ watch(mediaId, () => {
               <p v-if="about" class="am-about">{{ about }}</p>
               <p v-else class="am-dim">Описания ни один источник не дал.</p>
 
-              <p class="am-about__tail">{{ aboutTail }}</p>
+              <p v-if="aboutLinks.length > 0" class="am-about__tail">
+                <template v-for="(link, at) in aboutLinks" :key="link.key">
+                  <span v-if="at > 0" class="am-about__dot" aria-hidden="true">·</span>
+                  <a
+                    class="am-about__link"
+                    :href="link.url"
+                    :title="link.hint"
+                    @click.prevent="onOpen(link.url)"
+                    >{{ link.text }}</a
+                  >
+                </template>
+              </p>
             </div>
           </div>
 
@@ -642,6 +667,25 @@ watch(mediaId, () => {
   margin: 14px 0 0;
   font-size: 12.5px;
   color: var(--am-faint);
+}
+
+/* Номера в хвосте — ссылки наружу. Подчёркивание появляется под мышью:
+   бледная справка не должна рябить линиями в покое. */
+.am-about__link {
+  color: var(--am-dim);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+}
+
+.am-about__link:hover,
+.am-about__link:focus-visible {
+  color: var(--am-accent);
+  border-bottom-color: currentcolor;
+}
+
+.am-about__dot {
+  margin: 0 7px;
 }
 
 .am-about-box {
