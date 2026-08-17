@@ -429,7 +429,6 @@ import {
   isSettingsOpen,
   loadAuthState,
   refreshDict,
-  reloadCustomLinks,
   saveAlToken,
   selectAccent,
   setAccentCustom,
@@ -585,7 +584,6 @@ function onClearCache(): void {
 // ==== Жизненный цикл ====
 
 onMounted(() => {
-  reloadCustomLinks()
   loadAuthState()
   syncTitleSources()
 })
@@ -594,12 +592,11 @@ onBeforeUnmount(() => {
   if (clearTimer !== undefined) window.clearTimeout(clearTimer)
 })
 
-// Словарь и свои ссылки меняются извне, поэтому перечитываем их при каждом открытии.
+// Словарь меняется извне, поэтому перечитываем его при каждом открытии.
 watch(isSettingsOpen, (open) => {
   // Панель не должна открываться с кнопкой, готовой стереть кэш по одному клику.
   disarmClear()
   if (!open) return
   refreshDict()
-  reloadCustomLinks()
 })
 </script>
