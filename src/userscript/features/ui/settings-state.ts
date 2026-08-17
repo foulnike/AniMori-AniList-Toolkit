@@ -14,8 +14,6 @@ import {
   isAccentTooLight,
   parseAccentHex,
 } from '@/core/accent'
-import { CL_COLORS, getCustomLinks, setCustomLinks } from '@/core/custom-links'
-import type { CustomLink } from '@/core/custom-links'
 import {
   getUserDict,
   normDictKey,
@@ -42,7 +40,6 @@ export const ISSUES_DICT_BULK = SUP_GITHUB + '/issues/new?template=dictionary-bu
 export const AL_DEV_SETTINGS = HTTPS + 'anilist.co/settings/developer'
 export const AL_PIN_REDIRECT = HTTPS + 'anilist.co/api/v2/oauth/pin'
 export const AL_AUTHORIZE = HTTPS + 'anilist.co/api/v2/oauth/authorize'
-export const CUSTOM_URL_EXAMPLE = HTTPS + 'site.com/search?q={query}'
 
 /**
  * Единая точка открытия внешних адресов из панели настроек.
@@ -202,42 +199,6 @@ export function setAccentCustom(value: string): void {
   accentCustom.value = value.trim().toLowerCase()
   if (accentPreset.value !== 'custom') accentPreset.value = 'custom'
   amSetAccent('custom', accentCustom.value)
-}
-
-export const customLinks = ref<CustomLink[]>([])
-
-export function reloadCustomLinks(): void {
-  customLinks.value = getCustomLinks()
-}
-
-/** В хранилище кладём чистые объекты, а не reactive-прокси. */
-export function persistCustomLinks(): void {
-  setCustomLinks(
-    customLinks.value.map((link) => ({
-      name: link.name.trim(),
-      url: link.url.trim(),
-      color: link.color,
-    })),
-  )
-}
-
-export function addCustomLink(): void {
-  const palette = CL_COLORS[customLinks.value.length % CL_COLORS.length]
-  customLinks.value.push({ name: '', url: '', color: palette ?? CL_COLORS[0] ?? '61,180,242' })
-  persistCustomLinks()
-}
-
-export function removeCustomLink(index: number): void {
-  if (index < 0 || index >= customLinks.value.length) return
-  customLinks.value.splice(index, 1)
-  persistCustomLinks()
-}
-
-export function setCustomLinkColor(index: number, color: string): void {
-  const link = customLinks.value[index]
-  if (!link) return
-  link.color = color
-  persistCustomLinks()
 }
 
 export interface DictEntry {
