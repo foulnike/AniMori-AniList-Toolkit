@@ -365,7 +365,7 @@ watch(mediaId, () => {
 
         <div class="am-split">
           <div class="am-split__main">
-            <div class="am-panel">
+            <div class="am-panel am-about-box">
               <h3 class="am-h3">Описание</h3>
               <p v-if="about" class="am-about">{{ about }}</p>
               <p v-else class="am-dim">Описания ни один источник не дал.</p>
@@ -376,11 +376,12 @@ watch(mediaId, () => {
 
           <aside class="am-split__side">
             <div class="am-panel am-mine">
-              <h3 class="am-h3">Моя запись</h3>
-
-              <button class="am-btn am-btn--wide am-mine__pick" type="button" @click="sheetOpen = true">
-                <span class="am-mine__label">{{ listLabel }}</span>
-                <span class="am-mine__hint">Изменить</span>
+              <button
+                class="am-btn am-btn--wide am-mine__pick"
+                type="button"
+                @click="sheetOpen = true"
+              >
+                {{ listLabel }}
               </button>
 
               <div class="am-mine__bar">
@@ -587,12 +588,14 @@ watch(mediaId, () => {
   border-color: rgba(255, 90, 90, 0.4);
 }
 
-/* Широкое окно делится надвое, узкое складывается в одну колонку. */
+/* Колонка описания равна длине строки, а не всей ширине окна:
+   иначе панель тянется дальше текста и правая половина пустует. */
 .am-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 84ch) 380px;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+  justify-content: start;
 }
 
 .am-split__main,
@@ -601,6 +604,12 @@ watch(mediaId, () => {
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+}
+
+/* Обе панели растягиваются до высоты большей из двух. */
+.am-about-box,
+.am-mine {
+  flex: 1;
 }
 
 /* Одна колонка с ограниченной длиной строки: разбивка на столбцы
@@ -613,11 +622,21 @@ watch(mediaId, () => {
   white-space: pre-line;
 }
 
-/* Справка хвостом описания: видно тому, кто искал, и не лезет в глаза. */
+/* Справка хвостом описания сидит у низа панели, где бы ни кончился текст. */
 .am-about__tail {
   margin: 14px 0 0;
   font-size: 12.5px;
   color: var(--am-faint);
+}
+
+.am-about-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.am-about-box .am-about__tail {
+  margin-top: auto;
+  padding-top: 14px;
 }
 
 /* Панель записи дышит: между блоками воздух, а не слипшиеся строки. */
@@ -625,27 +644,12 @@ watch(mediaId, () => {
   gap: 16px;
 }
 
-/* Главная кнопка крупная: с дивана и пультом мелкую не нажать. */
+/* Главная кнопка крупная и надпись у неё по центру: с дивана и пультом
+   мелкую не нажать, а вторая подпись внутри только смещала текст. */
 .am-mine__pick {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
   min-height: 52px;
   font-size: 15px;
-  text-align: left;
-}
-
-.am-mine__label {
   font-weight: 650;
-}
-
-.am-mine__hint {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  opacity: 0.72;
-  text-transform: uppercase;
 }
 
 .am-mine__bar {
