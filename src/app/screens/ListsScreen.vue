@@ -7,7 +7,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { initCollection, refreshFromServer } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
 import { startEditSender } from '@/core/edit-sender'
-import { peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
+import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { searchOwnList } from '@/core/media-search'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { SnapshotEntry } from '@/core/snapshot'
@@ -215,7 +215,9 @@ function sortEntries(list: SnapshotEntry[]): SnapshotEntry[] {
 /** Запись памяти в плитку. */
 function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
-  const parts = entry.type === 'MANGA' ? (look?.chapters ?? null) : (look?.episodes ?? null)
+
+  // У идущего сезона знаменателем служат вышедшие серии.
+  const parts = partsOut(look, entry.type)
 
   return {
     mediaId: entry.mediaId,
