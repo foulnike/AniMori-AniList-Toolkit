@@ -2,7 +2,7 @@
 // Тормоз живёт здесь, а не в очереди: только клиент видит все запросы к AniList сразу.
 // Сам запрос собирает мост (пункт 2.3): в десктопе пропуск в разметку не попадает.
 
-import { Bridge, type HttpResponse } from '@/bridge'
+import { Bridge, BridgeHttpError, type HttpResponse } from '@/bridge'
 import { IS_ANILIST } from '../core/constants'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
@@ -119,6 +119,14 @@ export function getAlToken(): string | null {
 }
 
 /**
+ * Есть ли чем подписать запрос. В десктопе пропуск лежит в оболочке и разметке
+ * не виден, так что здесь это ответ только про наш собственный токен.
+ */
+function canSign(): boolean {
+  return getAlToken() !== null
+}
+
+/**
  * Отдаёт мосту токен, найденный только в Vuex: подписывает запрос теперь мост,
  * а сессию сайта он сам не видит и без этого ответил бы «вход не выполнен».
  */
@@ -210,6 +218,8 @@ function backOffAfterServerFailure(status: number): number {
 /**
  * GraphQL-запрос к AniList с паузой после 429 и ограниченным числом повторов.
  * @param useAuth Подписывать ли запрос пропуском; сам пропуск подставляет мост.
+ *   Без пропуска просьба понижается до публичного запроса: работа без входа
+ *   важнее полей, которые сервер отдаёт только своему хозяину.
  * @param attempt Служебный счётчик повторов после 429. Снаружи не передаётся.
  */
 export async function anilistQuery<T = unknown>(
@@ -227,12 +237,19 @@ export async function anilistQuery<T = unknown>(
     await sleep(remaining + Math.floor(Math.random() * 500))
   }
 
-  if (useAuth) shareVuexToken()
+  // Подписать нечем: мост на такую просьбу отказывает целиком, и запрос,
+  // которому пропуск был нужен лишь для своей закладки, не ушёл бы вовсе.
+  const signed = useAuth && canSign()
+  if (useAuth && !signed) {
+    Logger('API', 'AniList: вход не выполнен, запрос идёт без подписи')
+  }
+
+  if (signed) shareVuexToken()
 
   Logger('API', 'GraphQL запрос (AniList)', {
     query: query.substring(0, 100) + '...',
     variables,
-    useAuth,
+    useAuth: signed,
   })
 
   // Разрешение на отправку: сам темп знает только ограничитель.
@@ -244,8 +261,16 @@ export async function anilistQuery<T = unknown>(
   let res: HttpResponse
   try {
     // Адрес, заголовки и пропуск — забота моста: в десктопе запрос идёт из Rust.
-    res = await Bridge.anilist.query(JSON.stringify({ query, variables }), useAuth)
+    res = await Bridge.anilist.query(JSON.stringify({ query, variables }), signed)
   } catch (e) {
+    // Отказ не от сети, а от самого моста: например, пропуск стёрли между
+    // проверкой и отправкой. Паузу ставить нельзя — она глушит и публичные
+    // запросы, а сервер тут ни при чём.
+    if (!(e instanceof BridgeHttpError)) {
+      Logger('ERROR', 'AniList: мост отклонил запрос', e)
+      throw e instanceof Error ? e : new Error(String(e))
+    }
+
     // Сеть упала — тот же отступ, иначе очередь крутит пачки вхолостую всё время без сети.
     reportError(NET_SOURCE_ANILIST, NET_LABEL_ANILIST, e, Date.now() - startedAt)
     backOffAfterServerFailure(0)
