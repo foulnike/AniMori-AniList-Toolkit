@@ -24,6 +24,8 @@ const MAL_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int) {
 // Подробности карточки. Запись списка спрашиваем вместе с тайтлом: один
 // запрос вместо двух, а сверка с памятью покажет неушедшие правки.
 // Баннер и цвет обложки — для крупного вида: без них карточка серая.
+// Пересмотры, даты и комментарий нужны окну правки: оно открывается из карточки
+// и своих запросов не делает.
 const CARD_QUERY = `query ($id: Int!) {
   Media(id: $id) {
     id
@@ -57,6 +59,18 @@ const CARD_QUERY = `query ($id: Int!) {
       score(format: POINT_10_DECIMAL)
       progress
       progressVolumes
+      repeat
+      notes
+      startedAt {
+        year
+        month
+        day
+      }
+      completedAt {
+        year
+        month
+        day
+      }
     }
   }
 }`
@@ -64,6 +78,8 @@ const CARD_QUERY = `query ($id: Int!) {
 // Поиск по слову. Закладка хозяина идёт тем же запросом: в выдаче
 // надо сразу видеть, что из найденного уже в своём списке.
 // Обложка просится large: в сетке постеров medium заметно мылится.
+// Пересмотры, даты и комментарий здесь не спрашиваются: в плитке их не видно,
+// а ответ на двадцать находок тяжелеет зазря.
 const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $perPage: Int!) {
   Page(page: $page, perPage: $perPage) {
     pageInfo {
@@ -107,11 +123,22 @@ interface MalReply {
   } | null
 }
 
+/** Нечёткая дата сервера: тройка чисел, любое из которых может быть пустым. */
+interface FuzzyReply {
+  year?: number | null
+  month?: number | null
+  day?: number | null
+}
+
 interface OwnReply {
   status?: string | null
   score?: number | null
   progress?: number | null
   progressVolumes?: number | null
+  repeat?: number | null
+  notes?: string | null
+  startedAt?: FuzzyReply | null
+  completedAt?: FuzzyReply | null
 }
 
 interface CardReply {
@@ -163,12 +190,22 @@ interface SearchReply {
   } | null
 }
 
-/** Запись списка глазами сервера. Нужна для сверки с нашей памятью. */
+/**
+ * Запись списка глазами сервера. Нужна для сверки с нашей памятью.
+ *
+ * В выдаче поиска новые поля не спрашиваются и приезжают пустыми: это не ошибка,
+ * а осознанная экономия веса ответа; правка таких полей идёт только из карточки.
+ */
 export interface ServerEntry {
   status: string | null
   score10: number
   progress: number
   volumes: number
+  repeat: number
+  /** Вид ГГГГ-ММ-ДД или null, если дата неполная или её нет. */
+  startedAt: string | null
+  completedAt: string | null
+  notes: string | null
 }
 
 /**
@@ -280,6 +317,25 @@ function textOrNull(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
 }
 
+/** Две цифры для даты. Свой помощник дешевле втягивания библиотеки дат. */
+function pad(value: number): string {
+  return value < 10 ? `0${value}` : String(value)
+}
+
+/**
+ * Нечёткая дата сервера в вид ГГГГ-ММ-ДД. Неполная дата считается отсутствующей:
+ * поле даты в окне правки ждёт ровно такой вид, а «только год» показать негде.
+ */
+function readFuzzy(date: FuzzyReply | null | undefined): string | null {
+  if (!date) return null
+
+  const { year, month, day } = date
+  if (typeof year !== 'number' || typeof month !== 'number' || typeof day !== 'number') return null
+  if (year <= 0 || month <= 0 || day <= 0) return null
+
+  return `${year}-${pad(month)}-${pad(day)}`
+}
+
 /** Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет». */
 function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
   if (!own) return null
@@ -289,6 +345,10 @@ function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
     score10: typeof own.score === 'number' ? own.score : 0,
     progress: typeof own.progress === 'number' ? own.progress : 0,
     volumes: typeof own.progressVolumes === 'number' ? own.progressVolumes : 0,
+    repeat: typeof own.repeat === 'number' ? own.repeat : 0,
+    startedAt: readFuzzy(own.startedAt),
+    completedAt: readFuzzy(own.completedAt),
+    notes: textOrNull(own.notes),
   }
 }
 
