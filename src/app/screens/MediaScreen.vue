@@ -49,13 +49,34 @@ const progress = computed<number>(() => own.value?.progress ?? card.value?.ownEn
 
 const volumes = computed<number>(() => own.value?.volumes ?? card.value?.ownEntry?.volumes ?? 0)
 
+/** Пересмотры и перечитывания. Правило то же: память впереди ответа. */
+const repeat = computed<number>(() => own.value?.repeat ?? card.value?.ownEntry?.repeat ?? 0)
+
+const startedAt = computed<string | null>(
+  () => own.value?.startedAt ?? card.value?.ownEntry?.startedAt ?? null,
+)
+
+const completedAt = computed<string | null>(
+  () => own.value?.completedAt ?? card.value?.ownEntry?.completedAt ?? null,
+)
+
+const notes = computed<string | null>(() => own.value?.notes ?? card.value?.ownEntry?.notes ?? null)
+
 /** Всего частей: у аниме эпизоды, у манги главы. Неизвестное не ограничивает. */
 const partsTotal = computed<number | null>(() =>
   card.value?.type === 'MANGA' ? (card.value?.chapters ?? null) : (card.value?.episodes ?? null),
 )
 
+/** Всего томов у манги. У аниме поле всегда пустое. */
+const volumesTotal = computed<number | null>(() => card.value?.volumes ?? null)
+
 /** Подпись строки счёта: «Главы» у манги и «Эпизоды» у аниме. */
 const partsWord = computed<string>(() => partsWordFor(card.value?.type ?? 'ANIME'))
+
+/** Слово для пересмотров: у манги читают, а не смотрят. */
+const repeatWord = computed<string>(() =>
+  card.value?.type === 'MANGA' ? 'Перечитывания' : 'Пересмотры',
+)
 
 /** Надпись главной кнопки: своя закладка, а без неё — приглашение добавить. */
 const listLabel = computed<string>(() => {
@@ -82,13 +103,14 @@ const heroStyle = computed(() => {
 })
 
 /** Доля пройденного для полосы в сводке. */
-const donePart = computed<string>(() => {
+const doneShare = computed<number>(() => {
   const total = partsTotal.value
-  if (total === null || total <= 0) return status.value === 'COMPLETED' ? '100%' : '0%'
+  if (total === null || total <= 0) return status.value === 'COMPLETED' ? 1 : 0
 
-  const part = Math.min(1, Math.max(0, progress.value / total))
-  return `${Math.round(part * 100)}%`
+  return Math.min(1, Math.max(0, progress.value / total))
 })
+
+const donePart = computed<string>(() => `${Math.round(doneShare.value * 100)}%`)
 
 /**
  * Разошлось ли наше состояние с сервером. Говорится вслух: чаще всего это
@@ -102,7 +124,12 @@ const drifted = computed<boolean>(() => {
   return (
     server.status !== mine.status ||
     server.score10 !== mine.score10 ||
-    server.progress !== mine.progress
+    server.progress !== mine.progress ||
+    server.volumes !== mine.volumes ||
+    server.repeat !== mine.repeat ||
+    server.startedAt !== mine.startedAt ||
+    server.completedAt !== mine.completedAt ||
+    server.notes !== mine.notes
   )
 })
 
@@ -113,6 +140,21 @@ const about = computed<string>(() => {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .trim()
+})
+
+/**
+ * Бледный хвост под описанием: номера и источник текста. Отдельной
+ * панели ради одной строчки не нужно: справка уместна рядом с текстом.
+ */
+const aboutTail = computed<string>(() => {
+  const found = card.value
+  if (found === null) return ''
+
+  const parts = [`AniList #${found.mediaId}`]
+  if (found.malId !== null) parts.push(`MAL #${found.malId}`)
+  if (russian.value !== null) parts.push(`описание: ${russian.value.sourceName}`)
+
+  return parts.join(' · ')
 })
 
 /** Факты пилюлями под названием: только то, что сервер впрямь назвал. */
@@ -138,6 +180,19 @@ function describe(e: unknown): string {
 
 function scoreText(value: number): string {
   return value > 0 ? value.toFixed(1) : '—'
+}
+
+/**
+ * Дата человеческим видом. Строка разбирается вручную: прогон через Date
+ * счёл бы её полночью по Гринвичу и сдвинул день назад у половины мира.
+ */
+function dateText(value: string | null): string {
+  if (value === null) return '—'
+
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!parts) return value
+
+  return `${parts[3]}.${parts[2]}.${parts[1]}`
 }
 
 /** Строка счёта частей вида «7 из 12». Неизвестный итог не выдумывается. */
@@ -191,8 +246,19 @@ async function load(): Promise<void> {
   }
 }
 
+/** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
+type CardEdit =
+  | 'status'
+  | 'score'
+  | 'progress'
+  | 'volumes'
+  | 'repeat'
+  | 'startedAt'
+  | 'completedAt'
+  | 'notes'
+
 /** Отправляет одну правку в очередь и обновляет показ по памяти. */
-async function send(kind: 'status' | 'score' | 'progress', value: string | number): Promise<void> {
+async function send(kind: CardEdit, value: string | number): Promise<void> {
   if (mediaId.value === 0) return
 
   try {
@@ -214,6 +280,26 @@ function onPickScore(value: number): void {
 
 function onPickProgress(value: number): void {
   void send('progress', value)
+}
+
+function onPickVolumes(value: number): void {
+  void send('volumes', value)
+}
+
+function onPickRepeat(value: number): void {
+  void send('repeat', value)
+}
+
+function onPickStarted(value: string): void {
+  void send('startedAt', value)
+}
+
+function onPickCompleted(value: string): void {
+  void send('completedAt', value)
+}
+
+function onPickNotes(value: string): void {
+  void send('notes', value)
 }
 
 onMounted(() => {
@@ -279,53 +365,66 @@ watch(mediaId, () => {
 
         <div class="am-split">
           <div class="am-split__main">
-            <div v-if="about" class="am-panel">
+            <div class="am-panel">
               <h3 class="am-h3">Описание</h3>
-              <p class="am-about">{{ about }}</p>
-            </div>
+              <p v-if="about" class="am-about">{{ about }}</p>
+              <p v-else class="am-dim">Описания ни один источник не дал.</p>
 
-            <div v-else class="am-panel am-dim">Описания ни один источник не дал.</div>
+              <p class="am-about__tail">{{ aboutTail }}</p>
+            </div>
           </div>
 
           <aside class="am-split__side">
-            <div class="am-panel">
+            <div class="am-panel am-mine">
               <h3 class="am-h3">Моя запись</h3>
 
-              <button class="am-btn am-btn--wide" type="button" @click="sheetOpen = true">
-                {{ listLabel }}
+              <button class="am-btn am-btn--wide am-mine__pick" type="button" @click="sheetOpen = true">
+                <span class="am-mine__label">{{ listLabel }}</span>
+                <span class="am-mine__hint">Изменить</span>
               </button>
 
-              <dl class="am-facts">
-                <div class="am-facts__row">
-                  <dt class="am-facts__name">Оценка</dt>
-                  <dd class="am-facts__value">{{ scoreText(score10) }}</dd>
+              <div class="am-mine__bar">
+                <span class="am-line">
+                  <span class="am-line__fill" :style="{ width: donePart }" />
+                </span>
+                <span class="am-mine__share">{{ donePart }}</span>
+              </div>
+
+              <dl class="am-tiles">
+                <div class="am-tile-fact">
+                  <dt class="am-tile-fact__name">Оценка</dt>
+                  <dd class="am-tile-fact__value">{{ scoreText(score10) }}</dd>
                 </div>
 
-                <div class="am-facts__row">
-                  <dt class="am-facts__name">{{ partsWord }}</dt>
-                  <dd class="am-facts__value">{{ partsText }}</dd>
+                <div class="am-tile-fact">
+                  <dt class="am-tile-fact__name">{{ partsWord }}</dt>
+                  <dd class="am-tile-fact__value">{{ partsText }}</dd>
                 </div>
 
-                <div v-if="card.type === 'MANGA'" class="am-facts__row">
-                  <dt class="am-facts__name">Тома</dt>
-                  <dd class="am-facts__value">{{ volumes }}</dd>
+                <div v-if="card.type === 'MANGA'" class="am-tile-fact">
+                  <dt class="am-tile-fact__name">Тома</dt>
+                  <dd class="am-tile-fact__value">{{ volumes }}</dd>
+                </div>
+
+                <div class="am-tile-fact">
+                  <dt class="am-tile-fact__name">{{ repeatWord }}</dt>
+                  <dd class="am-tile-fact__value">{{ repeat }}</dd>
+                </div>
+
+                <div class="am-tile-fact">
+                  <dt class="am-tile-fact__name">Начато</dt>
+                  <dd class="am-tile-fact__value">{{ dateText(startedAt) }}</dd>
+                </div>
+
+                <div class="am-tile-fact">
+                  <dt class="am-tile-fact__name">Закончено</dt>
+                  <dd class="am-tile-fact__value">{{ dateText(completedAt) }}</dd>
                 </div>
               </dl>
 
-              <span class="am-line">
-                <span class="am-line__fill" :style="{ width: donePart }" />
-              </span>
+              <p v-if="notes" class="am-mine__note">{{ notes }}</p>
 
               <p v-if="drifted" class="am-meta">Правка сохранена и ждёт отправки на AniList.</p>
-            </div>
-
-            <div class="am-panel">
-              <h3 class="am-h3">Справка</h3>
-              <p class="am-meta">
-                AniList #{{ card.mediaId }}
-                <template v-if="card.malId"> · MAL #{{ card.malId }}</template>
-                <template v-if="russian"> · описание: {{ russian.sourceName }}</template>
-              </p>
             </div>
           </aside>
         </div>
@@ -339,10 +438,20 @@ watch(mediaId, () => {
           :progress="progress"
           :volumes="volumes"
           :parts-total="partsTotal"
+          :volumes-total="volumesTotal"
+          :repeat="repeat"
+          :started-at="startedAt"
+          :completed-at="completedAt"
+          :notes="notes"
           @close="sheetOpen = false"
           @status="onPickStatus"
           @score="onPickScore"
           @progress="onPickProgress"
+          @volumes="onPickVolumes"
+          @repeat="onPickRepeat"
+          @started-at="onPickStarted"
+          @completed-at="onPickCompleted"
+          @notes="onPickNotes"
         />
       </template>
     </template>
@@ -481,7 +590,7 @@ watch(mediaId, () => {
 /* Широкое окно делится надвое, узкое складывается в одну колонку. */
 .am-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: 18px;
   align-items: start;
 }
@@ -494,39 +603,109 @@ watch(mediaId, () => {
   min-width: 0;
 }
 
-/* Описание занимает всю панель: на широком окне текст
-   рассыпается колонками, а не тянется одной длинной строкой. */
+/* Одна колонка с ограниченной длиной строки: разбивка на столбцы
+   короткое описание резала на три столбика по одной строке. */
 .am-about {
+  max-width: 78ch;
   margin: 0;
-  line-height: 1.6;
+  line-height: 1.65;
   color: #d7e0ee;
   white-space: pre-line;
-  column-width: 46ch;
-  column-gap: 38px;
 }
 
-.am-facts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
+/* Справка хвостом описания: видно тому, кто искал, и не лезет в глаза. */
+.am-about__tail {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--am-faint);
 }
 
-.am-facts__row {
+/* Панель записи дышит: между блоками воздух, а не слипшиеся строки. */
+.am-mine {
+  gap: 16px;
+}
+
+/* Главная кнопка крупная: с дивана и пультом мелкую не нажать. */
+.am-mine__pick {
   display: flex;
   gap: 12px;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  min-height: 52px;
+  font-size: 15px;
+  text-align: left;
 }
 
-.am-facts__name {
-  font-size: 13px;
-  color: var(--am-dim);
+.am-mine__label {
+  font-weight: 650;
 }
 
-.am-facts__value {
-  margin: 0;
+.am-mine__hint {
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.72;
+  text-transform: uppercase;
+}
+
+.am-mine__bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.am-mine__share {
+  flex: none;
+  min-width: 42px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--am-dim);
+  text-align: right;
+}
+
+/* Факты плитками по две в ряд: каждое значение со своей подписью. */
+.am-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.am-tile-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-m);
+}
+
+.am-tile-fact__name {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--am-faint);
+  text-transform: uppercase;
+}
+
+.am-tile-fact__value {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+/* Комментарий выделен полосой сбоку: это чужой текст, а не наша подпись. */
+.am-mine__note {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #d7e0ee;
+  white-space: pre-line;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid var(--am-accent);
+  border-radius: 0 var(--am-r-s) var(--am-r-s) 0;
 }
 
 @media (max-width: 1180px) {
