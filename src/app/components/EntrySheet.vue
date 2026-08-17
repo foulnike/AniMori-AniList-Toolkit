@@ -15,6 +15,9 @@ const SCORE_STEP = 0.5
 /** Быстрые оценки одним нажатием: целые баллы шкалы. */
 const QUICK_MARKS: ReadonlyArray<number> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
+/** Крайние тона шкалы оценок: единица красная, десятка зелёная. */
+const MARK_TONE_MAX = 132
+
 const props = defineProps<{
   type: MediaType
   title: string
@@ -87,6 +90,19 @@ watch(
 
 function markText(value: number): string {
   return value > 0 ? value.toFixed(1) : '—'
+}
+
+/**
+ * Цвет балла: тон идёт от красного к зелёному по шкале.
+ * Считается на месте, чтобы не держать в стилях десять почти одинаковых правил.
+ */
+function markStyle(mark: number): Record<string, string> {
+  const tone = Math.round(((mark - 1) / (QUICK_MARKS.length - 1)) * MARK_TONE_MAX)
+
+  return {
+    '--am-mark': `hsl(${tone} 64% 46%)`,
+    '--am-mark-deep': `hsl(${tone} 68% 34%)`,
+  }
 }
 
 /** Оценка шагом шкалы, с обрезкой по краям: сервер знает только 0—10. */
@@ -220,12 +236,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="am-picks">
+          <div class="am-picks am-picks--mid">
             <button
               v-for="mark in QUICK_MARKS"
               :key="mark"
               class="am-pick am-pick--num"
               :class="{ 'am-pick--on': mark === score10 }"
+              :style="markStyle(mark)"
               type="button"
               @click="setScore(mark)"
             >
@@ -393,10 +410,14 @@ onBeforeUnmount(() => {
 
 /* Круглая цель, но не мелкая: на телевизоре мелкое просто не поймать. */
 .am-sheet__close {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
   width: 44px;
   height: 44px;
   margin-left: auto;
+  padding: 0;
   font: inherit;
   font-size: 22px;
   line-height: 1;
@@ -419,6 +440,11 @@ onBeforeUnmount(() => {
   gap: 14px;
 }
 
+/* Закладки, оценка и комментарий занимают всю ширину: рядов там много. */
+.am-field--wide {
+  grid-column: 1 / -1;
+}
+
 /* Панель поля: подпись сверху, содержимое под ней. */
 .am-field {
   display: flex;
@@ -428,11 +454,6 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-m);
-}
-
-/* Закладки, оценка и комментарий занимают всю ширину: рядов там много. */
-.am-field--wide {
-  grid-column: 1 / -1;
 }
 
 .am-field__name {
@@ -449,12 +470,21 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+/* Своя обёртка для шкалы оценок: ряд закладок остаётся прижатым влево. */
+.am-picks--mid {
+  justify-content: center;
+}
+
 /* Цель нажатия 44 пикселя по высоте: правило пульта и пальца заодно. */
 .am-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
   padding: 0 18px;
   font: inherit;
   font-size: 14px;
+  line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
   background: rgba(255, 255, 255, 0.04);
@@ -477,10 +507,31 @@ onBeforeUnmount(() => {
   border-color: transparent;
 }
 
+/* Балл красится своим тоном шкалы: правила ниже перебивают общую заливку. */
 .am-pick--num {
   min-width: 52px;
   font-weight: 650;
-  text-align: center;
+  color: rgba(255, 255, 255, 0.92);
+  background: linear-gradient(180deg, var(--am-mark), var(--am-mark-deep));
+  border-color: rgba(255, 255, 255, 0.1);
+  opacity: 0.6;
+  transition:
+    opacity 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.am-pick--num:hover {
+  color: #fff;
+  background: linear-gradient(180deg, var(--am-mark), var(--am-mark-deep));
+  opacity: 0.85;
+}
+
+.am-pick--num.am-pick--on {
+  color: #fff;
+  background: linear-gradient(180deg, var(--am-mark), var(--am-mark-deep));
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16);
+  opacity: 1;
 }
 
 .am-step-row {
@@ -490,10 +541,15 @@ onBeforeUnmount(() => {
 }
 
 .am-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 44px;
   height: 44px;
+  padding: 0;
   font: inherit;
   font-size: 20px;
+  line-height: 1;
   color: var(--am-text);
   cursor: pointer;
   background: rgba(255, 255, 255, 0.05);
@@ -519,15 +575,55 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+/* Поле даты одето под панель. Сам выпадающий календарь рисует движок. */
 .am-date {
   flex: 1;
   min-height: 44px;
+  padding: 9px 14px;
+  color: var(--am-text);
+  background: var(--am-panel-2);
+  border-radius: var(--am-r-m);
 }
 
+.am-date:hover {
+  background: var(--am-hover);
+  border-color: var(--am-accent);
+}
+
+.am-date::-webkit-datetime-edit {
+  color: var(--am-text);
+}
+
+.am-date::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+.am-date::-webkit-datetime-edit-text {
+  padding: 0 2px;
+  color: var(--am-faint);
+}
+
+/* Значок вызова календаря светлый: родной чёрный на тёмном поле не виден. */
+.am-date::-webkit-calendar-picker-indicator {
+  padding: 4px;
+  cursor: pointer;
+  border-radius: var(--am-r-s);
+  filter: invert(1) brightness(1.4);
+  opacity: 0.55;
+}
+
+.am-date::-webkit-calendar-picker-indicator:hover {
+  background: rgba(255, 255, 255, 0.12);
+  opacity: 1;
+}
+
+/* Заметка не круглая: скругление полей ввода на большом поле смотрится нелепо. */
 .am-note {
   min-height: 96px;
+  padding: 12px 14px;
   font: inherit;
   line-height: 1.5;
+  border-radius: var(--am-r-m);
   resize: vertical;
 }
 
