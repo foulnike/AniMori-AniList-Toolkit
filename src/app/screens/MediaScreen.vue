@@ -7,6 +7,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
 import { getEntry } from '@/core/collection'
 import { queueEdit } from '@/core/edit-sender'
+import { partsOut } from '@/core/media-looks'
 import { getRussianTitle, type RussianTitle } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
 
@@ -62,8 +63,16 @@ const completedAt = computed<string | null>(
 
 const notes = computed<string | null>(() => own.value?.notes ?? card.value?.ownEntry?.notes ?? null)
 
-/** Всего частей: у аниме эпизоды, у манги главы. Неизвестное не ограничивает. */
+/**
+ * Сколько частей уже вышло: именно по этому числу считается полоса и шаг.
+ * У идущего сезона объявленного итога часто нет вовсе.
+ */
 const partsTotal = computed<number | null>(() =>
+  card.value === null ? null : partsOut(card.value, card.value.type),
+)
+
+/** Объявленный итог: то, сколько частей всего обещано. */
+const partsPlanned = computed<number | null>(() =>
   card.value?.type === 'MANGA' ? (card.value?.chapters ?? null) : (card.value?.episodes ?? null),
 )
 
@@ -166,7 +175,13 @@ const facts = computed<string[]>(() => {
   const kindWord = formatWord(found.format)
   if (kindWord !== null) list.push(kindWord)
   if (found.seasonYear !== null) list.push(String(found.seasonYear))
-  if (partsTotal.value !== null) list.push(`${partsWord.value}: ${partsTotal.value}`)
+  if (partsPlanned.value !== null) list.push(`${partsWord.value}: ${partsPlanned.value}`)
+
+  // У идущего сезона важно не обещанное, а то, что уже можно смотреть.
+  if (found.airingEpisode !== null && partsTotal.value !== null) {
+    list.push(`Вышло: ${partsTotal.value}`)
+  }
+
   if (found.volumes) list.push(`Тома: ${found.volumes}`)
   if (found.duration) list.push(`${found.duration} мин`)
   if (found.averageScore !== null) list.push(`Средняя ${found.averageScore}%`)
