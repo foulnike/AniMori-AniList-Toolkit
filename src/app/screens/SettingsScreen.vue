@@ -8,6 +8,7 @@ import { Bridge } from '@/bridge'
 import {
   entryCount,
   forgetCollection,
+  initCollection,
   refreshFromServer,
   unlinkCollection,
 } from '@/core/collection'
@@ -92,7 +93,12 @@ async function guard(action: () => Promise<void>): Promise<void> {
 
 /// Числа переспрашиваются после каждой кнопки: показанное должно совпадать
 /// с тем, что лежит внутри.
+///
+/// Подъём обязателен: настройки открывают раньше списков, и без него
+/// сводка показывала ноль при живом списке на диске. Сам подъём
+/// идемпотентен и в сеть не ходит.
 async function readState(): Promise<void> {
+  await initCollection()
   listCount.value = entryCount()
 
   const got = await getDbStats()
