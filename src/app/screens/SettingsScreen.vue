@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // Настройки: вход в AniList и распоряжение своими данными.
-// Каждая кнопка здесь что-то делает: обещаний на будущее на экране нет.
+// На экране только то, что человеку решать: как всё устроено внутри —
+// дело документации, а не карточки настроек.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
-import { currentUserId, entryCount, forgetCollection, refreshFromServer } from '@/core/collection'
+import { entryCount, forgetCollection, refreshFromServer } from '@/core/collection'
 import { clearCache, getDbStats } from '@/core/db'
-import type { DbStats } from '@/core/types'
 
 import {
   authStatus,
@@ -20,9 +20,21 @@ import {
 } from '../auth/session'
 
 const version = __ANIMORI_VERSION__
-const platform = __ANIMORI_PLATFORM__
 
 const desktop = isDesktop()
+
+/// Человеку важна его система, а не имя нашей сборки: слово «app» ему
+/// не говорит ничего, а «Windows» отвечает на вопрос сразу.
+function systemName(): string {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  if (/Android/i.test(ua)) return 'Android'
+  if (/Windows/i.test(ua)) return 'Windows'
+  if (/Mac OS X/i.test(ua)) return 'macOS'
+  if (/Linux/i.test(ua)) return 'Linux'
+  return 'неизвестна'
+}
+
+const system = systemName()
 
 // Ошибки показываются рядом с кнопкой, а не глотаются: молчаливый catch
 // здесь означал бы кнопку, которая не делает ничего и не говорит почему.
@@ -35,15 +47,13 @@ const manualOpen = ref(false)
 // из него берётся срок ожидания для подсказки.
 const login = ref<LoginStart | null>(null)
 
-// События панели данных: сброс и обновление идут молча, и без явного
-// ответа человек не поймёт, случилось ли что-нибудь вообще.
+// Сброс и обновление идут молча, и без явного ответа человек не поймёт,
+// случилось ли что-нибудь вообще.
 const note = ref('')
 const cleared = ref(false)
 
 const listCount = ref(0)
-const ownerId = ref<number | null>(null)
-const stats = ref<DbStats | null>(null)
-const statsError = ref('')
+const usedSize = ref('')
 
 let stopWatch: (() => void) | null = null
 
@@ -63,21 +73,13 @@ async function guard(action: () => Promise<void>): Promise<void> {
   }
 }
 
-/// Состояние своих данных переспрашивается после каждой своей кнопки:
-/// числа на экране должны совпадать с тем, что лежит внутри.
+/// Числа переспрашиваются после каждой кнопки: показанное должно совпадать
+/// с тем, что лежит внутри.
 async function readState(): Promise<void> {
   listCount.value = entryCount()
-  ownerId.value = currentUserId()
 
   const got = await getDbStats()
-  if ('error' in got) {
-    stats.value = null
-    statsError.value = got.error
-    return
-  }
-
-  stats.value = got
-  statsError.value = ''
+  usedSize.value = 'error' in got ? '' : got.estimatedSize
 }
 
 function onLogin(): void {
@@ -93,7 +95,7 @@ function onLogout(): void {
     await logout()
     await forgetCollection()
     login.value = null
-    note.value = 'Выход выполнен: список забыт, склад описаний остался.'
+    note.value = 'Список отвязан.'
     await readState()
   })
 }
@@ -107,26 +109,26 @@ function onManual(): void {
   })
 }
 
-// Полное обновление: оба типа целиком вместо одного вида на экране
-// списков. Удалённое на сайте уйдёт и у нас — только здесь и только так.
+// Полное обновление: оба типа целиком. Удалённое на сайте уйдёт и у нас —
+// только здесь и только так.
 function onPull(): void {
   void guard(async () => {
     note.value = ''
     const count = await refreshFromServer()
     await readState()
-    note.value = `Список взят с сервера заново: записей ${count}.`
+    note.value = `Список обновлён: записей ${count}.`
   })
 }
 
-// Склад сбрасывается только руками: срока жизни у записей нет.
-// Перезагрузка не дёргается сама: человек может быть середине правок.
+// Память сбрасывается только руками. Перезагрузка не дёргается сама:
+// человек может быть середине правок.
 function onClear(): void {
   void guard(async () => {
     note.value = ''
     await clearCache()
     cleared.value = true
     await readState()
-    note.value = 'Склад описаний и обликов пуст. Русские названия наберутся заново по мере показа.'
+    note.value = 'Память очищена. Названия и описания загрузятся заново.'
   })
 }
 
@@ -138,7 +140,7 @@ function onReload(): void {
 /// ничего не значит.
 function expiryText(seconds: number | null): string {
   if (seconds === null) return 'срок неизвестен'
-  return `до ${new Date(seconds * 1000).toLocaleString('ru-RU')}`
+  return `до ${new Date(seconds * 1000).toLocaleDateString('ru-RU')}`
 }
 
 /// Ожидание в минутах: секунды читать неудобно.
@@ -165,25 +167,25 @@ onBeforeUnmount(() => {
     <div class="am-split">
       <div class="am-panel am-box">
         <div class="am-bar">
-          <h3 class="am-h3">Аккаунт AniList</h3>
+          <h3 class="am-h3">AniList</h3>
           <span class="am-bar__gap" />
           <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
             <span class="am-flag__dot" aria-hidden="true" />
-            {{ authStatus.authorized ? 'вход выполнен' : 'без входа' }}
+            {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
           </span>
         </div>
 
         <p v-if="!desktop" class="am-meta">
-          Вход работает только в приложении: в браузере нет моста к Rust. Запустите
-          <code>npm run tauri dev</code>.
+          Подключение работает только в приложении. Запустите <code>npm run tauri dev</code>.
         </p>
 
         <template v-else>
-          <p v-if="authStatus.authorized" class="am-meta">
-            Доступ действует {{ expiryText(authStatus.expiresAt) }}.
-          </p>
-          <p v-else class="am-meta">
-            Без входа доступен только поиск. Свои списки и оценки появятся после входа.
+          <p class="am-meta">
+            {{
+              authStatus.authorized
+                ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
+                : 'Подключите аккаунт, чтобы видеть и править свои списки. Поиск и карточки работают и без него.'
+            }}
           </p>
 
           <div class="am-row">
@@ -194,17 +196,21 @@ onBeforeUnmount(() => {
               :disabled="busy"
               @click="onLogin"
             >
-              Войти через AniList
+              Подключить аккаунт
             </button>
-            <button
-              v-else
-              class="am-btn am-btn--ghost"
-              type="button"
-              :disabled="busy"
-              @click="onLogout"
-            >
-              Выйти и забыть список
-            </button>
+            <template v-else>
+              <button class="am-btn" type="button" :disabled="busy" @click="onPull">
+                Обновить список
+              </button>
+              <button
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="busy"
+                @click="onLogout"
+              >
+                Отключить
+              </button>
+            </template>
 
             <button
               v-if="!authStatus.authorized"
@@ -212,25 +218,20 @@ onBeforeUnmount(() => {
               type="button"
               @click="manualOpen = !manualOpen"
             >
-              Вставить токен вручную
+              Ввести токен
             </button>
           </div>
 
           <!-- Показывается только после нажатия: до него окна входа нет и ждать
                человеку нечего. -->
           <p v-if="login && !authStatus.authorized" class="am-meta">
-            Открылось окно входа AniList — оно идёт через наш прокси. После разрешения окно
-            закроется само. Ожидание — {{ waitText(login.waitSecs) }}.
+            Окно AniList открыто, после разрешения оно закроется само. Ожидание —
+            {{ waitText(login.waitSecs) }}.
           </p>
 
           <div v-if="manualOpen && !authStatus.authorized" class="am-row">
             <label class="am-field">
-              <input
-                v-model="manual"
-                class="am-input"
-                type="text"
-                placeholder="Токен доступа AniList"
-              />
+              <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
             </label>
             <button
               class="am-btn"
@@ -247,71 +248,36 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="am-panel am-box">
-        <h3 class="am-h3">Свои данные</h3>
-
-        <p class="am-meta">
-          Список живёт снимком в памяти и на диске, описания и облик — в складе без срока годности.
-          Стареет склад только здесь, кнопкой.
-        </p>
+        <h3 class="am-h3">Память</h3>
 
         <ul class="am-facts">
           <li class="am-fact">
             <span class="am-fact__name">Записей в списке</span>
             <span class="am-fact__value">{{ listCount }}</span>
           </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Список принадлежит</span>
-            <span class="am-fact__value">{{
-              ownerId === null ? 'никому: входа не было' : `#${ownerId}`
-            }}</span>
-          </li>
-          <li v-if="stats" class="am-fact">
-            <span class="am-fact__name">Записей в складе</span>
-            <span class="am-fact__value">{{ stats.totalCacheRecords }}</span>
-          </li>
-          <li v-if="stats" class="am-fact">
-            <span class="am-fact__name">Номеров MAL сопоставлено</span>
-            <span class="am-fact__value">{{ stats.malMappings }}</span>
-          </li>
-          <li v-if="stats" class="am-fact">
+          <li v-if="usedSize" class="am-fact">
             <span class="am-fact__name">Занято на диске</span>
-            <span class="am-fact__value">{{ stats.estimatedSize }}</span>
+            <span class="am-fact__value">{{ usedSize }}</span>
           </li>
         </ul>
 
-        <p v-if="statsError" class="am-meta">Склад не ответил: {{ statsError }}</p>
-
         <div class="am-row">
-          <button
-            class="am-btn"
-            type="button"
-            :disabled="busy || !authStatus.authorized"
-            title="Забрать аниме и мангу с сервера целиком, с учётом удалённого на сайте"
-            @click="onPull"
-          >
-            Взять список с сервера заново
-          </button>
-
           <button
             class="am-btn am-btn--ghost"
             type="button"
             :disabled="busy"
-            title="Убрать русские названия, описания и облик тайтлов из склада"
+            title="Убрать сохранённые названия, описания и обложки"
             @click="onClear"
           >
-            Сбросить склад описаний
+            Очистить память
           </button>
 
           <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
-            Перезагрузить окно
+            Перезагрузить
           </button>
         </div>
 
         <p v-if="note" class="am-note">{{ note }}</p>
-
-        <p v-if="!authStatus.authorized" class="am-meta">
-          Список с сервера берётся только после входа. Склад сбрасывается и без него.
-        </p>
       </div>
 
       <div class="am-panel am-box">
@@ -323,16 +289,8 @@ onBeforeUnmount(() => {
             <span class="am-fact__value">{{ version }}</span>
           </li>
           <li class="am-fact">
-            <span class="am-fact__name">Площадка</span>
-            <span class="am-fact__value">{{ platform }}</span>
-          </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Списки</span>
-            <span class="am-fact__value">снимок в памяти и очередь правок</span>
-          </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Русские названия</span>
-            <span class="am-fact__value">Шикимори, склад без срока</span>
+            <span class="am-fact__name">Система</span>
+            <span class="am-fact__value">{{ system }}</span>
           </li>
         </ul>
       </div>
@@ -344,7 +302,7 @@ onBeforeUnmount(() => {
 /* Широкое окно держит панели рядом, узкое ставит их друг под другом. */
 .am-split {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 18px;
   align-items: start;
 }
@@ -375,7 +333,7 @@ onBeforeUnmount(() => {
   color: var(--am-good);
 }
 
-/* Состояние входа точкой: видно без чтения. */
+/* Состояние подключения точкой: видно без чтения. */
 .am-flag {
   display: inline-flex;
   gap: 7px;
