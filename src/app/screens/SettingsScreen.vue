@@ -5,7 +5,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
-import { entryCount, forgetCollection, refreshFromServer } from '@/core/collection'
+import {
+  entryCount,
+  forgetCollection,
+  refreshFromServer,
+  unlinkCollection,
+} from '@/core/collection'
 import { clearCache, getDbStats } from '@/core/db'
 
 import {
@@ -58,6 +63,12 @@ const cleared = ref(false)
  */
 const asking = ref(false)
 
+/**
+ * Спрошено ли подтверждение удаления списка. Спрашивается всегда:
+ * местные записи вернуть потом неоткуда, их нет ни на каком сервере.
+ */
+const askingDrop = ref(false)
+
 const listCount = ref(0)
 const usedSize = ref('')
 
@@ -94,15 +105,25 @@ function onLogin(): void {
   })
 }
 
-// Выход уводит и список: чужой список не вправе пережить выход,
-// иначе следующий вошедший увидит на главной предыдущие полки.
+/**
+ * Отключение счёта: связь рвётся, список остаётся здесь местным (пункт 3.16).
+ * Раньше выход уносил список совсем, и человек терял данные там, где ждал
+ * всего лишь отключения сайта.
+ */
 function onLogout(): void {
   void guard(async () => {
+    note.value = ''
+    asking.value = false
+
     await logout()
-    await forgetCollection()
+    const left = await unlinkCollection()
     login.value = null
-    note.value = 'Список отвязан.'
     await readState()
+
+    note.value =
+      left > 0
+        ? `Счёт отключён. Список остался здесь местным: записей ${left}.`
+        : 'Счёт отключён.'
   })
 }
 
@@ -139,6 +160,34 @@ function onAsk(): void {
 
 function onCancel(): void {
   asking.value = false
+}
+
+/** Нажатие на удаление списка: тоже только вопрос, без действия. */
+function onAskDrop(): void {
+  note.value = ''
+  error.value = ''
+  askingDrop.value = true
+}
+
+function onCancelDrop(): void {
+  askingDrop.value = false
+}
+
+/**
+ * Удаление своего списка по прямой просьбе. Счёт при этом не трогается:
+ * список можно стереть и перенести заново, не входя второй раз.
+ *
+ * На AniList это не отражается никак: удаляем только то, что лежит у нас.
+ */
+function onDropList(): void {
+  askingDrop.value = false
+
+  void guard(async () => {
+    note.value = ''
+    await forgetCollection()
+    await readState()
+    note.value = 'Список удалён. На AniList ваши записи остались нетронутыми.'
+  })
 }
 
 // Память сбрасывается только руками. Перезагрузка не дёргается сама:
@@ -229,7 +278,13 @@ onBeforeUnmount(() => {
               >
                 {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
               </button>
-              <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onLogout">
+              <button
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="busy"
+                title="Разорвать связь с AniList. Список останется здесь"
+                @click="onLogout"
+              >
                 Отключить
               </button>
             </template>
@@ -285,7 +340,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="am-panel am-box">
-        <h3 class="am-h3">Память</h3>
+        <h3 class="am-h3">Свои данные</h3>
 
         <ul class="am-facts">
           <li class="am-fact">
@@ -298,6 +353,11 @@ onBeforeUnmount(() => {
           </li>
         </ul>
 
+        <p class="am-meta">
+          Список живёт здесь, на вашем диске, и от отключения счёта не исчезает. Память —
+          это названия, описания и обложки: её можно сбросить без потерь.
+        </p>
+
         <div class="am-row">
           <button
             class="am-btn am-btn--ghost"
@@ -309,9 +369,36 @@ onBeforeUnmount(() => {
             Очистить память
           </button>
 
+          <button
+            v-if="listCount > 0"
+            class="am-btn am-btn--ghost"
+            type="button"
+            :disabled="busy"
+            title="Удалить свой список с этого устройства"
+            @click="onAskDrop"
+          >
+            Удалить мой список
+          </button>
+
           <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
             Перезагрузить
           </button>
+        </div>
+
+        <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
+        <div v-if="askingDrop" class="am-ask">
+          <p class="am-ask__text">
+            Удалить список с этого устройства: записей {{ listCount }}. На AniList ваши
+            записи останутся нетронутыми, а добавленные здесь без входа вернуть будет
+            неоткуда.
+          </p>
+
+          <div class="am-row">
+            <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
+              Удалить список
+            </button>
+            <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">Отмена</button>
+          </div>
         </div>
 
         <p v-if="note" class="am-note">{{ note }}</p>
