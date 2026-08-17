@@ -15,6 +15,12 @@ interface Props {
   score?: string | null
   /** Своя закладка или своя оценка: левый верхний угол. */
   mark?: string | null
+  /** Сколько раз пройдено повторно: отметка рядом с оценкой. */
+  repeat?: number
+  /** Свой комментарий: отметка с текстом во всплывающей подсказке. */
+  note?: string | null
+  /** Идёт ли сезон прямо сейчас: тихая точка в углу. */
+  ongoing?: boolean
   /** Свой счёт частей строкой вида «7 / 12». */
   own?: string | null
   /** Доля пройденного от нуля до единицы: полоса внизу постера. */
@@ -28,6 +34,9 @@ const props = withDefaults(defineProps<Props>(), {
   color: null,
   score: null,
   mark: null,
+  repeat: 0,
+  note: null,
+  ongoing: false,
   own: null,
   done: 0,
   adult: false,
@@ -45,6 +54,14 @@ const letter = computed(() => props.title.trim().charAt(0).toUpperCase() || '?')
 
 /** Ширина полосы счёта. За края шкалы не выходим даже при чужом странном счёте. */
 const donePart = computed(() => `${Math.round(Math.min(1, Math.max(0, props.done)) * 100)}%`)
+
+/** Подсказка отметки повторов: знак сам за себя не говорит. */
+const repeatHint = computed(() => `Повторных проходов: ${props.repeat}`)
+
+/** Есть ли вообще что показывать в левом верхнем углу. */
+const hasTags = computed(
+  () => props.mark !== null || props.adult || props.repeat > 0 || props.note !== null,
+)
 </script>
 
 <template>
@@ -63,12 +80,27 @@ const donePart = computed(() => `${Math.round(Math.min(1, Math.max(0, props.done
 
         <span class="am-tile__shade" aria-hidden="true" />
 
-        <span v-if="mark || adult" class="am-tile__tags">
+        <span v-if="hasTags" class="am-tile__tags">
           <span v-if="mark" class="am-tile__tag">{{ mark }}</span>
+
+          <span v-if="repeat > 0" class="am-tile__tag am-tile__tag--sign" :title="repeatHint">
+            ↻{{ repeat }}
+          </span>
+
+          <span v-if="note" class="am-tile__tag am-tile__tag--sign" :title="note">✎</span>
+
           <span v-if="adult" class="am-tile__tag am-tile__tag--adult">18+</span>
         </span>
 
         <span v-if="score" class="am-tile__score">{{ score }}</span>
+
+        <span
+          v-if="ongoing"
+          class="am-tile__live"
+          :class="{ 'am-tile__live--low': score !== null }"
+          title="Сезон идёт: части ещё выходят"
+        />
+
         <span v-if="own" class="am-tile__own">{{ own }}</span>
 
         <span v-if="done > 0" class="am-tile__line">
@@ -160,19 +192,29 @@ const donePart = computed(() => `${Math.round(Math.min(1, Math.max(0, props.done
   left: 8px;
   display: flex;
   gap: 4px;
-  max-width: calc(100% - 60px);
+  max-width: calc(100% - 44px);
 }
 
 .am-tile__tag {
+  display: inline-flex;
+  align-items: center;
   padding: 3px 8px;
   overflow: hidden;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.2;
   color: #eaf1fb;
   text-overflow: ellipsis;
   white-space: nowrap;
   background: rgba(8, 12, 18, 0.72);
   border-radius: 999px;
+}
+
+/* Отметка знаком тише оценки: она рядом, а не вместо неё. */
+.am-tile__tag--sign {
+  padding: 3px 7px;
+  font-size: 10.5px;
+  color: #cbd7e8;
 }
 
 .am-tile__tag--adult {
@@ -190,6 +232,25 @@ const donePart = computed(() => `${Math.round(Math.min(1, Math.max(0, props.done
   color: #101820;
   background: linear-gradient(180deg, #ffe49a, var(--am-warn));
   border-radius: 999px;
+}
+
+/* Идущий сезон — одна точка в углу: надпись шумела бы на всю сетку. */
+.am-tile__live {
+  position: absolute;
+  top: 11px;
+  right: 11px;
+  width: 8px;
+  height: 8px;
+  background: var(--am-good);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 3px rgba(61, 220, 151, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* Если в том же углу оценка каталога, точка садится под неё. */
+.am-tile__live--low {
+  top: 34px;
 }
 
 .am-tile__own {

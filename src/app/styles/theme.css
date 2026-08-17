@@ -379,6 +379,34 @@ img {
   box-shadow: var(--am-sh-1);
 }
 
+/* Выбор из списка пилюлей. Свои цвета обязательны и у самого выбора,
+   и у его строк: иначе при наведении окружение заливает его белым. */
+.am-pick {
+  min-height: var(--am-ctl);
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--am-text);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+  appearance: none;
+}
+
+.am-pick:hover,
+.am-pick:focus {
+  color: var(--am-text);
+  background: var(--am-hover);
+  border-color: var(--am-accent);
+  outline: none;
+}
+
+.am-pick option {
+  color: var(--am-text);
+  background: var(--am-panel-2);
+}
+
 /* Сетка постеров: тянется на всю ширину окна сама. */
 .am-grid {
   display: grid;
@@ -413,7 +441,10 @@ img {
   border-radius: 999px;
 }
 
+/* Заливка именно блочная: строчный ящик высоты не берёт
+   и полоса остаётся серой при любом счёте. */
 .am-line__fill {
+  display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--am-accent), var(--am-accent-2));
   border-radius: 999px;
