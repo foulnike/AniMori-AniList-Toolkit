@@ -65,6 +65,10 @@ function fromServer(raw: RawListEntry, type: MediaType): SnapshotEntry {
     score10: raw.score,
     progress: raw.progress,
     volumes: raw.volumes,
+    repeat: raw.repeat,
+    startedAt: raw.startedAt,
+    completedAt: raw.completedAt,
+    notes: raw.notes,
     updatedAt: raw.updatedAt,
     isAdult: raw.isAdult,
     romaji: raw.romaji,
@@ -73,8 +77,37 @@ function fromServer(raw: RawListEntry, type: MediaType): SnapshotEntry {
 }
 
 /**
+ * Пустая запись для правки неизвестного тайтла: так выглядит добавление
+ * в список, которое сервер ещё не видел. Поля перечислены явно: новое
+ * поле снимка должно ломать сборку здесь, а не живой запуск.
+ */
+function blankEntry(mediaId: number, when: number): SnapshotEntry {
+  return {
+    mediaId,
+    // Правка не знает о тайтле ничего кроме номера; ответ сервера поля поправит.
+    // Аниме выбрано подставкой сознательно: таких записей подавляющее большинство.
+    type: 'ANIME',
+    status: null,
+    score10: 0,
+    progress: 0,
+    volumes: 0,
+    repeat: 0,
+    startedAt: null,
+    completedAt: null,
+    notes: null,
+    updatedAt: when,
+    isAdult: false,
+    romaji: null,
+    english: null,
+  }
+}
+
+/**
  * Накатывает одну правку на память. Правка неизвестного тайтла создаёт запись:
  * так выглядит добавление в список, которое сервер ещё не видел.
+ *
+ * Пустая строка в дате и комментарии значит «стереть»: отдельного вида
+ * правки для очистки нет, а везти null через очередь нельзя: так обозначено удаление.
  */
 function applyEdit(edit: PendingEdit): void {
   if (edit.kind === 'remove') {
@@ -83,24 +116,22 @@ function applyEdit(edit: PendingEdit): void {
   }
 
   const known = entries.get(edit.mediaId)
-  const entry: SnapshotEntry = known ?? {
-    mediaId: edit.mediaId,
-    // Правка не знает о тайтле ничего кроме номера; ответ сервера поля поправит.
-    // Аниме выбрано подставкой сознательно: таких записей подавляющее большинство.
-    type: 'ANIME',
-    status: null,
-    score10: 0,
-    progress: 0,
-    volumes: 0,
-    updatedAt: edit.createdAt,
-    isAdult: false,
-    romaji: null,
-    english: null,
-  }
+  const entry: SnapshotEntry = known ?? blankEntry(edit.mediaId, edit.createdAt)
 
   if (edit.kind === 'status' && typeof edit.value === 'string') entry.status = edit.value
   if (edit.kind === 'score' && typeof edit.value === 'number') entry.score10 = edit.value
   if (edit.kind === 'progress' && typeof edit.value === 'number') entry.progress = edit.value
+  if (edit.kind === 'volumes' && typeof edit.value === 'number') entry.volumes = edit.value
+  if (edit.kind === 'repeat' && typeof edit.value === 'number') entry.repeat = edit.value
+  if (edit.kind === 'startedAt' && typeof edit.value === 'string') {
+    entry.startedAt = edit.value === '' ? null : edit.value
+  }
+  if (edit.kind === 'completedAt' && typeof edit.value === 'string') {
+    entry.completedAt = edit.value === '' ? null : edit.value
+  }
+  if (edit.kind === 'notes' && typeof edit.value === 'string') {
+    entry.notes = edit.value === '' ? null : edit.value
+  }
 
   // Наша правка свежее любого ответа: именно её пользователь видел последней.
   entry.updatedAt = Math.max(entry.updatedAt, edit.createdAt)
