@@ -202,12 +202,7 @@ onBeforeUnmount(() => {
               <button class="am-btn" type="button" :disabled="busy" @click="onPull">
                 Обновить список
               </button>
-              <button
-                class="am-btn am-btn--ghost"
-                type="button"
-                :disabled="busy"
-                @click="onLogout"
-              >
+              <button class="am-btn am-btn--ghost" type="button" :disabled="busy" @click="onLogout">
                 Отключить
               </button>
             </template>
