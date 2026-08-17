@@ -23,8 +23,11 @@ export const ANIME365_DOMAINS: readonly string[] = ['smotret-anime.online', 'ani
 /** подряд-сбоев -> отключение источника на сессию */
 export const ANIME365_FAIL_LIMIT = 5
 
-/** TTL кэша — 90 дней. */
-export const CACHE_TIME = 90 * 24 * 60 * 60 * 1000
+/**
+ * Срок хранения кэша: бессрочно. Склад лежит на своём диске,
+ * а чистится только руками из настроек через clearCache().
+ */
+export const CACHE_TIME = Number.POSITIVE_INFINITY
 
 // IndexedDB
 export const DB_NAME = 'AniMoriSuperDB'

@@ -288,9 +288,12 @@ export async function clearCache(): Promise<void> {
 
 /**
  * Фоновый GC: курсором по shikiCache удаляет записи старше CACHE_TIME.
- * Fire-and-forget: промис резолвится до окончания обхода курсора.
+ * При бессрочном сроке хранения выходит сразу, не обходя базу.
  */
 export async function runGarbageCollector(): Promise<void> {
+  // Срока жизни у записей нет: чистит только clearCache() из настроек.
+  if (!Number.isFinite(CACHE_TIME)) return
+
   try {
     const db = await openDB()
     if (!db) return
