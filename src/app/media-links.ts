@@ -5,6 +5,12 @@
 import { ANIME365_DOMAINS, SHIKI_DOMAINS } from '@/core/constants'
 import type { MediaType } from '@/core/types'
 
+/** Имя узла AniList. Схема добавляется кодом: так же, как у русских зеркал. */
+const ANILIST_HOST = 'anilist.co'
+
+/** Имя узла MyAnimeList. */
+const MAL_HOST = 'myanimelist.net'
+
 /** Одна ссылка хвоста описания. */
 export interface MediaLink {
   /** Ключ для перебора в разметке. */
@@ -34,6 +40,11 @@ function shikiKind(type: MediaType): string {
   return type === 'MANGA' ? 'mangas' : 'animes'
 }
 
+/** Собирает адрес из имени узла, раздела и номера. */
+function pageUrl(host: string, kind: string, id: number): string {
+  return 'https://' + host + '/' + kind + '/' + String(id)
+}
+
 /** Лежит ли адрес на одном из известных зеркал источника. */
 function atDomain(url: string, domains: readonly string[]): boolean {
   return domains.some((domain) => url.includes(domain))
@@ -52,7 +63,7 @@ export function mediaLinks(input: MediaLinksInput): MediaLink[] {
   list.push({
     key: 'anilist',
     text: `AniList #${input.mediaId}`,
-    url: `https://anilist.co/${kind}/${input.mediaId}`,
+    url: pageUrl(ANILIST_HOST, kind, input.mediaId),
     hint: 'Открыть карточку на AniList',
   })
 
@@ -60,7 +71,7 @@ export function mediaLinks(input: MediaLinksInput): MediaLink[] {
     list.push({
       key: 'mal',
       text: `MAL #${malId}`,
-      url: `https://myanimelist.net/${kind}/${malId}`,
+      url: pageUrl(MAL_HOST, kind, malId),
       hint: 'Открыть карточку на MyAnimeList',
     })
   }
@@ -82,7 +93,7 @@ export function mediaLinks(input: MediaLinksInput): MediaLink[] {
     list.push({
       key: 'shiki',
       text: 'Шикимори',
-      url: `https://${SHIKI_DOMAINS[0]}/${shikiKind(input.type)}/${malId}`,
+      url: pageUrl(SHIKI_DOMAINS[0], shikiKind(input.type), malId),
       hint: 'Открыть карточку на Шикимори',
     })
   }
