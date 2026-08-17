@@ -4,11 +4,15 @@
 разработки: решения и их причины — в `docs/DECISIONS.md`, ход работ —
 в `docs/<версия>/PLAN.md`, подробности — в телах коммитов.
 
-Карта разбита на три части:
+Карта разбита на семь частей:
 
 1. этот файл — обзор, дерево репозитория, жизненный цикл;
 2. `PROJECT-MAP-MODULES.md` — прикладные модули и слой API;
-3. `PROJECT-MAP-SHELL.md` — оболочка Tauri, сборка, данные, инварианты.
+3. `PROJECT-MAP-SHELL.md` — оболочка Tauri, сборка, данные, инварианты;
+4. `PROJECT-MAP-SHELL-2.md` — запросы AniList и файлы в оболочке;
+5. `PROJECT-MAP-DATA.md` — хранение и слой данных приложения;
+6. `PROJECT-MAP-APP.md` — свои экраны, тема, путь правки;
+7. `PROJECT-MAP-NET.md` — темп обращений к сети и паузы.
 
 Размеры файлов в карте не указываются: они меняются каждую неделю и всегда
 оказываются ложью.
@@ -76,13 +80,12 @@ package.json                    номер приложения для Tauri, с
 CHANGELOG.md, README.md, LICENSE
 ```
 
-Формы обращений: `bug.yml`, `translation.yml`, `feature.yml`, `dictionary-bulk.yml`.
-GitHub берёт их только из ветки по умолчанию, так что в рабочей ветке их
-проверить нельзя. `config.yml` выключает пустые обращения и ссылается на
-якорь раздела установки в README.
+Формы обращений (`bug.yml`, `translation.yml`, `feature.yml`,
+`dictionary-bulk.yml`) и `config.yml` GitHub берёт только из ветки
+по умолчанию, так что в рабочей ветке их проверить нельзя.
 
 Документы в корне `docs/`: `DOC-RULES.md` (как вести записи), `DECISIONS.md`
-(реестр решений строками с хешами), `CODE-STYLE.md`, три части карты.
+(реестр решений строками с хешами), `CODE-STYLE.md`, семь частей карты.
 
 ### src/
 
@@ -94,26 +97,34 @@ vite-env.d.ts  типы глобалов сборки, в том числе __AN
 
 shared/     общее ядро обоих продуктов
   api/        внешние сервисы
-    anilist.ts, shikimori.ts, shikimori-people.ts, shikimori-user.ts,
-    anime365.ts, animethemes.ts, dictionary.ts, titles.ts, rate-limit.ts
+    anilist.ts, anilist-list.ts, anilist-edit.ts, anilist-media.ts,
+    anilist-lookup.ts, shikimori.ts, shikimori-people.ts, shikimori-user.ts,
+    shikimori-search.ts, anime365.ts, animethemes.ts, titles.ts, rate-limit.ts
   bridge/     абстракция платформы
-    IBridge.ts              контракт: storage, http, clipboard, shell, proxyDiagnostics
-    TauriBridge.ts, MonkeyBridge.ts, TauriProxyDiagnostics.ts
+    IBridge.ts              контракт: storage, http, anilist, files, clipboard,
+                            shell, proxyDiagnostics
+    TauriBridge.ts, TauriAniList.ts, MonkeyBridge.ts, TauriProxyDiagnostics.ts
     index.ts                единственная точка импорта: '@/bridge'
   core/       ядро данных и настроек
     db.ts           IndexedDB, кэши, сборщик мусора
     settings.ts     все настройки и чтение их через мост
+    snapshot.ts     снимок списка, очередь правок, дубль в файл
+    collection.ts   список в памяти, обновление с сервера
+    collection-view.ts  отборы, счётчики, страницы
+    edit-sender.ts  единственный путь правок наружу
+    media-title.ts, media-looks.ts, media-search.ts
     net-health.ts   учёт доступности источников
     proxy.ts        разбор и сборка настроек прокси
-    dictionary.ts   сборка итогового словаря
     constants.ts    домены, TTL, регулярки перевода
-    types.ts, custom-links.ts, accent.ts
+    types.ts, accent.ts
   adblock/    impl.desktop.ts, impl.noop.ts, index.ts, net-block.ts, net-probe.ts
   utils/      logger.ts, vue-mounter.ts, dom.ts, name-match.ts
 
 userscript/ надстройка над сайтом
   main.ts        точка входа: порядок старта и привязка к SPA
   lifecycle.ts   реестр задач на смену роута и разбор
+  dictionary.ts  сборка итогового словаря, личные правки
+  dictionary-remote.ts  загрузка dictionary.json с GitHub и его кэш
   style.scss     все стили надстройки одним файлом
   features/
     exporter/   index.ts, sync-api.ts, sync-state.ts, SyncModal.vue
@@ -135,9 +146,13 @@ app/        свои экраны приложения
   index.html     корень режима app, выход собирается в dist/app
   main.ts        точка входа приложения
   App.vue        реестры экранов: SCREEN_NAMES, SCREEN_TITLES, SCREENS
+  labels.ts      русские подписи закладок, форматов и частей
+  media-links.ts ссылки на тайтл в трёх сервисах
   router/        index.ts — свой маршрутизатор на хэше, routes.ts — адреса
-  components/    AppShell.vue — рамка окна: меню, шапка, «Назад»
+  components/    AppShell.vue — рамка окна, MediaTile.vue — плитка,
+                 EntrySheet.vue — окно правки записи
   screens/       HomeScreen, ListsScreen, MediaScreen, SearchScreen, SettingsScreen
+  styles/        theme.css — токены и общие классы своих экранов
   auth/          session.ts — факт входа и срок для разметки, без пропуска
 ```
 
@@ -153,21 +168,27 @@ app/        свои экраны приложения
 править каждый импорт. Между слоями ходят только через алиасы;
 относительные пути допустимы лишь внутри своего каталога.
 
-| Имя в коде           | Куда ведёт                    |
-| -------------------- | ----------------------------- |
-| `@/api/*`            | `src/shared/api/*`            |
-| `@/bridge`           | `src/shared/bridge/index.ts`  |
-| `@/core/*`           | `src/shared/core/*`           |
-| `@/utils/*`          | `src/shared/utils/*`          |
-| `@/features/adblock` | `src/shared/adblock`          |
-| `@/core/lifecycle`   | `src/userscript/lifecycle.ts` |
-| `@/features/*`       | `src/userscript/features/*`   |
-| `@/*`                | `src/*`                       |
+| Имя в коде           | Куда ведёт                              |
+| -------------------- | --------------------------------------- |
+| `@/api/*`            | `src/shared/api/*`                      |
+| `@/bridge`           | `src/shared/bridge/index.ts`            |
+| `@/core/*`           | `src/shared/core/*`                     |
+| `@/utils/*`          | `src/shared/utils/*`                    |
+| `@/features/adblock` | `src/shared/adblock`                    |
+| `@/core/lifecycle`   | `src/userscript/lifecycle.ts`           |
+| `@/core/dictionary`  | `src/userscript/dictionary.ts`          |
+| `@/api/dictionary`   | `src/userscript/dictionary-remote.ts`   |
+| `@/features/*`       | `src/userscript/features/*`             |
+| `@/*`                | `src/*`                                 |
 
 Список держится синхронно в трёх местах: `resolve.alias` в `vite.config.ts`,
 `paths` в `tsconfig.json` и `tsconfig.shared.json`. Правка одного без остальных
 даёт зелёную сборку при красном тайпчеке или наоборот. Точные имена
 стоят раньше общих: порядок ключей решает, какой алиас сработает.
+
+Три последних имени ядра — исключения: модули сменили слой. Цикл знает роуты
+чужого SPA, словарь — подмену слов в чужом DOM. Своему приложению ни то,
+ни другое не нужно: оно рисует по-русски сразу.
 
 ### src-tauri/
 
@@ -175,6 +196,8 @@ app/        свои экраны приложения
 src/lib.rs          создание своего окна, команды, плагины
 src/hybrid.rs       окно site с настоящим сайтом и инъекцией бандла скрипта
 src/auth.rs         вход AniList: окно login, приёмник пропуска, стрелочник
+src/anilist.rs      запрос GraphQL из Rust: подпись пропуском, без куки
+src/files.rs        чтение и запись разрешённых файлов приватного каталога
 src/adblock.rs      сетевой блокировщик на событиях WebView2, только Windows
 src/proxy.rs        решение о прокси, щуп, состояние для интерфейса
 src/proxy_guard.rs  сторож готовности страницы и аварийный выход
@@ -212,7 +235,7 @@ monkey. В окне `site` — `initialization_script` из `hybrid.rs`: сна�
 2. перехватчики ошибок, перехват ссылок, токен AniList;
 3. выход, если домен не anilist.co (проверка `IS_SHIKI` нужна для старых
    установок юзерскрипта, где в шапке ещё стоит shikimori);
-4. свои ссылки и личный словарь;
+4. личный словарь пользователя;
 5. адблок, затем сетевая разведка (в браузере оба — заглушки);
 6. акцентный цвет;
 7. панели: настройки, журнал, сканер, перенос, панель действий, блок навигации;
