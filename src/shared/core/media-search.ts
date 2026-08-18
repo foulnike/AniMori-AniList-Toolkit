@@ -1,11 +1,15 @@
 // Поиск тайтлов: свой список и каталог, латиница и кириллица.
 // Хозяин выбора пути: экранам не надо знать, кто понимает русское слово.
 // Каталог AniList кириллицу не знает, поэтому русское идёт через Шикимори.
+//
+// Здесь же проходит отбор взрослого: политика одна на все пути каталога,
+// решение живёт в core/adult.ts. Экраны получают выдачу уже отобранной.
 
 import { fetchBriefsByMal } from '../api/anilist-lookup'
-import { searchMedia, type SearchPage } from '../api/anilist-media'
+import { searchMedia, type MediaBrief, type SearchPage } from '../api/anilist-media'
 import { hasCyrillic, searchShikimori } from '../api/shikimori-search'
 import { Logger } from '../utils/logger'
+import { hiddenCount, keepAllowed } from './adult'
 import { selectEntries } from './collection-view'
 import { peekRussianName, rememberRussianName, warmRussianTitles } from './media-title'
 import type { SnapshotEntry } from './snapshot'
@@ -35,10 +39,36 @@ export function isRussianWord(word: string): boolean {
   return hasCyrillic(word)
 }
 
+/** Признак взрослого у находки каталога. Одна выжимка на все пути отбора. */
+function briefIsAdult(brief: MediaBrief): boolean {
+  return brief.isAdult
+}
+
+/**
+ * Убирает взрослое из страницы находок и правит числа под новый состав.
+ *
+ * Общее число сервера после отбора обнуляется: оно считало и спрятанное,
+ * а «найдено 20» над четырнадцатью плитками — вранье хуже отсутствия числа.
+ * Признак следующей страницы остаётся серверным: добор всё равно спрашивают
+ * у каталога, и на его страницах отбор пройдёт заново.
+ */
+function sift(page: SearchPage, word: string): SearchPage {
+  const hidden = hiddenCount(page.items, briefIsAdult)
+  if (hidden === 0) return page
+
+  const items = keepAllowed(page.items, briefIsAdult) as MediaBrief[]
+  Logger('INFO', `Поиск «${word}»: спрятано взрослых ${hidden} из ${page.items.length}`)
+
+  return { items, hasNext: page.hasNext, total: null }
+}
+
 /**
  * Поиск по своему списку. Слово сверяется с русским, ромадзи и английским
  * названием. Перед отбором поднимается склад переводов: иначе на кириллице
  * нашлось бы только то, что успели показать в этом запуске.
+ *
+ * Взрослое здесь НЕ отсеивается: своя запись уже своя, и прятать её значит
+ * терять свои же данные из вида. Метку 18+ рисует плитка.
  */
 export async function searchOwnList(
   word: string,
@@ -85,7 +115,11 @@ export async function searchCatalog(
   const asked = word.trim()
   if (asked === '') return { items: [], hasNext: false, total: 0 }
 
-  if (!hasCyrillic(asked)) return await searchMedia(asked, type, page)
+  if (!hasCyrillic(asked)) {
+    const found = await searchMedia(asked, type, page)
+    // Отказ сервера остаётся отказом: пустую страницу вместо него подсовывать нельзя.
+    return found === null ? null : sift(found, asked)
+  }
 
   // Второй страницы у русского пути нет, поэтому добор возвращает пустоту.
   if (page > 1) return { items: [], hasNext: false, total: null }
@@ -110,6 +144,8 @@ export async function searchCatalog(
   )
 
   // Имя уже в руках — ходить за ним в сеть по второму кругу было бы глупо.
+  // Запоминается имя и для спрятанного: настройку могут включить, а тайтл
+  // тогда уже будет назван по-русски без нового запроса.
   for (const item of items) {
     if (item.malId === null) continue
 
@@ -122,5 +158,5 @@ export async function searchCatalog(
     `Поиск «${asked}» через Шикимори: находок ${found.length}, в AniList есть ${items.length}`,
   )
 
-  return { items, hasNext: false, total: items.length }
+  return sift({ items, hasNext: false, total: items.length }, asked)
 }
