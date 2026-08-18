@@ -59,7 +59,8 @@ function descParts(): DescPart[] {
   let m: RegExpExecArray | null
   while ((m = link.exec(d)) !== null) {
     if (m.index > last) parts.push({ text: d.slice(last, m.index), url: null })
-    parts.push({ text: m[1], url: m[2] })
+    // Обе группы гарантированы самим выражением: [текст](url).
+    parts.push({ text: m[1]!, url: m[2]! })
     last = m.index + m[0].length
   }
   if (last < d.length) parts.push({ text: d.slice(last), url: null })
@@ -125,10 +126,11 @@ function fmtDate(
   const month = d.month ?? 0
   const year = d.year ?? 0
   if (month < 1 || month > 12) return year > 0 ? String(year) : ''
-  if (day > 0) {
-    return year > 0 ? `${day} ${MONTHS_RU[month - 1]} ${year}` : `${day} ${MONTHS_RU[month - 1]}`
-  }
-  return year > 0 ? `${MONTHS_RU_NOM[month - 1]} ${year}` : MONTHS_RU_NOM[month - 1]
+  // Диапазон месяца проверен выше, элемент есть всегда.
+  const monthGen = MONTHS_RU[month - 1]!
+  const monthNom = MONTHS_RU_NOM[month - 1]!
+  if (day > 0) return year > 0 ? `${day} ${monthGen} ${year}` : `${day} ${monthGen}`
+  return year > 0 ? `${monthNom} ${year}` : monthNom
 }
 
 /** Сэйю без повторов: один человек — одна строка, сколько бы аниме ни было. */
