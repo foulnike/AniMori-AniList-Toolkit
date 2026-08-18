@@ -33,6 +33,7 @@ async function load(): Promise<Map<string, string> | null> {
   const reply = await fetchShiki<ShikiStudio[]>('/api/studios')
   if (!Array.isArray(reply.data)) return null
 
+  // Конкатенация, а не шаблон: адрес из двух строк не теряет части по дороге.
   const base = 'https://' + (reply.domain ?? 'shikimori.io')
   const map = new Map<string, string>()
   for (const s of reply.data) {

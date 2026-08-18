@@ -26,8 +26,6 @@ const KEY_PREFIX: Record<PersonKind, string> = { character: 'CHR2_', staff: 'STF
 export interface RussianPerson {
   russian: string
   description: string | null
-  /** Абсолютная ссылка на Shikimori, если источник её вернул. */
-  shikiUrl: string | null
   /** Номер у Шикимори: по нему добирается описание. */
   shikiId?: number
   /** Имя добыто списком ролей: описание ещё не спрашивали. */
@@ -86,12 +84,6 @@ function stripBbcode(text: string | null): string | null {
   return clean === '' ? null : clean
 }
 
-/** Абсолютный адрес на Шикимори из ответа: домен зеркала + относительный путь. */
-function absoluteShikiUrl(domain: string | null, path: string | null): string | null {
-  if (!domain || !path) return null
-  return `https://${domain}${path}`
-}
-
 /** Полный путь для одного человека: склад, затем поиск Shikimori. */
 async function loadOne(
   kind: PersonKind,
@@ -124,7 +116,6 @@ async function loadOne(
   const card: RussianPerson = {
     russian: found.data.russian,
     description: stripBbcode(found.data.description),
-    shikiUrl: absoluteShikiUrl(found.data.domain, found.data.url),
     shikiId: found.data.id,
   }
 
@@ -218,12 +209,9 @@ export async function prefetchRussianPeople(
       continue
     }
 
-    // Ссылки у списка ролей относительные, а отвечавшее зеркало здесь неизвестно:
-    // абсолютный адрес появится с добором описания.
     const card: RussianPerson = {
       russian: best.russian,
       description: null,
-      shikiUrl: null,
       shikiId: best.id,
       partial: true,
     }
@@ -260,7 +248,6 @@ export async function getRussianPersonFull(
     const full: RussianPerson = {
       russian: details.russian ?? known.russian,
       description: stripBbcode(details.description),
-      shikiUrl: absoluteShikiUrl(details.domain, details.url) ?? known.shikiUrl,
       shikiId: known.shikiId,
     }
     memory.set(key, full)
