@@ -92,9 +92,10 @@ async function request(opts: {
   }
 }
 
-/** Кандидат из списка поиска. */
-interface PersonCandidate extends NameCandidate {
+/** Кандидат из списка поиска или ролей. */
+export interface PersonCandidate extends NameCandidate {
   id?: number
+  url?: string | null
 }
 
 /** Детали персоны. Связи с тайтлами лежат в четырёх разных полях. */
@@ -414,4 +415,58 @@ export async function resolveShikiPersonByMedia(
   }
 
   return bestScore >= 55 ? best : null
+}
+
+/**
+ * Весь состав тайтла одним запросом: персонажи и авторы с русскими именами.
+ * Кэш списка ролей общий с точечным резолвом. Описаний в списке нет:
+ * их добирает fetchShikiPersonDetails по уже известному номеру.
+ */
+export async function fetchShikiRoles(
+  malId: number,
+  kind: 'animes' | 'mangas',
+): Promise<{ characters: PersonCandidate[]; people: PersonCandidate[] } | null> {
+  const roles = await loadRoles(kind, malId)
+  if (!roles) return null
+
+  return {
+    characters: roles
+      .map((r) => r.character)
+      .filter((x): x is PersonCandidate => Boolean(x)),
+    people: roles.map((r) => r.person).filter((x): x is PersonCandidate => Boolean(x)),
+  }
+}
+
+/**
+ * Детали персоны по уже известному номеру: один запрос без поиска.
+ * Нужен добором описания для карточек, добытых списком ролей.
+ */
+export async function fetchShikiPersonDetails(
+  endpointStr: PersonEndpoint,
+  id: number,
+): Promise<ShikiPerson | null> {
+  for (const domain of SHIKI_DOMAINS) {
+    const r = await request({
+      method: 'GET',
+      url: mirrorUrl(domain, `/api/${endpointStr}/${id}`),
+      domain,
+    })
+    if (r.status === 429) return null
+    if (r.status !== 200) continue
+
+    try {
+      const d = JSON.parse(r.responseText) as PersonDetails
+      return {
+        id: d.id ?? id,
+        russian: d.russian ?? null,
+        description: d.description ?? null,
+        url: d.url ?? null,
+        domain,
+      }
+    } catch (e) {
+      Logger('WARN', `Shikimori: неразборчивые детали персоны ${id} (${domain})`, e)
+    }
+  }
+
+  return null
 }

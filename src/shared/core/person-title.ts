@@ -6,9 +6,15 @@
 import { CACHE_TIME } from './constants'
 import { dbGet, dbSet } from './db'
 import type { PersonRef } from '../api/anilist-people'
-import { fetchShikiPersonREST } from '../api/shikimori-people'
+import {
+  fetchShikiPersonDetails,
+  fetchShikiPersonREST,
+  fetchShikiRoles,
+  type PersonCandidate,
+} from '../api/shikimori-people'
 import { Logger } from '../utils/logger'
-import type { ShikiCacheRecord } from './types'
+import { scoreNameMatch, type NameTarget } from '../utils/name-match'
+import type { MediaType, ShikiCacheRecord } from './types'
 
 /** Чем человек является в карточке тайтла: героем или автором. */
 export type PersonKind = 'character' | 'staff'
@@ -22,6 +28,10 @@ export interface RussianPerson {
   description: string | null
   /** Абсолютная ссылка на Shikimori, если источник её вернул. */
   shikiUrl: string | null
+  /** Номер у Шикимори: по нему добирается описание. */
+  shikiId?: number
+  /** Имя добыто списком ролей: описание ещё не спрашивали. */
+  partial?: boolean
 }
 
 /** Знание этого запуска. `null` значит «спрашивали, перевода нет». */
@@ -109,6 +119,7 @@ async function loadOne(
     russian: found.data.russian,
     description: stripBbcode(found.data.description),
     shikiUrl: found.data.url ? `https://${found.data.domain}${found.data.url}` : null,
+    shikiId: found.data.id,
   }
 
   memory.set(key, card)
@@ -145,6 +156,99 @@ export async function getRussianPerson(
   } finally {
     pending.delete(key)
   }
+}
+
+/**
+ * Русские имена всего состава одним запросом: список ролей тайтла у Шикимори.
+ * Описаний в нём нет, поэтому такие карточки помечаются `partial`, а описание
+ * добирается при открытии окошка. Возвращает несопоставленных: их добирает
+ * обычный точечный поиск.
+ */
+export async function prefetchRussianPeople(
+  malId: number,
+  type: MediaType,
+  entries: Array<{ kind: PersonKind; person: PersonRef }>,
+): Promise<Array<{ kind: PersonKind; person: PersonRef }>> {
+  const todo = entries.filter((e) => !memory.has(memoryKey(e.kind, e.person.personId)))
+  if (todo.length === 0) return []
+
+  const roles = await fetchShikiRoles(malId, type === 'MANGA' ? 'mangas' : 'animes')
+  if (!roles) return todo
+
+  const left: typeof todo = []
+  let added = 0
+
+  for (const entry of todo) {
+    const pool = entry.kind === 'character' ? roles.characters : roles.people
+    const target: NameTarget = { full: entry.person.name, native: entry.person.native }
+
+    // Порог 55: кандидаты уже ограничены составом этого тайтла.
+    let best: PersonCandidate | null = null
+    let bestScore = 0
+    for (const cand of pool) {
+      const score = scoreNameMatch(cand, target)
+      if (score > bestScore) {
+        bestScore = score
+        best = cand
+      }
+    }
+
+    if (!best || bestScore < 55 || typeof best.russian !== 'string' || best.russian === '') {
+      left.push(entry)
+      continue
+    }
+
+    // Ссылки у списка ролей относительные, а отвечавшее зеркало здесь неизвестно:
+    // абсолютный адрес появится с добором описания.
+    const card: RussianPerson = {
+      russian: best.russian,
+      description: null,
+      shikiUrl: null,
+      shikiId: best.id,
+      partial: true,
+    }
+    memory.set(memoryKey(entry.kind, entry.person.personId), card)
+    await writeCache(entry.kind, entry.person.personId, card)
+    added++
+  }
+
+  Logger('INFO', `Русские имена списком ролей: ${added} из ${todo.length}`)
+  return left
+}
+
+/**
+ * Полная русская карточка, с описанием. Карточка из списка ролей добирает
+ * описание одним запросом деталей по уже известному номеру.
+ */
+export async function getRussianPersonFull(
+  kind: PersonKind,
+  person: PersonRef,
+  targetMalIds: number[] = [],
+): Promise<RussianPerson | null> {
+  const key = memoryKey(kind, person.personId)
+  const known = memory.get(key)
+
+  if (known && !known.partial) return known
+
+  if (known?.partial && known.shikiId) {
+    const details = await fetchShikiPersonDetails(
+      kind === 'character' ? 'characters' : 'people',
+      known.shikiId,
+    )
+    if (!details) return known
+
+    const full: RussianPerson = {
+      russian: details.russian ?? known.russian,
+      description: stripBbcode(details.description),
+      shikiUrl: details.url ? `https://${details.domain}${details.url}` : known.shikiUrl,
+      shikiId: known.shikiId,
+    }
+    memory.set(key, full)
+    await writeCache(kind, person.personId, full)
+    return full
+  }
+
+  return getRussianPerson(kind, person, targetMalIds)
 }
 
 /**

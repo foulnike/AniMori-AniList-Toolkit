@@ -6,7 +6,13 @@ import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
 import { fetchMalIds } from '@/api/anilist-media'
 import { fetchMediaPeople, type CharacterRef, type PersonRef, type StaffRef } from '@/api/anilist-people'
 import type { PersonTarget } from '@/api/anilist-person'
-import { getRussianPerson, type PersonKind, type RussianPerson } from '@/core/person-title'
+import {
+  getRussianPerson,
+  peekRussianPerson,
+  prefetchRussianPeople,
+  type PersonKind,
+  type RussianPerson,
+} from '@/core/person-title'
 import { settings } from '@/core/settings'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
@@ -109,9 +115,9 @@ async function load(): Promise<void> {
 }
 
 /**
- * Фоновый проход по русским именам: герои и авторы первыми, сэйю в хвост.
- * Идёт по одному: веер запросов упрётся в темп Шикимори. Уход с тайтла
- * обрывает очередь тем же номером показа, что и основная добыча.
+ * Фоновый проход по русским именам. Основная масса приходит одним запросом —
+ * списком ролей тайтла; точечный поиск достаётся несопоставленным. Уход
+ * с тайтла обрывает очередь тем же номером показа, что и основная добыча.
  */
 async function beginRussian(mine: number): Promise<void> {
   const queue: Array<{ kind: PersonKind; person: PersonRef }> = []
@@ -126,18 +132,38 @@ async function beginRussian(mine: number): Promise<void> {
   }
   if (queue.length === 0) return
 
-  // MAL id текущего тайтла: гард тёзок у поиска Шикимори.
-  let guard: number[] = []
+  // MAL id текущего тайтла: на нём висят и массовый проход, и гард тёзок.
+  let malId: number | undefined
   try {
-    const malId = (await fetchMalIds([props.mediaId], props.type)).get(props.mediaId)
-    if (malId) guard = [malId]
+    malId = (await fetchMalIds([props.mediaId], props.type)).get(props.mediaId)
   } catch (e) {
     Logger('WARN', `Русские имена: MAL id тайтла ${props.mediaId} не добыт`, e)
   }
 
+  if (malId) {
+    const left = await prefetchRussianPeople(malId, props.type, queue)
+    if (mine !== run) return
+
+    // Список ролей разрешил большинство разом: подметаем их в плитки.
+    for (const entry of queue) {
+      const card = peekRussianPerson(entry.kind, entry.person.personId)
+      if (card) russian.set(personKey(entry.kind, entry.person.personId), card)
+    }
+
+    // Кого список не покрыл, добираем точечно, по одному.
+    for (const entry of left) {
+      if (mine !== run) return
+      const card = await getRussianPerson(entry.kind, entry.person, [malId])
+      if (mine !== run) return
+      if (card) russian.set(personKey(entry.kind, entry.person.personId), card)
+    }
+    return
+  }
+
+  // Без номера MAL массового прохода нет: все идут точечным поиском.
   for (const entry of queue) {
     if (mine !== run) return
-    const card = await getRussianPerson(entry.kind, entry.person, guard)
+    const card = await getRussianPerson(entry.kind, entry.person)
     if (mine !== run) return
     if (card) russian.set(personKey(entry.kind, entry.person.personId), card)
   }
