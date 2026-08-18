@@ -190,9 +190,7 @@ export async function initCollection(): Promise<number> {
  * @param types Какие типы тянуть. По умолчанию оба: экраны разделены, но список один
  * и наполняться он должен целиком, иначе числа у закладок врут до первого визита.
  */
-export async function refreshFromServer(
-  types: readonly MediaType[] = ALL_TYPES,
-): Promise<number> {
+export async function refreshFromServer(types: readonly MediaType[] = ALL_TYPES): Promise<number> {
   if (refreshInFlight) return refreshInFlight
 
   refreshInFlight = (async () => {
@@ -311,10 +309,7 @@ export async function unlinkCollection(): Promise<number> {
   ownerUserId = null
   await saveSnapshotNow({ backup: true })
 
-  Logger(
-    'DB',
-    `Коллекция отвязана от счёта: записей ${entries.size}, выброшено правок ${dropped}`,
-  )
+  Logger('DB', `Коллекция отвязана от счёта: записей ${entries.size}, выброшено правок ${dropped}`)
 
   return entries.size
 }
