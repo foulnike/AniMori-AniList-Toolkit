@@ -49,6 +49,17 @@ export interface AniMoriSettings {
    */
   hideAds: boolean
   /**
+   * Показывать ли взрослое (18+) в поиске и каталоге — пункт 3.8.
+   *
+   * Выключено по умолчанию. Раньше вопроса не было вовсе: взрослое прятал
+   * сам AniList у себя, а мы жили на его страницах. Своё окно спрашивает
+   * каталог напрямую, и отбирать теперь нам.
+   *
+   * Своего списка ключ не касается: спрятанная своя запись — это враньё
+   * в числах и потеря своих же данных, а метка 18+ на плитке есть и так.
+   */
+  showAdult: boolean
+  /**
    * Показывать ли пилюлю «Перенос». Скрывается только кнопка: окно остаётся
    * смонтированным и доступным программно, смысл ключа чисто интерфейсный.
    */
@@ -92,6 +103,7 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   accentCustom: '',
   blockPlayerPopups: false,
   hideAds: false,
+  showAdult: false,
   showSyncButton: true,
   showCompareButton: true,
   translateTitles: true,
@@ -126,6 +138,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     accentCustom,
     blockPlayerPopups,
     hideAds,
+    showAdult,
     showSyncButton,
     showCompareButton,
   ] = await Promise.all([
@@ -152,6 +165,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('am_accent_custom', DEFAULT_SETTINGS.accentCustom),
     storage.get('set_block_popups', DEFAULT_SETTINGS.blockPlayerPopups),
     storage.get('set_hide_ads', DEFAULT_SETTINGS.hideAds),
+    storage.get('set_adult', DEFAULT_SETTINGS.showAdult),
     storage.get('set_btn_sync', DEFAULT_SETTINGS.showSyncButton),
     storage.get('set_btn_compare', DEFAULT_SETTINGS.showCompareButton),
   ])
@@ -184,6 +198,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     accentCustom,
     blockPlayerPopups,
     hideAds,
+    showAdult,
     showSyncButton,
     showCompareButton,
     translateTitles: titlePrimary !== 'off',
