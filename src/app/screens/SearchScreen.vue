@@ -2,9 +2,10 @@
 // Пункт 3.5: поиск по чужому каталогу. Поиск по своему списку живёт
 // во вкладке списков: там он идёт по памяти и сети не требует вовсе.
 // Куда идти за русским словом, решает core/media-search: экран только показывает.
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
+import { getEntry, initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
@@ -46,6 +47,8 @@ interface Row {
   score: string | null
   mark: string | null
   own: string | null
+  repeat: number
+  note: string | null
   done: number
   adult: boolean
 }
@@ -94,15 +97,29 @@ function briefFacts(brief: MediaBrief): string {
   return parts.join(' · ')
 }
 
-/** Своя закладка по ответу сервера. Нет закладки — метки на постере не будет. */
+/**
+ * Своя закладка: сначала местный список, и только потом ответ сервера.
+ * Без входа ownEntry пуст всегда, а свой список у нас есть и так (пункт 3.14).
+ */
 function markText(brief: MediaBrief): string | null {
+  const mine = getEntry(brief.mediaId)
+  if (mine) return statusWord(brief.type, mine.status)
+
   return statusWord(brief.type, brief.ownEntry?.status ?? null)
+}
+
+/** Свой счёт частей по той же лестнице: память, ответ сервера, ноль. */
+function ownSeen(brief: MediaBrief): number {
+  const mine = getEntry(brief.mediaId)
+  if (mine) return mine.progress
+
+  return brief.ownEntry?.progress ?? 0
 }
 
 /** Строка счёта на постере: свой прогресс, а без него — размер тайтла. */
 function ownText(brief: MediaBrief): string | null {
   const parts = partsCount(brief)
-  const seen = brief.ownEntry?.progress ?? 0
+  const seen = ownSeen(brief)
   const short = partsShort(brief.type)
 
   if (seen > 0) return parts === null ? `${seen} ${short}` : `${seen} / ${parts} ${short}`
@@ -111,12 +128,12 @@ function ownText(brief: MediaBrief): string | null {
 
 /** Доля пройденного для полосы под постером. */
 function donePart(brief: MediaBrief): number {
-  const own = brief.ownEntry
-  if (!own) return 0
-  if (own.status === 'COMPLETED') return 1
+  const mine = getEntry(brief.mediaId)
+  const status = mine ? mine.status : brief.ownEntry?.status ?? null
+  if (status === 'COMPLETED') return 1
 
   const parts = partsCount(brief)
-  const seen = own.progress ?? 0
+  const seen = ownSeen(brief)
   if (parts === null || parts <= 0 || seen <= 0) return 0
 
   return Math.min(1, seen / parts)
@@ -131,6 +148,9 @@ function pickTitle(brief: MediaBrief): string {
 
 /** Выписка сервера в плитку показа. */
 function toRow(brief: MediaBrief): Row {
+  // Повторы и комментарий бывают только своими: у ответа каталога их нет.
+  const mine = getEntry(brief.mediaId)
+
   return {
     mediaId: brief.mediaId,
     title: pickTitle(brief),
@@ -140,6 +160,8 @@ function toRow(brief: MediaBrief): Row {
     score: scoreText(brief),
     mark: markText(brief),
     own: ownText(brief),
+    repeat: mine?.repeat ?? 0,
+    note: mine?.notes ?? null,
     done: donePart(brief),
     adult: brief.isAdult,
   }
@@ -254,6 +276,19 @@ function onMore(): void {
 function open(mediaId: number): void {
   navigate('media', { id: String(mediaId) })
 }
+
+onMounted(() => {
+  void (async () => {
+    // Поиск бывает первым экраном запуска: без подъёма снимка память пуста,
+    // и своих меток на постерах не будет даже при полном списке на диске.
+    try {
+      await initCollection()
+      redraw()
+    } catch (e) {
+      Logger('WARN', 'Поиск: свой список поднять не вышло', e)
+    }
+  })()
+})
 </script>
 
 <template>
@@ -320,6 +355,8 @@ function open(mediaId: number): void {
         :score="row.score"
         :mark="row.mark"
         :own="row.own"
+        :repeat="row.repeat"
+        :note="row.note"
         :done="row.done"
         :adult="row.adult"
         @open="open(row.mediaId)"
