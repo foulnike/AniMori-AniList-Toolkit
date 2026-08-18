@@ -144,18 +144,21 @@ app/        свои экраны приложения
   App.vue        реестры экранов: SCREEN_NAMES, SCREEN_TITLES, SCREENS
   labels.ts      русские подписи закладок, форматов и частей
   media-links.ts ссылки на тайтл в трёх сервисах
+  tile-row.ts    сборка строки плитки для поиска и страницы студии
   router/        index.ts — свой маршрутизатор на хэше, routes.ts — адреса
   components/    AppShell.vue — рамка окна, MediaTile.vue — плитка,
-                 EntrySheet.vue — окно правки записи
-  screens/       HomeScreen, ListsScreen, MediaScreen, SearchScreen, SettingsScreen
+                 EntrySheet.vue — окно правки записи,
+                 PeopleBox.vue и PersonSheet.vue — люди тайтла
+  screens/       HomeScreen, ListsScreen, MediaScreen, SearchScreen,
+                 SettingsScreen, StudioScreen
   styles/        theme.css — токены и общие классы своих экранов
   auth/          session.ts — факт входа и срок для разметки, без пропуска
 ```
 
 Новый экран — три места в `App.vue`: `SCREEN_NAMES`, `SCREEN_TITLES`, `SCREENS`.
-Адреса вида `#/lists` и `#/media/21`, неизвестный адрес ведёт на главную.
-Палитра экранов — в переменных `--am-*`. Порядок пуска окна держит `main.ts`,
-а не `App.vue`.
+Адреса вида `#/lists`, `#/media/21` и `#/studio/4`, неизвестный адрес ведёт
+на главную. Палитра экранов — в переменных `--am-*`. Порядок пуска окна
+держит `main.ts`, а не `App.vue`.
 
 Жизненный цикл живёт у скрипта, а не в ядре: он знает роуты и корни чужого SPA.
 
