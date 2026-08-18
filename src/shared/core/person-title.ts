@@ -118,7 +118,7 @@ async function loadOne(
   const card: RussianPerson = {
     russian: found.data.russian,
     description: stripBbcode(found.data.description),
-    shikiUrl: found.data.url ? `https://${found.data.domain}${found.data.url}` : null,
+    shikiUrl: found.data.url ? `{{https://${found.data.domain}}}${found.data.url}` : null,
     shikiId: found.data.id,
   }
 
@@ -169,7 +169,21 @@ export async function prefetchRussianPeople(
   type: MediaType,
   entries: Array<{ kind: PersonKind; person: PersonRef }>,
 ): Promise<Array<{ kind: PersonKind; person: PersonRef }>> {
-  const todo = entries.filter((e) => !memory.has(memoryKey(e.kind, e.person.personId)))
+  // Сначала память и склад: знакомые люди сети не ждут вовсе, а добытые
+  // полные карточки не подменяются частичными из списка ролей.
+  const todo: typeof entries = []
+  for (const entry of entries) {
+    const key = memoryKey(entry.kind, entry.person.personId)
+    if (memory.has(key)) continue
+
+    const cached = await readCache(entry.kind, entry.person.personId)
+    if (cached) {
+      memory.set(key, cached)
+      continue
+    }
+
+    todo.push(entry)
+  }
   if (todo.length === 0) return []
 
   const roles = await fetchShikiRoles(malId, type === 'MANGA' ? 'mangas' : 'animes')
@@ -240,7 +254,7 @@ export async function getRussianPersonFull(
     const full: RussianPerson = {
       russian: details.russian ?? known.russian,
       description: stripBbcode(details.description),
-      shikiUrl: details.url ? `https://${details.domain}${details.url}` : known.shikiUrl,
+      shikiUrl: details.url ? `{{https://${details.domain}}}${details.url}` : known.shikiUrl,
       shikiId: known.shikiId,
     }
     memory.set(key, full)

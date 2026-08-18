@@ -451,7 +451,8 @@ export async function fetchShikiPersonDetails(
       url: mirrorUrl(domain, `/api/${endpointStr}/${id}`),
       domain,
     })
-    if (r.status === 429) return null
+    // 429 уже поставил шлюз на паузу: следующее зеркало спросится после неё.
+    if (r.status === 429) continue
     if (r.status !== 200) continue
 
     try {

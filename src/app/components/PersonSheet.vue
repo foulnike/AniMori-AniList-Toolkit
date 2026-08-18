@@ -19,6 +19,8 @@ import {
 } from '@/core/person-title'
 import { settings } from '@/core/settings'
 
+import { genderWord, langWord, occupationWord } from '../labels'
+
 const props = defineProps<{ start: PersonTarget }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
@@ -280,10 +282,10 @@ onBeforeUnmount(() => {
           <!-- Стафф: занятия, язык, город -->
           <template v-if="start.kind === 'staff' && staffCard">
             <p v-if="staffCard.primaryOccupations?.length" class="am-dim am-ps-names__occ">
-              {{ staffCard.primaryOccupations.join(', ') }}
+              {{ staffCard.primaryOccupations.map(occupationWord).join(', ') }}
             </p>
             <p v-if="staffCard.languageV2" class="am-dim">
-              {{ staffCard.languageV2
+              {{ langWord(staffCard.languageV2)
               }}<template v-if="staffCard.homeTown">, {{ staffCard.homeTown }}</template>
             </p>
             <p v-if="fmtDate(staffCard.dateOfBirth)" class="am-dim">
@@ -297,7 +299,7 @@ onBeforeUnmount(() => {
           <!-- Персонаж: пол, возраст, дата рождения -->
           <template v-if="start.kind === 'character' && charCard">
             <p v-if="charCard.gender || charCard.age" class="am-dim">
-              <template v-if="charCard.gender">{{ charCard.gender }}</template
+              <template v-if="charCard.gender">{{ genderWord(charCard.gender) }}</template
               ><template v-if="charCard.gender && charCard.age"> · </template
               ><template v-if="charCard.age">{{ charCard.age }}</template>
             </p>
