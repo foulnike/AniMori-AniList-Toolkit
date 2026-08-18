@@ -1,305 +1,294 @@
 <script setup lang="ts">
-// Пункт 3.9: человек окошком поверх экрана. Своя история переходов:
-// от персонажа к его сэйю и обратно, без ухода с карточки тайтла.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// Окошко персонажа или автора поверх основного интерфейса (пункт 3.9б).
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
-  fetchPersonCard,
-  peekPersonCard,
-  type PersonCard,
-  type PersonRef,
+  fetchCharacterCard,
+  fetchStaffCard,
+  type CharacterCard,
   type PersonTarget,
+  type StaffCard,
 } from '@/api/anilist-person'
 import { Bridge } from '@/bridge'
-import { Logger } from '@/utils/logger'
 
 const props = defineProps<{ start: PersonTarget }>()
-
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-/** Кого смотрим сейчас и куда вернёт «Назад». */
-const view = ref<PersonTarget>(props.start)
-const path = ref<PersonTarget[]>([])
+/** Предел описания до кнопки «Ещё». */
+const DESC_LIMIT = 400
 
-const card = ref<PersonCard | null>(peekPersonCard(props.start.kind, props.start.personId))
-const busy = ref(false)
+const charCard = ref<CharacterCard | null>(null)
+const staffCard = ref<StaffCard | null>(null)
+const busy = ref(true)
+const expanded = ref(false)
 
-/** Номер показа: ответ на прежнего человека приходит уже не к месту. */
-let run = 0
-
-const kicker = computed<string>(() =>
-  view.value.kind === 'character' ? 'Персонаж' : 'Автор',
-)
-
-/** Имя и портрет берутся из плитки, пока ответ ещё в пути. */
-const name = computed<string>(() => card.value?.name ?? view.value.name)
-const native = computed<string | null>(() => card.value?.native ?? view.value.native)
-const image = computed<string | null>(() => card.value?.image ?? view.value.image)
-const siteUrl = computed<string | null>(() => card.value?.siteUrl ?? view.value.siteUrl)
-
-const letter = computed<string>(() => name.value.slice(0, 1).toUpperCase())
-
-async function load(): Promise<void> {
-  const mine = ++run
-  const ready = peekPersonCard(view.value.kind, view.value.personId)
-
-  card.value = ready
-  if (ready !== null) return
-
-  busy.value = true
-
-  try {
-    const found = await fetchPersonCard(view.value.kind, view.value.personId)
-    if (mine !== run) return
-
-    card.value = found
-  } catch (e) {
-    // Окно остаётся с именем и портретом из плитки: это лучше пустоты.
-    Logger('WARN', `Человек ${view.value.personId}: добыть не вышло`, e)
-  } finally {
-    if (mine === run) busy.value = false
-  }
+/** Описание из загруженных данных. */
+function rawDesc(): string {
+  return (
+    (props.start.kind === 'character'
+      ? charCard.value?.description
+      : staffCard.value?.description) ?? ''
+  )
 }
 
-/** Переход к сэйю: голос — тот же автор, просто с другой стороны. */
-function onVoice(person: PersonRef): void {
-  path.value.push(view.value)
-  view.value = { kind: 'staff', ...person }
+function shortDesc(): string {
+  const d = rawDesc()
+  return expanded.value || d.length <= DESC_LIMIT ? d : d.slice(0, DESC_LIMIT) + '…'
 }
 
-function onBack(): void {
-  const prev = path.value.pop()
-  if (prev !== undefined) view.value = prev
+function hasMore(): boolean {
+  return rawDesc().length > DESC_LIMIT && !expanded.value
 }
 
-/** Уводит наружу через оболочку: в окне приложения переход унёс бы само окно. */
-function onOpen(): void {
-  const url = siteUrl.value
-  if (url === null) return
-
-  void Bridge.shell.openExternal(url).catch((e) => {
-    Logger('WARN', `Человек: внешняя ссылка не открылась (${url})`, e)
-  })
+function fullName(): string {
+  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
+  return card?.name.full ?? props.start.name
 }
 
-/** Escape возвращает на шаг назад, а с первого шага закрывает окно. */
-function onKey(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-
-  if (path.value.length > 0) onBack()
-  else emit('close')
+function nativeName(): string | null {
+  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
+  return card?.name.native ?? props.start.native ?? null
 }
 
-onMounted(() => {
+function altNames(): string[] {
+  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
+  return card?.name.alternative?.filter((n) => n.trim() !== '') ?? []
+}
+
+function largeImage(): string | null {
+  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
+  return card?.image?.large ?? props.start.image ?? null
+}
+
+/** Форматирует дату { year, month, day } в читаемый вид. */
+function fmtDate(
+  d: { year: number | null; month: number | null; day: number | null } | null,
+): string {
+  if (!d) return ''
+  const parts: string[] = []
+  if (d.day) parts.push(String(d.day))
+  if (d.month) parts.push(String(d.month))
+  if (d.year) parts.push(String(d.year))
+  return parts.join('.')
+}
+
+/** Первый голос из каждого аниме (приоритет JA, затем любой). */
+function voiceRows() {
+  if (!charCard.value?.media?.edges) return []
+  return charCard.value.media.edges
+    .map((edge) => {
+      const ja = edge.voiceActors.find((v) => v.language === 'JAPANESE')
+      const va = ja ?? edge.voiceActors[0] ?? null
+      return va ? { va, media: edge.node, role: edge.characterRole } : null
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    .slice(0, 6)
+}
+
+function openSite(): void {
+  Bridge.shell.openExternal(props.start.siteUrl).catch(() => {})
+}
+
+function onKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') emit('close')
+}
+
+onMounted(async () => {
   window.addEventListener('keydown', onKey)
-  void load()
+  if (props.start.kind === 'character') {
+    charCard.value = await fetchCharacterCard(props.start.personId)
+  } else {
+    staffCard.value = await fetchStaffCard(props.start.personId)
+  }
+  busy.value = false
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
 })
-
-watch(
-  () => `${view.value.kind}:${view.value.personId}`,
-  () => {
-    void load()
-  },
-)
 </script>
 
 <template>
-  <div class="am-who" role="dialog" aria-modal="true" @click.self="emit('close')">
-    <div class="am-who__box">
-      <header class="am-who__top">
-        <button
-          v-if="path.length > 0"
-          class="am-btn am-btn--ghost"
-          type="button"
-          @click="onBack"
-        >
-          ← Назад
-        </button>
-
-        <div class="am-who__text">
-          <span class="am-who__kicker">{{ kicker }}</span>
-          <h3 class="am-who__name">{{ name }}</h3>
-          <span v-if="native" class="am-who__native">{{ native }}</span>
+  <div class="am-sheet" role="dialog" aria-modal="true" @click.self="emit('close')">
+    <div class="am-sheet__box">
+      <!-- Шапка -->
+      <div class="am-ps-top">
+        <div class="am-ps-portrait">
+          <img
+            v-if="largeImage()"
+            class="am-ps-portrait__img"
+            :src="largeImage()!"
+            :alt="fullName()"
+            decoding="async"
+          />
+          <span v-else class="am-ps-portrait__img am-ps-portrait__img--empty" aria-hidden="true">
+            {{ fullName().slice(0, 1) }}
+          </span>
         </div>
 
-        <button class="am-who__close" type="button" title="Закрыть" @click="emit('close')">
-          <span aria-hidden="true">×</span>
-        </button>
-      </header>
+        <div class="am-ps-names">
+          <p class="am-ps-names__full">{{ fullName() }}</p>
+          <p v-if="nativeName()" class="am-ps-names__native">{{ nativeName() }}</p>
+          <p v-if="altNames().length" class="am-ps-names__alt">
+            {{ altNames().join(' · ') }}
+          </p>
 
-      <div class="am-who__body">
-        <div class="am-who__side">
-          <img v-if="image" class="am-who__art" :src="image" :alt="name" decoding="async" />
-          <span v-else class="am-who__art am-who__art--empty" aria-hidden="true">{{ letter }}</span>
-
-          <dl v-if="card && card.facts.length > 0" class="am-who__facts">
-            <div v-for="fact in card.facts" :key="fact.name" class="am-who__fact">
-              <dt class="am-who__fact-name">{{ fact.name }}</dt>
-              <dd class="am-who__fact-value">{{ fact.value }}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div class="am-who__main">
-          <div v-if="busy && card === null" class="am-who__wait">
-            <span class="am-skeleton am-who__line" />
-            <span class="am-skeleton am-who__line" />
-            <span class="am-skeleton am-who__line am-who__line--short" />
-          </div>
-
-          <p v-else-if="card && card.about" class="am-who__about">{{ card.about }}</p>
-          <p v-else class="am-dim">Описания нет.</p>
-
-          <section v-if="card && card.voices.length > 0" class="am-who__voices">
-            <h4 class="am-who__sub">Голоса</h4>
-            <div class="am-who__rail">
-              <button
-                v-for="person in card.voices"
-                :key="person.personId"
-                class="am-who__voice"
-                type="button"
-                :title="person.native ?? person.name"
-                @click="onVoice(person)"
+          <!-- Стафф: занятия, язык, город -->
+          <template v-if="start.kind === 'staff' && staffCard">
+            <p v-if="staffCard.primaryOccupations?.length" class="am-dim am-ps-names__occ">
+              {{ staffCard.primaryOccupations.join(', ') }}
+            </p>
+            <p v-if="staffCard.languageV2" class="am-dim">
+              {{ staffCard.languageV2
+              }}<template v-if="staffCard.homeTown">, {{ staffCard.homeTown }}</template>
+            </p>
+            <p v-if="fmtDate(staffCard.dateOfBirth)" class="am-dim">
+              {{ fmtDate(staffCard.dateOfBirth)
+              }}<template v-if="fmtDate(staffCard.dateOfDeath)">
+                &nbsp;—&nbsp;{{ fmtDate(staffCard.dateOfDeath) }}</template
               >
-                <img
-                  v-if="person.image"
-                  class="am-who__pic"
-                  :src="person.image"
-                  :alt="person.name"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <span v-else class="am-who__pic am-who__pic--empty" aria-hidden="true">
-                  {{ person.name.slice(0, 1) }}
-                </span>
+            </p>
+          </template>
 
-                <span class="am-who__voice-name">{{ person.name }}</span>
-              </button>
-            </div>
-          </section>
+          <!-- Персонаж: пол, возраст, дата рождения -->
+          <template v-if="start.kind === 'character' && charCard">
+            <p v-if="charCard.gender || charCard.age" class="am-dim">
+              <template v-if="charCard.gender">{{ charCard.gender }}</template
+              ><template v-if="charCard.gender && charCard.age"> · </template
+              ><template v-if="charCard.age">{{ charCard.age }}</template>
+            </p>
+            <p v-if="fmtDate(charCard.dateOfBirth)" class="am-dim">
+              {{ fmtDate(charCard.dateOfBirth) }}
+            </p>
+          </template>
         </div>
+
+        <button class="am-sheet__close" type="button" aria-label="Закрыть" @click="emit('close')">
+          ×
+        </button>
       </div>
 
-      <footer class="am-who__foot">
-        <button v-if="siteUrl" class="am-btn am-btn--soft" type="button" @click="onOpen">
-          Открыть на AniList
+      <!-- Скелетон -->
+      <template v-if="busy">
+        <span class="am-skeleton am-ps-skel" />
+        <span class="am-skeleton am-ps-skel" />
+        <span class="am-skeleton am-ps-skel am-ps-skel--short" />
+      </template>
+
+      <!-- Описание -->
+      <template v-else>
+        <p v-if="rawDesc()" class="am-ps-desc">
+          {{ shortDesc() }}
+        </p>
+        <button v-if="hasMore()" class="am-btn am-btn--ghost" type="button" @click="expanded = true">
+          Показать полностью
         </button>
 
-        <span class="am-bar__gap" />
+        <!-- Сэйю (только для персонажей) -->
+        <template v-if="start.kind === 'character' && voiceRows().length">
+          <h4 class="am-ps-sub">Голоса</h4>
+          <div class="am-ps-voices">
+            <div v-for="row in voiceRows()" :key="row.va.id" class="am-ps-va">
+              <img
+                v-if="row.va.image?.medium || row.va.image?.large"
+                class="am-ps-va__art"
+                :src="(row.va.image.medium ?? row.va.image.large)!"
+                :alt="row.va.name.full"
+                loading="lazy"
+                decoding="async"
+              />
+              <span v-else class="am-ps-va__art am-ps-va__art--empty" aria-hidden="true">
+                {{ row.va.name.full.slice(0, 1) }}
+              </span>
+              <span class="am-ps-va__info">
+                <span class="am-ps-va__name">{{ row.va.name.full }}</span>
+                <span class="am-ps-va__media am-dim">
+                  {{ row.media.title.romaji ?? row.media.title.english ?? '' }}
+                </span>
+              </span>
+            </div>
+          </div>
+        </template>
+      </template>
 
-        <button class="am-btn" type="button" @click="emit('close')">Готово</button>
-      </footer>
+      <!-- Футер -->
+      <div class="am-sheet__foot">
+        <button class="am-btn am-btn--ghost" type="button" @click="openSite()">
+          Открыть на AniList
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Окно поверх экрана: затемнение гасит всё лишнее. */
-.am-who {
+.am-sheet {
   position: fixed;
   inset: 0;
-  z-index: 32;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(4, 7, 12, 0.68);
+  background: rgba(4, 7, 12, 0.72);
   backdrop-filter: blur(6px);
 }
 
-.am-who__box {
+.am-sheet__box {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   width: 100%;
-  max-width: 900px;
-  max-height: 88vh;
+  max-width: 780px;
+  max-height: 90vh;
   padding: 26px;
+  overflow-y: auto;
   background: linear-gradient(180deg, var(--am-panel-2), var(--am-panel));
-  border: 1px solid var(--am-line);
   border-radius: var(--am-r-l);
   box-shadow: var(--am-sh-2);
 }
 
-.am-who__top {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-}
-
-.am-who__text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.am-who__kicker {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--am-accent);
-  text-transform: uppercase;
-}
-
-.am-who__name {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 650;
-  line-height: 1.25;
-}
-
-.am-who__native {
-  font-size: 13px;
-  color: var(--am-faint);
-}
-
-.am-who__close {
-  display: inline-flex;
+.am-sheet__close {
   flex: none;
-  align-items: center;
-  justify-content: center;
+  align-self: flex-start;
   width: 44px;
   height: 44px;
-  margin-left: auto;
   padding: 0;
-  font: inherit;
   font-size: 22px;
   line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
+  background: none;
+  border: 0;
+  border-radius: 50%;
 }
 
-.am-who__close:hover {
+.am-sheet__close:hover,
+.am-sheet__close:focus-visible {
   color: var(--am-text);
   background: var(--am-hover);
 }
 
-/* Портрет с фактами слева, описание справа и прокручивается само. */
-.am-who__body {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 20px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.am-who__side {
+.am-sheet__foot {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
+  justify-content: flex-end;
+  padding-top: 4px;
+  border-top: 1px solid var(--am-line-soft);
 }
 
-.am-who__art {
-  width: 100%;
+/* Шапка */
+.am-ps-top {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.am-ps-portrait {
+  flex: none;
+}
+
+.am-ps-portrait__img {
+  width: 110px;
   aspect-ratio: 2 / 3;
   object-fit: cover;
   background: var(--am-panel-2);
@@ -307,147 +296,117 @@ watch(
   border-radius: var(--am-r-m);
 }
 
-.am-who__art--empty {
+.am-ps-portrait__img--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 44px;
+  font-size: 32px;
   color: var(--am-faint);
 }
 
-.am-who__facts {
+.am-ps-names {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.am-ps-names__full {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.am-ps-names__native {
+  font-size: 14px;
+  color: var(--am-dim);
+}
+
+.am-ps-names__alt {
+  font-size: 13px;
+  color: var(--am-faint);
+}
+
+.am-ps-names__occ {
+  margin-top: 4px;
+}
+
+/* Описание */
+.am-ps-desc {
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-line;
+  color: var(--am-dim);
+}
+
+/* Голоса */
+.am-ps-sub {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--am-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.am-ps-voices {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0;
 }
 
-.am-who__fact {
+.am-ps-va {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.am-who__fact-name {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--am-faint);
-  text-transform: uppercase;
-}
-
-.am-who__fact-value {
-  margin: 0;
-  font-size: 13.5px;
-}
-
-.am-who__main {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.am-who__about {
-  margin: 0;
-  font-size: 14.5px;
-  line-height: 1.65;
-  color: var(--am-text);
-  white-space: pre-line;
-}
-
-.am-who__wait {
-  display: flex;
-  flex-direction: column;
   gap: 10px;
-}
-
-.am-who__line {
-  height: 14px;
-  border-radius: var(--am-r-s);
-}
-
-.am-who__line--short {
-  width: 60%;
-}
-
-.am-who__sub {
-  margin: 0 0 10px;
-  font-size: 13px
-  ;
-  font-weight: 650;
-  letter-spacing: 0.03em;
-  color: var(--am-dim);
-  text-transform: uppercase;
-}
-
-.am-who__rail {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-}
-
-.am-who__voice {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 6px;
   align-items: center;
-  width: 92px;
-  padding: 8px;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
 }
 
-.am-who__voice:hover,
-.am-who__voice:focus-visible {
-  background: var(--am-hover);
-  border-color: var(--am-accent);
-}
-
-.am-who__pic {
-  width: 60px;
-  height: 60px;
+.am-ps-va__art {
+  flex: none;
+  width: 40px;
+  height: 40px;
   object-fit: cover;
   background: var(--am-panel-2);
   border-radius: 50%;
 }
 
-.am-who__pic--empty {
+.am-ps-va__art--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 16px;
   color: var(--am-faint);
 }
 
-.am-who__voice-name {
-  font-size: 12px;
-  line-height: 1.3;
-  text-align: center;
-}
-
-.am-who__foot {
+.am-ps-va__info {
   display: flex;
-  gap: 10px;
-  align-items: center;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-/* Узкое окно: портрет уходит наверх, столбец один. */
-@media (max-width: 760px) {
-  .am-who__body {
-    grid-template-columns: minmax(0, 1fr);
-    overflow-y: auto;
-  }
+.am-ps-va__name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
 
-  .am-who__art {
-    max-width: 160px;
-  }
+.am-ps-va__media {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Скелетон */
+.am-ps-skel {
+  display: block;
+  height: 16px;
+  border-radius: var(--am-r-s);
+}
+
+.am-ps-skel--short {
+  width: 60%;
 }
 </style>
