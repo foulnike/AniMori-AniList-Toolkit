@@ -86,7 +86,9 @@ function voiceRows() {
 }
 
 function openSite(): void {
-  Bridge.shell.openExternal(props.start.siteUrl).catch(() => {})
+  const url = props.start.siteUrl
+  if (url === null) return
+  Bridge.shell.openExternal(url).catch(() => {})
 }
 
 function onKey(e: KeyboardEvent): void {
@@ -212,7 +214,7 @@ onBeforeUnmount(() => {
       </template>
 
       <!-- Футер -->
-      <div class="am-sheet__foot">
+      <div v-if="start.siteUrl" class="am-sheet__foot">
         <button class="am-btn am-btn--ghost" type="button" @click="openSite()">
           Открыть на AniList
         </button>
