@@ -30,8 +30,11 @@ AniMori — надстройка над anilist.co для русскоязычн
 интерфейса и карточек, русский поиск, встроенный плеер, виджеты медиа-страницы,
 перенос списков с Shikimori и их сравнение.
 
-В ветке 3.0 к этому добавляется второй продукт: собственный клиент AniList
-на своих экранах. Скрипт и приложение стоят на общем ядре.
+В ветке 3.0 к этому добавляется второй продукт: собственный клиент на своих
+экранах. Скрипт и приложение стоят на общем ядре. Списки клиента живут
+местно и без входа; как только подключён сервис, он становится источником
+истины и затирает местное; одновременно подключён ровно один сервис.
+Границы этого курса — в `docs/DECISIONS-LISTS.md`.
 
 Одна кодовая база собирается в два продукта.
 
@@ -40,7 +43,7 @@ AniMori — надстройка над anilist.co для русскоязычн
 | Сборка            | `npm run build` (режим userscript)  | `npm run build:tauri` плюс cargo   |
 | Оболочка           | Tampermonkey в браузере             | Tauri 2 и WebView2, только Windows |
 | Артефакт          | `dist/animori.user.js`              | `AniMori_<версия>_x64-setup.exe`   |
-| Мост              | `MonkeyBridge` на GM_\*             | `TauriBridge` на плагинах Tauri    |
+| Мост              | `MonkeyBridge` на GM_\*             | `TauriBridge` на плагинах Tauri |
 | Адблок            | заглушка `impl.noop`               | CSS плюс сетевой фильтр WebView2 |
 | Сеть через прокси | нет, только диагностика доступности | два канала: WebView2 и клиент Rust |
 
@@ -68,7 +71,7 @@ AniMori — надстройка над anilist.co для русскоязычн
 .github/workflows/release.yml   сборка и публикация по тегу
 .github/ISSUE_TEMPLATE/         четыре формы обращений и config.yml
 dictionary.json                 словарь интерфейса, тянется с raw.githubusercontent
-docs/                           карты, стиль, правила документации, реестр решений
+docs/                           карты, стиль, правила документации, реестры решений
 docs/<версия>/                  PLAN.md, CONTEXT.md и свой DECISIONS.md
 src/                            общий фронтенд: ядро, скрипт, приложение
 src-tauri/                      оболочка на Rust
@@ -85,7 +88,9 @@ CHANGELOG.md, README.md, LICENSE
 по умолчанию, так что в рабочей ветке их проверить нельзя.
 
 Документы в корне `docs/`: `DOC-RULES.md` (как вести записи), `DECISIONS.md`
-(реестр решений строками с хешами), `CODE-STYLE.md`, семь частей карты.
+(общий реестр решений строками с хешами), `DECISIONS-LISTS.md`
+(предметный реестр по спискам и связи с сервисами), `CODE-STYLE.md`,
+семь частей карты.
 
 ### src/
 
@@ -109,8 +114,9 @@ shared/     общее ядро обоих продуктов
     db.ts           IndexedDB, кэши, сборщик мусора
     settings.ts     все настройки и чтение их через мост
     snapshot.ts     снимок списка, очередь правок, дубль в файл
-    collection.ts   список в памяти, обновление с сервера
+    collection.ts   список в памяти, перенос с сервиса
     collection-view.ts  отборы, счётчики, страницы
+    adult.ts        единый отбор взрослого на слое показа
     edit-sender.ts  единственный путь правок наружу
     media-title.ts, media-looks.ts, media-search.ts
     net-health.ts   учёт доступности источников
@@ -123,28 +129,19 @@ shared/     общее ядро обоих продуктов
 userscript/ надстройка над сайтом
   main.ts        точка входа: порядок старта и привязка к SPA
   lifecycle.ts   реестр задач на смену роута и разбор
-  dictionary.ts  сборка итогового словаря, личные правки
-  dictionary-remote.ts  загрузка dictionary.json с GitHub и его кэш
+  dictionary.ts, dictionary-remote.ts  словарь и его загрузка с GitHub
   style.scss     все стили надстройки одним файлом
   features/
-    exporter/   index.ts, sync-api.ts, sync-state.ts, SyncModal.vue
-    media/      index.ts, player.ts, franchise.ts, themes.ts, ratings.ts,
-                extlinks.ts, types.ts
-    scanner/    index.ts, compare.ts, scanner-state.ts, ScannerModal.vue,
-                ScannerDiffCategory.vue
-    search/     index.ts, dict-capture.ts
-    translator/ index.ts, rules.ts, dom.ts
-    ui/         SettingsModal.vue и вкладки (SettingsDevTab, SettingsDictTab,
-                SettingsLinksTab, SettingsSupportTab, SettingsProxyCard),
-                settings-state.ts, LoggerModal.vue, logger-state.ts,
-                ActionPanel.vue, action-panel-state.ts, actions.ts,
-                player-hero.scss, NavPanel.vue, nav.ts, nav-state.ts, reload.ts,
-                links.ts, net-check.ts, NetToast.vue, net-toast.ts, settings.ts,
-                logger-ui.ts
+    exporter/   перенос списков и его окно
+    media/      плеер, франшиза, темы, оценки, свои ссылки
+    scanner/    сравнение списков и его окно
+    search/     русский поиск и сбор слов словаря
+    translator/ перевод чужого DOM и правила
+    ui/         настройки, журнал, панель действий, навигация, сетевые подсказки
 
 app/        свои экраны приложения
   index.html     корень режима app, выход собирается в dist/app
-  main.ts        точка входа приложения
+  main.ts        точка входа и порядок пуска окна
   App.vue        реестры экранов: SCREEN_NAMES, SCREEN_TITLES, SCREENS
   labels.ts      русские подписи закладок, форматов и частей
   media-links.ts ссылки на тайтл в трёх сервисах
@@ -158,7 +155,8 @@ app/        свои экраны приложения
 
 Новый экран — три места в `App.vue`: `SCREEN_NAMES`, `SCREEN_TITLES`, `SCREENS`.
 Адреса вида `#/lists` и `#/media/21`, неизвестный адрес ведёт на главную.
-Палитра экранов — в переменных `--am-*`.
+Палитра экранов — в переменных `--am-*`. Порядок пуска окна держит `main.ts`,
+а не `App.vue`.
 
 Жизненный цикл живёт у скрипта, а не в ядре: он знает роуты и корни чужого SPA.
 
@@ -216,7 +214,8 @@ Cargo.toml
 ## 3. Жизненный цикл
 
 Ниже — жизненный цикл надстройки. Свои экраны его не используют: там обычное
-приложение Vue со своим маршрутизатором.
+приложение Vue со своим маршрутизатором, а порядок пуска описан в шестой
+части карты.
 
 ### 3.1 Как код попадает на страницу
 
