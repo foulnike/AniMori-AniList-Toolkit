@@ -5,7 +5,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
-import { getEntry, initCollection } from '@/core/collection'
+import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
@@ -13,8 +13,8 @@ import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
-import { formatWord, partsShort, statusWord } from '../labels'
 import { navigate } from '../router'
+import { toTileRow, type TileRow } from '../tile-row'
 
 /** Пауза после последнего нажатия: каждая буква в сеть — сожжённый темп. */
 const TYPING_PAUSE_MS = 300
@@ -37,25 +37,9 @@ const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
   { key: 'MANGA', title: 'Манга' },
 ]
 
-/** Плитка выдачи. Всё готовится заранее: разметка ничего не считает. */
-interface Row {
-  mediaId: number
-  title: string
-  facts: string
-  cover: string | null
-  color: string | null
-  score: string | null
-  mark: string | null
-  own: string | null
-  repeat: number
-  note: string | null
-  done: number
-  adult: boolean
-}
-
 const word = ref('')
 const kind = ref<MediaType>('ANIME')
-const rows = ref<Row[]>([])
+const rows = ref<TileRow[]>([])
 const busy = ref(false)
 const trouble = ref('')
 const total = ref<number | null>(null)
@@ -76,99 +60,8 @@ function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/** Оценка сервера для угла постера: у AniList она в сотнях. */
-function scoreText(brief: MediaBrief): string | null {
-  return brief.averageScore === null ? null : `${brief.averageScore}%`
-}
-
-/** Сколько всего частей у тайтла: у аниме серии, у манги главы. */
-function partsCount(brief: MediaBrief): number | null {
-  return brief.type === 'MANGA' ? brief.chapters : brief.episodes
-}
-
-/** Короткая подпись под названием: вид и год. Счёт частей ушёл на постер. */
-function briefFacts(brief: MediaBrief): string {
-  const parts: string[] = []
-
-  const kindWord = formatWord(brief.format)
-  if (kindWord !== null) parts.push(kindWord)
-  if (brief.seasonYear !== null) parts.push(String(brief.seasonYear))
-
-  return parts.join(' · ')
-}
-
-/**
- * Своя закладка: сначала местный список, и только потом ответ сервера.
- * Без входа ownEntry пуст всегда, а свой список у нас есть и так (пункт 3.14).
- */
-function markText(brief: MediaBrief): string | null {
-  const mine = getEntry(brief.mediaId)
-  if (mine) return statusWord(brief.type, mine.status)
-
-  return statusWord(brief.type, brief.ownEntry?.status ?? null)
-}
-
-/** Свой счёт частей по той же лестнице: память, ответ сервера, ноль. */
-function ownSeen(brief: MediaBrief): number {
-  const mine = getEntry(brief.mediaId)
-  if (mine) return mine.progress
-
-  return brief.ownEntry?.progress ?? 0
-}
-
-/** Строка счёта на постере: свой прогресс, а без него — размер тайтла. */
-function ownText(brief: MediaBrief): string | null {
-  const parts = partsCount(brief)
-  const seen = ownSeen(brief)
-  const short = partsShort(brief.type)
-
-  if (seen > 0) return parts === null ? `${seen} ${short}` : `${seen} / ${parts} ${short}`
-  return parts === null ? null : `${parts} ${short}`
-}
-
-/** Доля пройденного для полосы под постером. */
-function donePart(brief: MediaBrief): number {
-  const mine = getEntry(brief.mediaId)
-  const status = mine ? mine.status : brief.ownEntry?.status ?? null
-  if (status === 'COMPLETED') return 1
-
-  const parts = partsCount(brief)
-  const seen = ownSeen(brief)
-  if (parts === null || parts <= 0 || seen <= 0) return 0
-
-  return Math.min(1, seen / parts)
-}
-
-/** Название для плитки: русское, латиница, английское, номер. */
-function pickTitle(brief: MediaBrief): string {
-  return (
-    peekRussianName(brief.mediaId) ?? brief.romaji ?? brief.english ?? `Тайтл #${brief.mediaId}`
-  )
-}
-
-/** Выписка сервера в плитку показа. */
-function toRow(brief: MediaBrief): Row {
-  // Повторы и комментарий бывают только своими: у ответа каталога их нет.
-  const mine = getEntry(brief.mediaId)
-
-  return {
-    mediaId: brief.mediaId,
-    title: pickTitle(brief),
-    facts: briefFacts(brief),
-    cover: brief.cover,
-    color: brief.color,
-    score: scoreText(brief),
-    mark: markText(brief),
-    own: ownText(brief),
-    repeat: mine?.repeat ?? 0,
-    note: mine?.notes ?? null,
-    done: donePart(brief),
-    adult: brief.isAdult,
-  }
-}
-
 function redraw(): void {
-  rows.value = briefs.map(toRow)
+  rows.value = briefs.map(toTileRow)
 }
 
 /**
@@ -374,24 +267,6 @@ onMounted(() => {
 <style scoped>
 .am-search--wide {
   min-width: 320px;
-}
-
-.am-hold {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.am-hold__art {
-  display: block;
-  aspect-ratio: 2 / 3;
-}
-
-.am-hold__line {
-  display: block;
-  width: 72%;
-  height: 12px;
-  border-radius: var(--am-r-s);
 }
 
 .am-more {

@@ -468,6 +468,25 @@ img {
   }
 }
 
+/* Заглушка плитки в сетке на время первого ответа. */
+.am-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.am-hold__art {
+  display: block;
+  aspect-ratio: 2 / 3;
+}
+
+.am-hold__line {
+  display: block;
+  width: 72%;
+  height: 12px;
+  border-radius: var(--am-r-s);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
