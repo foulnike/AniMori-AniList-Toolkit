@@ -241,7 +241,12 @@ const partsText = computed<string>(() => {
   return total === null ? String(progress.value) : `${progress.value} из ${total}`
 })
 
-/** Факт записи для плитки. */
+/** Правая часть строки прогресса: «7 из 12 · 58%», без процента при неизвестном итоге. */
+const progressText = computed<string>(() =>
+  partsTotal.value === null ? partsText.value : `${partsText.value} · ${donePart.value}`,
+)
+
+/** Факт записи для строки. */
 interface MineFact {
   key: string
   name: string
@@ -249,15 +254,13 @@ interface MineFact {
 }
 
 /**
- * Плитки записи: рисуются только с настоящим значением. В пустом состоянии
- * панель — это кнопка и полоса под ней, нули и прочерки не показываются.
+ * Факты записи строками: рисуются только с настоящим значением.
+ * Частей в списке нет: их показывает полоса прогресса.
  */
 const mineFacts = computed<MineFact[]>(() => {
   const list: MineFact[] = []
   if (score10.value > 0)
     list.push({ key: 'score', name: 'Оценка', value: scoreText(score10.value) })
-  if (progress.value > 0)
-    list.push({ key: 'parts', name: partsWord.value, value: partsText.value })
   if (card.value?.type === 'MANGA' && volumes.value > 0)
     list.push({ key: 'volumes', name: 'Тома', value: String(volumes.value) })
   if (repeat.value > 0)
@@ -422,6 +425,12 @@ watch(mediaId, () => {
               <p v-if="card.native" class="am-hero__sub">{{ card.native }}</p>
 
               <ul class="am-pills">
+                <li v-if="score10 > 0" class="am-pill am-pill--mine" title="Моя оценка">
+                  ★ {{ scoreText(score10) }}
+                </li>
+                <li v-if="progress > 0" class="am-pill am-pill--mine" title="Мой прогресс">
+                  {{ partsText }}
+                </li>
                 <li v-for="item in facts" :key="item" class="am-pill">{{ item }}</li>
                 <li v-if="card.isAdult" class="am-pill am-pill--adult">18+</li>
               </ul>
@@ -458,31 +467,40 @@ watch(mediaId, () => {
           </div>
 
           <aside class="am-split__side">
-            <div class="am-panel am-mine">
+            <div class="am-mine">
               <button
-                class="am-btn am-btn--wide am-mine__pick"
+                class="am-mine__pick"
+                :class="{ 'am-mine__pick--empty': !listed }"
                 type="button"
                 @click="sheetOpen = true"
               >
+                <span v-if="listed" class="am-mine__dot" aria-hidden="true" />
                 {{ listLabel }}
+                <span v-if="listed" class="am-mine__hint">Изменить</span>
               </button>
 
-              <div v-if="listed" class="am-mine__bar">
-                <span class="am-line">
+              <div v-if="listed" class="am-mine__progress">
+                <div class="am-mine__prow">
+                  <span class="am-mine__pname">{{ partsWord }}</span>
+                  <span class="am-mine__pval">{{ progressText }}</span>
+                </div>
+                <span class="am-line am-mine__line">
                   <span class="am-line__fill" :style="{ width: donePart }" />
                 </span>
               </div>
 
-              <dl v-if="mineFacts.length > 0" class="am-tiles">
-                <div v-for="fact in mineFacts" :key="fact.key" class="am-tile-fact">
-                  <dt class="am-tile-fact__name">{{ fact.name }}</dt>
-                  <dd class="am-tile-fact__value">{{ fact.value }}</dd>
+              <dl v-if="mineFacts.length > 0" class="am-mine__rows">
+                <div v-for="fact in mineFacts" :key="fact.key" class="am-mine__row">
+                  <dt class="am-mine__rname">{{ fact.name }}</dt>
+                  <dd class="am-mine__rval">{{ fact.value }}</dd>
                 </div>
               </dl>
 
               <p v-if="notes" class="am-mine__note">{{ notes }}</p>
 
-              <p v-if="drifted" class="am-meta">Правка сохранена и ждёт отправки на AniList.</p>
+              <p v-if="drifted" class="am-mine__drift">
+                Правка сохранена и ждёт отправки на AniList.
+              </p>
             </div>
           </aside>
         </div>
@@ -647,6 +665,13 @@ watch(mediaId, () => {
   border-color: rgba(255, 90, 90, 0.4);
 }
 
+/* Свои оценка и прогресс — немые пилюли у заголовка: их ищут там, а не в сайдбаре. */
+.am-pill--mine {
+  color: #cfe6ff;
+  background: rgba(88, 166, 255, 0.16);
+  border-color: rgba(88, 166, 255, 0.4);
+}
+
 /* Колонка описания равна длине строки, а не всей ширине окна:
    иначе панель тянется дальше текста и правая половина пустует. */
 .am-split {
@@ -665,9 +690,8 @@ watch(mediaId, () => {
   min-width: 0;
 }
 
-/* Обе панели растягиваются до высоты большей из двух. */
-.am-about-box,
-.am-mine {
+/* Панель описания тянется на всю высоту строки сетки. */
+.am-about-box {
   flex: 1;
 }
 
@@ -717,59 +741,110 @@ watch(mediaId, () => {
   padding-top: 14px;
 }
 
-/* Панель записи дышит: между блоками воздух, а не слипшиеся строки. */
+/* Колонка свойств записи без коробки; flex обязателен: без него gap не работает. */
 .am-mine {
-  gap: 20px;
-}
-
-/* Главная кнопка крупная и надпись у неё по центру: с дивана и пультом
-   мелкую не нажать, а вторая подпись внутри только смещала текст. */
-.am-mine__pick {
-  min-height: 52px;
-  font-size: 15px;
-  font-weight: 650;
-}
-
-/* Полоса ровно по ширине кнопки над ней, без счётчика процентов сбоку. */
-.am-mine__bar {
-  padding: 2px 0 6px;
-}
-
-.am-mine__bar .am-line {
-  display: block;
-  width: 100%;
-}
-
-/* Факты плитками по две в ряд: каждое значение со своей подписью. */
-.am-tiles {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0;
-}
-
-.am-tile-fact {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
+  gap: 18px;
+  padding: 6px 4px;
 }
 
-.am-tile-fact__name {
-  font-size: 11.5px;
+/* Тихая кнопка закладки: залитая акцентом плаха перекрикивала героя. */
+.am-mine__pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--am-faint);
-  text-transform: uppercase;
+  color: var(--am-text);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--am-line);
+  border-radius: var(--am-r-m);
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
-.am-tile-fact__value {
-  margin: 0;
-  font-size: 15px;
+.am-mine__pick:hover {
+  background: var(--am-hover);
+  border-color: rgba(88, 166, 255, 0.45);
+}
+
+.am-mine__pick--empty {
+  color: var(--am-accent);
+}
+
+.am-mine__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--am-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.6);
+}
+
+.am-mine__hint {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--am-faint);
+}
+
+.am-mine__pick:hover .am-mine__hint {
+  color: var(--am-accent);
+}
+
+.am-mine__prow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.am-mine__pname {
+  font-size: 12.5px;
+  color: var(--am-faint);
+}
+
+.am-mine__pval {
+  font-size: 13px;
   font-weight: 650;
+}
+
+/* Полоса записи плотнее общей: здесь она главный счётчик, а не фон. */
+.am-mine__line {
+  display: block;
+  height: 6px;
+}
+
+/* Факты строками с hairline: коробки плиток давали шум «коробок в коробке». */
+.am-mine__rows {
+  margin: 0;
+}
+
+.am-mine__row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.am-mine__rname {
+  font-size: 13px;
+  color: var(--am-faint);
+}
+
+.am-mine__rval {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
 /* Комментарий выделен полосой сбоку: это чужой текст, а не наша подпись. */
@@ -783,6 +858,25 @@ watch(mediaId, () => {
   background: rgba(255, 255, 255, 0.03);
   border-left: 2px solid var(--am-accent);
   border-radius: 0 var(--am-r-s) var(--am-r-s) 0;
+}
+
+/* Расхождение с сервером — точка предупреждения: молчание читалось потерей данных. */
+.am-mine__drift {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--am-warn);
+}
+
+.am-mine__drift::before {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  content: '';
+  background: var(--am-warn);
+  border-radius: 50%;
 }
 
 @media (max-width: 1180px) {
