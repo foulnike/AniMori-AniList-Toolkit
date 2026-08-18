@@ -213,6 +213,10 @@ function toSearch(): void {
   navigate('search')
 }
 
+function toSettings(): void {
+  navigate('settings')
+}
+
 onMounted(() => {
   void (async () => {
     try {
@@ -270,7 +274,14 @@ onMounted(() => {
     <div v-else-if="empty" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">✧</span>
       <span>Здесь появятся тайтлы, которые вы смотрите и читаете.</span>
-      <span>Войдите в AniList на экране настроек и обновите список.</span>
+      <span>Найдите тайтл и добавьте к себе: список ведётся здесь, без всяких входов.</span>
+
+      <div class="am-empty__acts">
+        <button class="am-btn" type="button" @click="toSearch">Найти тайтл</button>
+        <button class="am-btn am-btn--ghost" type="button" @click="toSettings">
+          Перенести список с AniList
+        </button>
+      </div>
     </div>
 
     <template v-else>
@@ -368,6 +379,15 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin-top: 6px;
+}
+
+/* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
+.am-empty__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
   margin-top: 6px;
 }
 
