@@ -8,6 +8,7 @@ import type { PersonTarget } from '@/api/anilist-person'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
+import { CREW_WORDS } from './crew-words'
 import PersonSheet from './PersonSheet.vue'
 
 const props = defineProps<{ mediaId: number; type: MediaType }>()
@@ -20,35 +21,6 @@ const ROLE_WORDS: Record<string, string> = {
   MAIN: 'Главный',
   SUPPORTING: 'Второстепенный',
   BACKGROUND: 'Массовка',
-}
-
-// Роли авторов сервер отдаёт свободной строкой, и список её значений открыт.
-// Здесь только частые; незнакомое показывается как пришло, а не прячется.
-const CREW_WORDS: Record<string, string> = {
-  Director: 'Режиссёр',
-  'Original Creator': 'Автор оригинала',
-  'Original Story': 'Первоисточник',
-  'Story & Art': 'Сюжет и рисунок',
-  Story: 'Сюжет',
-  Art: 'Рисунок',
-  'Character Design': 'Дизайн персонажей',
-  'Series Composition': 'Композиция сериала',
-  Script: 'Сценарий',
-  Music: 'Музыка',
-  'Sound Director': 'Звукорежиссёр',
-  'Animation Director': 'Режиссёр анимации',
-  'Chief Animation Director': 'Главный режиссёр анимации',
-  'Assistant Director': 'Помощник режиссёра',
-  'Episode Director': 'Режиссёр эпизода',
-  'Background Art': 'Фоны',
-  'Color Design': 'Цвета',
-  Editing: 'Монтаж',
-  Producer: 'Продюсер',
-  'Executive Producer': 'Исполнительный продюсер',
-  'Theme Song Performance': 'Исполнение темы',
-  'Theme Song Composition': 'Музыка темы',
-  'Theme Song Lyrics': 'Слова темы',
-  'Theme Song Arrangement': 'Аранжировка темы',
 }
 
 const folk = ref<CharacterRef[]>([])
