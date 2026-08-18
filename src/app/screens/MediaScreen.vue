@@ -14,7 +14,7 @@ import { Logger } from '@/utils/logger'
 
 import EntrySheet from '../components/EntrySheet.vue'
 import PeopleBox from '../components/PeopleBox.vue'
-import { formatWord, partsWord as partsWordFor, statusWord } from '../labels'
+import { formatWord, genreWord, partsWord as partsWordFor, statusWord } from '../labels'
 import { mediaLinks, type MediaLink } from '../media-links'
 import { currentRoute } from '../router'
 
@@ -397,7 +397,7 @@ watch(mediaId, () => {
 
               <ul v-if="card.genres.length > 0" class="am-pills">
                 <li v-for="genre in card.genres" :key="genre" class="am-pill am-pill--soft">
-                  {{ genre }}
+                  {{ genreWord(genre) }}
                 </li>
               </ul>
             </div>
