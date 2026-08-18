@@ -11,7 +11,12 @@ import {
   type StaffCard,
 } from '@/api/anilist-person'
 import { Bridge } from '@/bridge'
-import { getRussianPerson, peekRussianPerson, type RussianPerson } from '@/core/person-title'
+import {
+  getRussianPerson,
+  getRussianPersonFull,
+  peekRussianPerson,
+  type RussianPerson,
+} from '@/core/person-title'
 import { settings } from '@/core/settings'
 
 const props = defineProps<{ start: PersonTarget }>()
@@ -196,11 +201,12 @@ function onKey(e: KeyboardEvent): void {
 /**
  * Русские имя и описание: окно они не держат, докидываются по готовности.
  * Гарда тёзок тут нет: списка тайтлов человека под рукой нет, а пара
- * имя + кандзи даёт точный балл и без него.
+ * имя + кандзи даёт точный балл и без него. Главному лицу спрашивается
+ * полная карточка: имя из списка ролей добирает описание одним запросом.
  */
 async function beginRussian(): Promise<void> {
   if (translateAllowed()) {
-    const card = await getRussianPerson(props.start.kind, props.start)
+    const card = await getRussianPersonFull(props.start.kind, props.start)
     if (!alive) return
     if (card) ruPerson.value = card
   }
