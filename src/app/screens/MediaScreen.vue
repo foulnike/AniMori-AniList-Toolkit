@@ -16,7 +16,7 @@ import EntrySheet from '../components/EntrySheet.vue'
 import PeopleBox from '../components/PeopleBox.vue'
 import { formatWord, genreWord, partsWord as partsWordFor, statusWord } from '../labels'
 import { mediaLinks, type MediaLink } from '../media-links'
-import { currentRoute } from '../router'
+import { currentRoute, navigate } from '../router'
 
 const card = ref<MediaCard | null>(null)
 const russian = ref<RussianTitle | null>(null)
@@ -327,6 +327,11 @@ function onOpen(url: string): void {
   })
 }
 
+/** Работы студии — внутренним переходом, а не внешней ссылкой. */
+function openStudio(studioId: number): void {
+  navigate('studio', { id: String(studioId) })
+}
+
 /** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
 type CardEdit =
   'status' | 'score' | 'progress' | 'volumes' | 'repeat' | 'startedAt' | 'completedAt' | 'notes'
@@ -503,6 +508,24 @@ watch(mediaId, () => {
               </p>
             </div>
           </aside>
+        </div>
+
+        <div v-if="card.studios.length > 0" class="am-panel am-studios">
+          <h3 class="am-h3">Производство</h3>
+
+          <div class="am-studios__list">
+            <button
+              v-for="studio in card.studios"
+              :key="studio.studioId"
+              class="am-studios__chip"
+              :class="{ 'am-studios__chip--main': studio.main }"
+              type="button"
+              :title="`Работы студии ${studio.name}`"
+              @click="openStudio(studio.studioId)"
+            >
+              {{ studio.name }}
+            </button>
+          </div>
         </div>
 
         <PeopleBox :media-id="mediaId" :type="card.type" />
@@ -877,6 +900,50 @@ watch(mediaId, () => {
   content: '';
   background: var(--am-warn);
   border-radius: 50%;
+}
+
+/* Производство — одна тонкая полоса под колонками: студий у тайтла мало. */
+.am-studios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.am-studios .am-h3 {
+  flex: none;
+}
+
+.am-studios__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.am-studios__chip {
+  min-height: var(--am-ctl);
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--am-text);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.am-studios__chip:hover {
+  background: var(--am-hover);
+  border-color: var(--am-accent);
+}
+
+/* Основная студия с акцентным краем: она и отвечает за постановку. */
+.am-studios__chip--main {
+  border-color: rgba(88, 166, 255, 0.45);
 }
 
 @media (max-width: 1180px) {
