@@ -131,6 +131,9 @@ const heroStyle = computed(() => {
   return { backgroundImage: `linear-gradient(120deg, ${tone}, #0b1018)` }
 })
 
+/** Есть ли запись в списке: без неё панель — одна кнопка добавления. */
+const listed = computed<boolean>(() => status.value !== '')
+
 /** Доля пройденного для полосы в сводке. */
 const doneShare = computed<number>(() => {
   const total = partsTotal.value
@@ -236,6 +239,34 @@ function dateText(value: string | null): string {
 const partsText = computed<string>(() => {
   const total = partsTotal.value
   return total === null ? String(progress.value) : `${progress.value} из ${total}`
+})
+
+/** Факт записи для плитки. */
+interface MineFact {
+  key: string
+  name: string
+  value: string
+}
+
+/**
+ * Плитки записи: рисуются только с настоящим значением. В пустом состоянии
+ * панель — это кнопка и полоса под ней, нули и прочерки не показываются.
+ */
+const mineFacts = computed<MineFact[]>(() => {
+  const list: MineFact[] = []
+  if (score10.value > 0)
+    list.push({ key: 'score', name: 'Оценка', value: scoreText(score10.value) })
+  if (progress.value > 0)
+    list.push({ key: 'parts', name: partsWord.value, value: partsText.value })
+  if (card.value?.type === 'MANGA' && volumes.value > 0)
+    list.push({ key: 'volumes', name: 'Тома', value: String(volumes.value) })
+  if (repeat.value > 0)
+    list.push({ key: 'repeat', name: repeatWord.value, value: String(repeat.value) })
+  if (startedAt.value !== null)
+    list.push({ key: 'started', name: 'Начато', value: dateText(startedAt.value) })
+  if (completedAt.value !== null)
+    list.push({ key: 'completed', name: 'Закончено', value: dateText(completedAt.value) })
+  return list
 })
 
 /** Забирает подробности и русскую карточку. Порядок важен: тип из первого ответа. */
@@ -436,42 +467,17 @@ watch(mediaId, () => {
                 {{ listLabel }}
               </button>
 
-              <div class="am-mine__bar">
+              <div v-if="listed" class="am-mine__bar">
                 <span class="am-line">
                   <span class="am-line__fill" :style="{ width: donePart }" />
                 </span>
                 <span class="am-mine__share">{{ donePart }}</span>
               </div>
 
-              <dl class="am-tiles">
-                <div class="am-tile-fact">
-                  <dt class="am-tile-fact__name">Оценка</dt>
-                  <dd class="am-tile-fact__value">{{ scoreText(score10) }}</dd>
-                </div>
-
-                <div class="am-tile-fact">
-                  <dt class="am-tile-fact__name">{{ partsWord }}</dt>
-                  <dd class="am-tile-fact__value">{{ partsText }}</dd>
-                </div>
-
-                <div v-if="card.type === 'MANGA'" class="am-tile-fact">
-                  <dt class="am-tile-fact__name">Тома</dt>
-                  <dd class="am-tile-fact__value">{{ volumes }}</dd>
-                </div>
-
-                <div class="am-tile-fact">
-                  <dt class="am-tile-fact__name">{{ repeatWord }}</dt>
-                  <dd class="am-tile-fact__value">{{ repeat }}</dd>
-                </div>
-
-                <div class="am-tile-fact">
-                  <dt class="am-tile-fact__name">Начато</dt>
-                  <dd class="am-tile-fact__value">{{ dateText(startedAt) }}</dd>
-                </div>
-
-                <div class="am-tile-fact">
-                  <dt class="am-tile-fact__name">Закончено</dt>
-                  <dd class="am-tile-fact__value">{{ dateText(completedAt) }}</dd>
+              <dl v-if="mineFacts.length > 0" class="am-tiles">
+                <div v-for="fact in mineFacts" :key="fact.key" class="am-tile-fact">
+                  <dt class="am-tile-fact__name">{{ fact.name }}</dt>
+                  <dd class="am-tile-fact__value">{{ fact.value }}</dd>
                 </div>
               </dl>
 
