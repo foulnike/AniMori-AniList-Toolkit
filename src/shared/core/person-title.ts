@@ -86,6 +86,12 @@ function stripBbcode(text: string | null): string | null {
   return clean === '' ? null : clean
 }
 
+/** Абсолютный адрес на Шикимори из ответа: домен зеркала + относительный путь. */
+function absoluteShikiUrl(domain: string | null, path: string | null): string | null {
+  if (!domain || !path) return null
+  return `https://${domain}${path}`
+}
+
 /** Полный путь для одного человека: склад, затем поиск Shikimori. */
 async function loadOne(
   kind: PersonKind,
@@ -118,7 +124,7 @@ async function loadOne(
   const card: RussianPerson = {
     russian: found.data.russian,
     description: stripBbcode(found.data.description),
-    shikiUrl: found.data.url ? `https://${found.data.domain}${found.data.url}` : null,
+    shikiUrl: absoluteShikiUrl(found.data.domain, found.data.url),
     shikiId: found.data.id,
   }
 
@@ -254,7 +260,7 @@ export async function getRussianPersonFull(
     const full: RussianPerson = {
       russian: details.russian ?? known.russian,
       description: stripBbcode(details.description),
-      shikiUrl: details.url ? `https://${details.domain}${details.url}` : known.shikiUrl,
+      shikiUrl: absoluteShikiUrl(details.domain, details.url) ?? known.shikiUrl,
       shikiId: known.shikiId,
     }
     memory.set(key, full)

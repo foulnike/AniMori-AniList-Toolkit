@@ -33,7 +33,7 @@ async function load(): Promise<Map<string, string> | null> {
   const reply = await fetchShiki<ShikiStudio[]>('/api/studios')
   if (!Array.isArray(reply.data)) return null
 
-  const base = `{{https://${reply.domain}} ?? 'shikimori.io'}`
+  const base = 'https://' + (reply.domain ?? 'shikimori.io')
   const map = new Map<string, string>()
   for (const s of reply.data) {
     if (!s || typeof s.image !== 'string' || s.image === '') continue
