@@ -10,6 +10,7 @@ import { getEntry } from '@/core/collection'
 import { queueEdit, type EntryLook } from '@/core/edit-sender'
 import { partsOut } from '@/core/media-looks'
 import { getRussianTitle, type RussianTitle } from '@/core/media-title'
+import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
 import EntrySheet from '../components/EntrySheet.vue'
@@ -25,6 +26,9 @@ const trouble = ref('')
 
 /** Открыто ли окно правки записи. */
 const sheetOpen = ref(false)
+
+/** Литографии студий с Шикимори: подставляются в чипы по готовности. */
+const logos = ref<Map<string, string> | null>(null)
 
 /** Счётчик правок этого показа: заставляет пересчитать взятое из памяти. */
 const editStamp = ref(0)
@@ -167,7 +171,10 @@ const drifted = computed<boolean>(() => {
 
 /** Описание без разметки: сервер и без HTML оставляет переносы тегом. */
 const about = computed<string>(() => {
-  const text = russian.value?.description ?? card.value?.description ?? ''
+  // Пустая строка от русского источника не гасит английский текст с AniList.
+  const ru = russian.value?.description?.trim() ?? ''
+  const en = card.value?.description?.trim() ?? ''
+  const text = ru !== '' ? ru : en
   return text
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
@@ -209,7 +216,6 @@ const facts = computed<string[]>(() => {
 
   if (found.volumes) list.push(`Тома: ${found.volumes}`)
   if (found.duration) list.push(`${found.duration} мин`)
-  if (found.averageScore !== null) list.push(`Средняя ${found.averageScore}%`)
 
   return list
 })
@@ -299,6 +305,13 @@ async function load(): Promise<void> {
     }
 
     card.value = found
+
+    // Литографии подгружаются фоном: чипы студий их не ждут.
+    if (found.studios.length > 0) {
+      void studioLogos().then((map) => {
+        if (mine === run) logos.value = map
+      })
+    }
   } catch (e) {
     if (mine !== run) return
     trouble.value = describe(e)
@@ -330,6 +343,11 @@ function onOpen(url: string): void {
 /** Работы студии — внутренним переходом, а не внешней ссылкой. */
 function openStudio(studioId: number): void {
   navigate('studio', { id: String(studioId) })
+}
+
+/** Литография студии по имени; промах — чип без картинки, это штатно. */
+function studioLogo(name: string): string | null {
+  return logos.value?.get(name.trim().toLowerCase()) ?? null
 }
 
 /** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
@@ -507,25 +525,33 @@ watch(mediaId, () => {
                 Правка сохранена и ждёт отправки на AniList.
               </p>
             </div>
+
+            <div v-if="card.studios.length > 0" class="am-studios">
+              <span class="am-studios__label">Производство</span>
+
+              <div class="am-studios__list">
+                <button
+                  v-for="studio in card.studios"
+                  :key="studio.studioId"
+                  class="am-studios__chip"
+                  :class="{ 'am-studios__chip--main': studio.main }"
+                  type="button"
+                  :title="`Работы студии ${studio.name}`"
+                  @click="openStudio(studio.studioId)"
+                >
+                  <img
+                    v-if="studioLogo(studio.name)"
+                    class="am-studios__logo"
+                    :src="studioLogo(studio.name)!"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  {{ studio.name }}
+                </button>
+              </div>
+            </div>
           </aside>
-        </div>
-
-        <div v-if="card.studios.length > 0" class="am-panel am-studios">
-          <h3 class="am-h3">Производство</h3>
-
-          <div class="am-studios__list">
-            <button
-              v-for="studio in card.studios"
-              :key="studio.studioId"
-              class="am-studios__chip"
-              :class="{ 'am-studios__chip--main': studio.main }"
-              type="button"
-              :title="`Работы студии ${studio.name}`"
-              @click="openStudio(studio.studioId)"
-            >
-              {{ studio.name }}
-            </button>
-          </div>
         </div>
 
         <PeopleBox :media-id="mediaId" :type="card.type" />
@@ -902,16 +928,16 @@ watch(mediaId, () => {
   border-radius: 50%;
 }
 
-/* Производство — одна тонкая полоса под колонками: студий у тайтла мало. */
+/* Производство — блок в колонке записи: студий у тайтла мало. */
 .am-studios {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.am-studios .am-h3 {
-  flex: none;
+.am-studios__label {
+  font-size: 12.5px;
+  color: var(--am-faint);
 }
 
 .am-studios__list {
@@ -921,8 +947,11 @@ watch(mediaId, () => {
 }
 
 .am-studios__chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
   min-height: var(--am-ctl);
-  padding: 6px 16px;
+  padding: 6px 14px;
   font: inherit;
   font-size: 13px;
   font-weight: 550;
@@ -944,6 +973,12 @@ watch(mediaId, () => {
 /* Основная студия с акцентным краем: она и отвечает за постановку. */
 .am-studios__chip--main {
   border-color: rgba(88, 166, 255, 0.45);
+}
+
+.am-studios__logo {
+  height: 16px;
+  max-width: 32px;
+  object-fit: contain;
 }
 
 @media (max-width: 1180px) {
