@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Окошко персонажа или автора поверх основного интерфейса (пункт 3.9б).
 // Русские имя и описание докидываются фоном из person-title.ts (пункт 3.9а).
+// Сэйю открывается в том же окне со стеком назад: башня затемнений не нужна.
 import { onBeforeUnmount, onMounted, ref, shallowReactive } from 'vue'
 
 import {
@@ -37,12 +38,24 @@ interface DescPart {
   url: string | null
 }
 
+/** Кто показан сейчас: из окна персонажа можно шагнуть в карточку сэйю. */
+const current = ref<PersonTarget>(props.start)
+
+/** Цепочка «персонаж → сэйю» для кнопки «Назад» внутри окна. */
+const history: PersonTarget[] = []
+
+/** Глубина цепочки реактивно: шаблон читает только её. */
+const depth = ref(0)
+
 const charCard = ref<CharacterCard | null>(null)
 const staffCard = ref<StaffCard | null>(null)
 const busy = ref(true)
 const expanded = ref(false)
 
-/** Русская карточка человека: имя, описание и ссылка на Shikimori. */
+/** Коробка окна: при переходе к сэйю её прокрутка возвращается наверх. */
+const box = ref<HTMLElement | null>(null)
+
+/** Русская карточка человека: имя и описание. */
 const ruPerson = ref<RussianPerson | null>(null)
 
 /** Русские имена сэйю по их номерам: подставляются по готовности. */
@@ -51,16 +64,19 @@ const ruVoices = shallowReactive(new Map<number, string>())
 /** Окно на экране: закрытое окно очередь не продолжает. */
 let alive = true
 
+/** Номер показа: ответ на прежнего человека приходит уже не к месту. */
+let run = 0
+
 /** Разрешён ли русский проход для этого человека настройками. */
 function translateAllowed(): boolean {
-  return props.start.kind === 'character' ? settings.translateCharacters : settings.translateStaff
+  return current.value.kind === 'character' ? settings.translateCharacters : settings.translateStaff
 }
 
 /** Описание из загруженных данных. Русское, когда есть, важнее английского. */
 function rawDesc(): string {
   if (ruPerson.value?.description) return ruPerson.value.description
   return (
-    (props.start.kind === 'character'
+    (current.value.kind === 'character'
       ? charCard.value?.description
       : staffCard.value?.description) ?? ''
   )
@@ -93,23 +109,23 @@ function descParts(): DescPart[] {
 }
 
 function fullName(): string {
-  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
-  return card?.name.full ?? props.start.name
+  const card = current.value.kind === 'character' ? charCard.value : staffCard.value
+  return card?.name.full ?? current.value.name
 }
 
 function nativeName(): string | null {
-  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
-  return card?.name.native ?? props.start.native ?? null
+  const card = current.value.kind === 'character' ? charCard.value : staffCard.value
+  return card?.name.native ?? current.value.native ?? null
 }
 
 function altNames(): string[] {
-  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
+  const card = current.value.kind === 'character' ? charCard.value : staffCard.value
   return card?.name.alternative?.filter((n) => n.trim() !== '') ?? []
 }
 
 function largeImage(): string | null {
-  const card = props.start.kind === 'character' ? charCard.value : staffCard.value
-  return card?.image?.large ?? props.start.image ?? null
+  const card = current.value.kind === 'character' ? charCard.value : staffCard.value
+  return card?.image?.large ?? current.value.image ?? null
 }
 
 const MONTHS_RU = [
@@ -185,19 +201,16 @@ function openLink(url: string): void {
 }
 
 function openSite(): void {
-  const url = props.start.siteUrl
+  const url = current.value.siteUrl
   if (url === null) return
   Bridge.shell.openExternal(url).catch(() => {})
 }
 
-function openShiki(): void {
-  const url = ruPerson.value?.shikiUrl
-  if (!url) return
-  Bridge.shell.openExternal(url).catch(() => {})
-}
-
 function onKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') emit('close')
+  if (e.key !== 'Escape') return
+  // Escape идёт на шаг назад по цепочке, а окно закрывает только в корне.
+  if (depth.value > 0) goBackPerson()
+  else emit('close')
 }
 
 /**
@@ -206,16 +219,16 @@ function onKey(e: KeyboardEvent): void {
  * имя + кандзи даёт точный балл и без него. Главному лицу спрашивается
  * полная карточка: имя из списка ролей добирает описание одним запросом.
  */
-async function beginRussian(): Promise<void> {
+async function beginRussian(mine: number, target: PersonTarget): Promise<void> {
   if (translateAllowed()) {
-    const card = await getRussianPersonFull(props.start.kind, props.start)
-    if (!alive) return
+    const card = await getRussianPersonFull(target.kind, target)
+    if (!alive || mine !== run) return
     if (card) ruPerson.value = card
   }
 
   if (settings.translateStaff) {
     for (const va of voiceActors()) {
-      if (!alive) return
+      if (!alive || mine !== run) return
       const found = await getRussianPerson('staff', {
         personId: va.id,
         name: va.name.full,
@@ -223,28 +236,61 @@ async function beginRussian(): Promise<void> {
         image: va.image?.large ?? va.image?.medium ?? null,
         siteUrl: va.siteUrl,
       })
-      if (!alive) return
+      if (!alive || mine !== run) return
       if (found) ruVoices.set(va.id, found.russian)
     }
   }
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', onKey)
+/** Показ человека: сброс прошлого, карточка с сервера, русский проход фоном. */
+async function load(target: PersonTarget): Promise<void> {
+  const mine = ++run
+  current.value = target
+  charCard.value = null
+  staffCard.value = null
+  ruVoices.clear()
+  expanded.value = false
+  busy.value = true
+  box.value?.scrollTo({ top: 0 })
 
   // Известное с прошлого показа подставляется сразу, сеть не ждётся.
-  if (translateAllowed()) {
-    ruPerson.value = peekRussianPerson(props.start.kind, props.start.personId)
-  }
+  ruPerson.value = translateAllowed() ? peekRussianPerson(target.kind, target.personId) : null
 
-  if (props.start.kind === 'character') {
-    charCard.value = await fetchCharacterCard(props.start.personId)
+  if (target.kind === 'character') {
+    charCard.value = await fetchCharacterCard(target.personId)
   } else {
-    staffCard.value = await fetchStaffCard(props.start.personId)
+    staffCard.value = await fetchStaffCard(target.personId)
   }
+  if (!alive || mine !== run) return
   busy.value = false
 
-  void beginRussian()
+  void beginRussian(mine, target)
+}
+
+/** Переход к сэйю в том же окне: второй слой затемнения не нужен. */
+function openVoice(va: VoiceActor): void {
+  history.push(current.value)
+  depth.value = history.length
+  void load({
+    kind: 'staff',
+    personId: va.id,
+    name: va.name.full,
+    native: va.name.native,
+    image: va.image?.large ?? va.image?.medium ?? null,
+    siteUrl: va.siteUrl,
+  })
+}
+
+/** Шаг назад по цепочке «персонаж → сэйю». */
+function goBackPerson(): void {
+  const prev = history.pop()
+  depth.value = history.length
+  if (prev) void load(prev)
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKey)
+  void load(props.start)
 })
 
 onBeforeUnmount(() => {
@@ -255,7 +301,16 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="am-sheet" role="dialog" aria-modal="true" @click.self="emit('close')">
-    <div class="am-sheet__box">
+    <div ref="box" class="am-sheet__box">
+      <button
+        v-if="depth > 0"
+        class="am-btn am-btn--ghost am-ps-back"
+        type="button"
+        @click="goBackPerson"
+      >
+        ← Назад
+      </button>
+
       <!-- Шапка -->
       <div class="am-ps-top">
         <div class="am-ps-portrait">
@@ -280,7 +335,7 @@ onBeforeUnmount(() => {
           </p>
 
           <!-- Стафф: занятия, язык, город -->
-          <template v-if="start.kind === 'staff' && staffCard">
+          <template v-if="current.kind === 'staff' && staffCard">
             <p v-if="staffCard.primaryOccupations?.length" class="am-dim am-ps-names__occ">
               {{ staffCard.primaryOccupations.map(occupationWord).join(', ') }}
             </p>
@@ -297,7 +352,7 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Персонаж: пол, возраст, дата рождения -->
-          <template v-if="start.kind === 'character' && charCard">
+          <template v-if="current.kind === 'character' && charCard">
             <p v-if="charCard.gender || charCard.age" class="am-dim">
               <template v-if="charCard.gender">{{ genderWord(charCard.gender) }}</template
               ><template v-if="charCard.gender && charCard.age"> · </template
@@ -339,11 +394,18 @@ onBeforeUnmount(() => {
           Показать полностью
         </button>
 
-        <!-- Сэйю (только для персонажей) -->
-        <template v-if="start.kind === 'character' && voiceActors().length">
+        <!-- Сэйю (только для персонажей): строка кликабельна, окно то же -->
+        <template v-if="current.kind === 'character' && voiceActors().length">
           <h4 class="am-ps-sub">Голоса</h4>
           <div class="am-ps-voices">
-            <div v-for="va in voiceActors()" :key="va.id" class="am-ps-va">
+            <button
+              v-for="va in voiceActors()"
+              :key="va.id"
+              class="am-ps-va"
+              type="button"
+              :title="`Карточка: ${va.name.full}`"
+              @click="openVoice(va)"
+            >
               <img
                 v-if="va.image?.medium || va.image?.large"
                 class="am-ps-va__art"
@@ -356,22 +418,14 @@ onBeforeUnmount(() => {
                 {{ va.name.full.slice(0, 1) }}
               </span>
               <span class="am-ps-va__name">{{ vaName(va) }}</span>
-            </div>
+            </button>
           </div>
         </template>
       </template>
 
       <!-- Футер -->
-      <div v-if="start.siteUrl || ruPerson?.shikiUrl" class="am-sheet__foot">
-        <button
-          v-if="ruPerson?.shikiUrl"
-          class="am-btn am-btn--ghost"
-          type="button"
-          @click="openShiki()"
-        >
-          Открыть на Shikimori
-        </button>
-        <button v-if="start.siteUrl" class="am-btn am-btn--ghost" type="button" @click="openSite()">
+      <div v-if="current.siteUrl" class="am-sheet__foot">
+        <button class="am-btn am-btn--ghost" type="button" @click="openSite()">
           Открыть на AniList
         </button>
       </div>
@@ -433,6 +487,11 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   padding-top: 4px;
   border-top: 1px solid var(--am-line-soft);
+}
+
+/* Шаг назад по цепочке «персонаж → сэйю»: сидит над шапкой слева. */
+.am-ps-back {
+  align-self: flex-start;
 }
 
 /* Шапка */
@@ -536,13 +595,32 @@ onBeforeUnmount(() => {
 .am-ps-voices {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
+/* Строка сэйю — кнопка: из неё открывается его карточка в этом же окне. */
 .am-ps-va {
   display: flex;
   gap: 10px;
   align-items: center;
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--am-r-m);
+}
+
+.am-ps-va:hover,
+.am-ps-va:focus-visible {
+  background: var(--am-hover);
+}
+
+.am-ps-va:hover .am-ps-va__name {
+  color: var(--am-accent);
 }
 
 .am-ps-va__art {

@@ -118,7 +118,7 @@ async function loadOne(
   const card: RussianPerson = {
     russian: found.data.russian,
     description: stripBbcode(found.data.description),
-    shikiUrl: found.data.url ? `{{https://${found.data.domain}}}${found.data.url}` : null,
+    shikiUrl: found.data.url ? `https://${found.data.domain}${found.data.url}` : null,
     shikiId: found.data.id,
   }
 
@@ -254,7 +254,7 @@ export async function getRussianPersonFull(
     const full: RussianPerson = {
       russian: details.russian ?? known.russian,
       description: stripBbcode(details.description),
-      shikiUrl: details.url ? `{{https://${details.domain}}}${details.url}` : known.shikiUrl,
+      shikiUrl: details.url ? `https://${details.domain}${details.url}` : known.shikiUrl,
       shikiId: known.shikiId,
     }
     memory.set(key, full)
