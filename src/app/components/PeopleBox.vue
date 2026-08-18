@@ -45,7 +45,7 @@ const shown = ref<PersonTarget | null>(null)
 /** Номер показа: ответ на прежний тайтл приходит уже не к месту. */
 let run = 0
 
-/** Русские имена, добытные фоном: ключ — `${kind}:${personId}`. */
+/** Русские имена, добытые фоном: ключ — `${kind}:${personId}`. */
 const russian = shallowReactive(new Map<string, RussianPerson>())
 
 const shownCrew = computed<StaffRef[]>(() =>
@@ -292,6 +292,12 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Общая полка растягивает треки на всю ширину: при горсти лиц это разнос.
+   Трек фиксированный — лица жмутся влево. */
+.am-folk .am-rail {
+  grid-auto-columns: 132px;
 }
 
 /* Персонажи полкой, а не сеткой: их бывает два десятка, и сетка
