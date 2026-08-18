@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Окошко персонажа или автора поверх основного интерфейса (пункт 3.9б).
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+// Русские имя и описание докидываются фоном из person-title.ts (пункт 3.9а).
+import { onBeforeUnmount, onMounted, ref, shallowReactive } from 'vue'
 
 import {
   fetchCharacterCard,
@@ -10,6 +11,8 @@ import {
   type StaffCard,
 } from '@/api/anilist-person'
 import { Bridge } from '@/bridge'
+import { getRussianPerson, peekRussianPerson, type RussianPerson } from '@/core/person-title'
+import { settings } from '@/core/settings'
 
 const props = defineProps<{ start: PersonTarget }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -32,8 +35,23 @@ const staffCard = ref<StaffCard | null>(null)
 const busy = ref(true)
 const expanded = ref(false)
 
-/** Описание из загруженных данных. */
+/** Русская карточка человека: имя, описание и ссылка на Shikimori. */
+const ruPerson = ref<RussianPerson | null>(null)
+
+/** Русские имена сэйю по их номерам: подставляются по готовности. */
+const ruVoices = shallowReactive(new Map<number, string>())
+
+/** Окно на экране: закрытое окно очередь не продолжает. */
+let alive = true
+
+/** Разрешён ли русский проход для этого человека настройками. */
+function translateAllowed(): boolean {
+  return props.start.kind === 'character' ? settings.translateCharacters : settings.translateStaff
+}
+
+/** Описание из загруженных данных. Русское, когда есть, важнее английского. */
 function rawDesc(): string {
+  if (ruPerson.value?.description) return ruPerson.value.description
   return (
     (props.start.kind === 'character'
       ? charCard.value?.description
@@ -150,6 +168,11 @@ function voiceActors(): VoiceActor[] {
   return out.slice(0, 6)
 }
 
+/** Имя сэйю: русское, когда фон уже добыл. */
+function vaName(va: VoiceActor): string {
+  return ruVoices.get(va.id) ?? va.name.full
+}
+
 function openLink(url: string): void {
   Bridge.shell.openExternal(url).catch(() => {})
 }
@@ -160,21 +183,64 @@ function openSite(): void {
   Bridge.shell.openExternal(url).catch(() => {})
 }
 
+function openShiki(): void {
+  const url = ruPerson.value?.shikiUrl
+  if (!url) return
+  Bridge.shell.openExternal(url).catch(() => {})
+}
+
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') emit('close')
 }
 
+/**
+ * Русские имя и описание: окно они не держат, докидываются по готовности.
+ * Гарда тёзок тут нет: списка тайтлов человека под рукой нет, а пара
+ * имя + кандзи даёт точный балл и без него.
+ */
+async function beginRussian(): Promise<void> {
+  if (translateAllowed()) {
+    const card = await getRussianPerson(props.start.kind, props.start)
+    if (!alive) return
+    if (card) ruPerson.value = card
+  }
+
+  if (settings.translateStaff) {
+    for (const va of voiceActors()) {
+      if (!alive) return
+      const found = await getRussianPerson('staff', {
+        personId: va.id,
+        name: va.name.full,
+        native: va.name.native,
+        image: va.image?.large ?? va.image?.medium ?? null,
+        siteUrl: va.siteUrl,
+      })
+      if (!alive) return
+      if (found) ruVoices.set(va.id, found.russian)
+    }
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
+
+  // Известное с прошлого показа подставляется сразу, сеть не ждётся.
+  if (translateAllowed()) {
+    ruPerson.value = peekRussianPerson(props.start.kind, props.start.personId)
+  }
+
   if (props.start.kind === 'character') {
     charCard.value = await fetchCharacterCard(props.start.personId)
   } else {
     staffCard.value = await fetchStaffCard(props.start.personId)
   }
   busy.value = false
+
+  void beginRussian()
 })
 
 onBeforeUnmount(() => {
+  alive = false
   window.removeEventListener('keydown', onKey)
 })
 </script>
@@ -199,6 +265,7 @@ onBeforeUnmount(() => {
 
         <div class="am-ps-names">
           <p class="am-ps-names__full">{{ fullName() }}</p>
+          <p v-if="ruPerson" class="am-ps-names__russian">{{ ruPerson.russian }}</p>
           <p v-if="nativeName()" class="am-ps-names__native">{{ nativeName() }}</p>
           <p v-if="altNames().length" class="am-ps-names__alt">
             {{ altNames().join(' · ') }}
@@ -280,15 +347,23 @@ onBeforeUnmount(() => {
               <span v-else class="am-ps-va__art am-ps-va__art--empty" aria-hidden="true">
                 {{ va.name.full.slice(0, 1) }}
               </span>
-              <span class="am-ps-va__name">{{ va.name.full }}</span>
+              <span class="am-ps-va__name">{{ vaName(va) }}</span>
             </div>
           </div>
         </template>
       </template>
 
       <!-- Футер -->
-      <div v-if="start.siteUrl" class="am-sheet__foot">
-        <button class="am-btn am-btn--ghost" type="button" @click="openSite()">
+      <div v-if="start.siteUrl || ruPerson?.shikiUrl" class="am-sheet__foot">
+        <button
+          v-if="ruPerson?.shikiUrl"
+          class="am-btn am-btn--ghost"
+          type="button"
+          @click="openShiki()"
+        >
+          Открыть на Shikimori
+        </button>
+        <button v-if="start.siteUrl" class="am-btn am-btn--ghost" type="button" @click="openSite()">
           Открыть на AniList
         </button>
       </div>
@@ -346,6 +421,7 @@ onBeforeUnmount(() => {
 
 .am-sheet__foot {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
   padding-top: 4px;
   border-top: 1px solid var(--am-line-soft);
@@ -397,6 +473,12 @@ onBeforeUnmount(() => {
   font-size: 18px;
   font-weight: 700;
   line-height: 1.25;
+}
+
+/* Русское имя читается первым по смыслу, поэтому ярче оригинала. */
+.am-ps-names__russian {
+  font-size: 14px;
+  color: var(--am-text);
 }
 
 .am-ps-names__native {

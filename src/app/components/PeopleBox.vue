@@ -1,10 +1,13 @@
 <script setup lang="ts">
 // Пункт 3.9: люди тайтла под двумя колонками карточки. Добыча своя:
 // ответ тяжелее карточки, и ждать его сверху экрана незачем.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
 
+import { fetchMalIds } from '@/api/anilist-media'
 import { fetchMediaPeople, type CharacterRef, type PersonRef, type StaffRef } from '@/api/anilist-people'
 import type { PersonTarget } from '@/api/anilist-person'
+import { getRussianPerson, type PersonKind, type RussianPerson } from '@/core/person-title'
+import { settings } from '@/core/settings'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
@@ -36,6 +39,9 @@ const shown = ref<PersonTarget | null>(null)
 /** Номер показа: ответ на прежний тайтл приходит уже не к месту. */
 let run = 0
 
+/** Русские имена, добытные фоном: ключ — `${kind}:${personId}`. */
+const russian = shallowReactive(new Map<string, RussianPerson>())
+
 const shownCrew = computed<StaffRef[]>(() =>
   wide.value ? crew.value : crew.value.slice(0, STAFF_HEAD),
 )
@@ -66,6 +72,15 @@ function letter(name: string): string {
   return name.slice(0, 1).toUpperCase()
 }
 
+function personKey(kind: PersonKind, personId: number): string {
+  return `${kind}:${personId}`
+}
+
+/** Имя для плитки: русское, когда фон уже добыл. */
+function displayName(kind: PersonKind, person: PersonRef): string {
+  return russian.get(personKey(kind, person.personId))?.russian ?? person.name
+}
+
 async function load(): Promise<void> {
   const mine = ++run
 
@@ -84,11 +99,47 @@ async function load(): Promise<void> {
 
     folk.value = found.characters
     crew.value = found.staff
+    void beginRussian(mine)
   } catch (e) {
     // Без людей карточка полноценна, поэтому секция просто не появится.
     Logger('WARN', `Люди тайтла ${props.mediaId}: добыть не вышло`, e)
   } finally {
     if (mine === run) busy.value = false
+  }
+}
+
+/**
+ * Фоновый проход по русским именам: герои и авторы первыми, сэйю в хвост.
+ * Идёт по одному: веер запросов упрётся в темп Шикимори. Уход с тайтла
+ * обрывает очередь тем же номером показа, что и основная добыча.
+ */
+async function beginRussian(mine: number): Promise<void> {
+  const queue: Array<{ kind: PersonKind; person: PersonRef }> = []
+  if (settings.translateCharacters) {
+    for (const person of folk.value) queue.push({ kind: 'character', person })
+  }
+  if (settings.translateStaff) {
+    for (const person of crew.value) queue.push({ kind: 'staff', person })
+    for (const person of folk.value) {
+      if (person.voice) queue.push({ kind: 'staff', person: person.voice })
+    }
+  }
+  if (queue.length === 0) return
+
+  // MAL id текущего тайтла: гард тёзок у поиска Шикимори.
+  let guard: number[] = []
+  try {
+    const malId = (await fetchMalIds([props.mediaId], props.type)).get(props.mediaId)
+    if (malId) guard = [malId]
+  } catch (e) {
+    Logger('WARN', `Русские имена: MAL id тайтла ${props.mediaId} не добыт`, e)
+  }
+
+  for (const entry of queue) {
+    if (mine !== run) return
+    const card = await getRussianPerson(entry.kind, entry.person, guard)
+    if (mine !== run) return
+    if (card) russian.set(personKey(entry.kind, entry.person.personId), card)
   }
 }
 
@@ -141,7 +192,7 @@ watch(
               {{ letter(person.name) }}
             </span>
 
-            <span class="am-face__name">{{ person.name }}</span>
+            <span class="am-face__name">{{ displayName('character', person) }}</span>
             <span v-if="roleWord(person.role)" class="am-face__role">
               {{ roleWord(person.role) }}
             </span>
@@ -155,7 +206,7 @@ watch(
             :title="person.voice.native ?? person.voice.name"
             @click="onShow('staff', person.voice)"
           >
-            {{ person.voice.name }}
+            {{ displayName('staff', person.voice) }}
           </button>
         </article>
       </div>
@@ -197,7 +248,7 @@ watch(
           </span>
 
           <span class="am-mate__text">
-            <span class="am-mate__name">{{ person.name }}</span>
+            <span class="am-mate__name">{{ displayName('staff', person) }}</span>
             <span v-if="crewWord(person.role)" class="am-mate__role">
               {{ crewWord(person.role) }}
             </span>
