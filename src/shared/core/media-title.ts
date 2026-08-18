@@ -9,8 +9,8 @@ import { resolveTitle } from '../api/titles'
 import { Logger } from '../utils/logger'
 import type { MediaType, ShikiCacheRecord } from './types'
 
-/** Префикс ключа на складе. Цифра — версия формы записи, а не номер источника. */
-const KEY_PREFIX = 'RU1_'
+/** Префикс ключа на складе. Цифра — версия формы записи: RU2 — описания без BBcode. */
+const KEY_PREFIX = 'RU2_'
 
 /** Готовая русская карточка тайтла. */
 export interface RussianTitle {

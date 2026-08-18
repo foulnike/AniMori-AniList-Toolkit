@@ -15,6 +15,24 @@ export interface ResolvedTitle {
   sourceName: string
 }
 
+/** Описание с Шикимори приходит с BBcode: теги выкидываются, текст остаётся. */
+function stripBbcode(text: string | null): string | null {
+  if (!text) return null
+
+  // Парные теги вида [character=123]...[/character]: содержимое остаётся,
+  // прогон до неподвижной точки снимает вложенность.
+  let clean = text
+  const pair = /\[([a-z][a-z0-9]*)(?:=[^\]]*)?\]([\s\S]*?)\[\/\1\]/gi
+  let prev = ''
+  while (prev !== clean) {
+    prev = clean
+    clean = clean.replace(pair, '$2')
+  }
+
+  clean = clean.replace(/\[\/?[a-z][a-z0-9]*(?:=[^\]]*)?\]/gi, '').trim()
+  return clean === '' ? null : clean
+}
+
 /** Резолвит русское название и описание по цепочке источников. */
 export async function resolveTitle(
   malId: number | null,
@@ -32,7 +50,7 @@ export async function resolveTitle(
       if (shiki.data?.russian) {
         return {
           russian: shiki.data.russian,
-          description: shiki.data.description ?? null,
+          description: stripBbcode(shiki.data.description ?? null),
           url: 'https://' + (shiki.domain ?? '') + (shiki.data.url ?? ''),
           sourceName: 'Shikimori',
         }
@@ -42,7 +60,7 @@ export async function resolveTitle(
       if (a?.russian) {
         return {
           russian: a.russian,
-          description: a.description,
+          description: stripBbcode(a.description),
           url: a.url,
           sourceName: 'anime365',
         }
