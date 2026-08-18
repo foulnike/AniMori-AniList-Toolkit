@@ -1,6 +1,6 @@
-// Соответствие номеров AniList и MyAnimeList, подробности тайтла и поиск.
-// Отдельно от anilist-list.ts: там записи пользователя, здесь сами тайтлы.
-// Запрос номеров пакетный: вся коллекция поодиночке сожгла бы темп целиком.
+// Соответствие номеров AniList и MyAnimeList, подробности тайтла, поиск
+// и работы студий. Отдельно от anilist-list.ts: там записи пользователя,
+// здесь сами тайтлы. Запрос номеров пакетный: поодиночке темп сгорит.
 
 import type { MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
@@ -58,6 +58,15 @@ const CARD_QUERY = `query ($id: Int!) {
       extraLarge
       large
       color
+    }
+    studios {
+      edges {
+        isMain
+        node {
+          id
+          name
+        }
+      }
     }
     mediaListEntry {
       status
@@ -126,6 +135,47 @@ const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $per
   }
 }`
 
+// Работы студии для её экрана. Запись хозяина не просится: свои метки
+// плитка ставит по памяти, а ответ с mediaListEntry тяжелеет зазря.
+const STUDIO_QUERY = `query ($id: Int!, $page: Int!, $perPage: Int!) {
+  Studio(id: $id) {
+    id
+    name
+    media(page: $page, perPage: $perPage, sort: POPULARITY_DESC) {
+      pageInfo {
+        hasNextPage
+        total
+      }
+      nodes {
+        id
+        idMal
+        type
+        format
+        status
+        episodes
+        chapters
+        seasonYear
+        averageScore
+        isAdult
+        nextAiringEpisode {
+          episode
+          airingAt
+        }
+        title {
+          romaji
+          english
+          native
+        }
+        coverImage {
+          large
+          medium
+          color
+        }
+      }
+    }
+  }
+}`
+
 interface MalReply {
   Page?: {
     media?: Array<{ id?: number; idMal?: number | null } | null> | null
@@ -156,6 +206,30 @@ interface OwnReply {
   completedAt?: FuzzyReply | null
 }
 
+/** Край связи со студией: основная отмечена у самого края. */
+interface StudioEdgeReply {
+  isMain?: boolean | null
+  node?: { id?: number; name?: string | null } | null
+}
+
+/** Выписка тайтла в ответе: одна форма у поиска и у списка работ студии. */
+interface BriefReply {
+  id?: number
+  idMal?: number | null
+  type?: string | null
+  format?: string | null
+  status?: string | null
+  episodes?: number | null
+  chapters?: number | null
+  seasonYear?: number | null
+  averageScore?: number | null
+  isAdult?: boolean | null
+  nextAiringEpisode?: AiringReply | null
+  title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
+  coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
+  mediaListEntry?: OwnReply | null
+}
+
 interface CardReply {
   Media?: {
     id?: number
@@ -181,6 +255,7 @@ interface CardReply {
       large?: string | null
       color?: string | null
     } | null
+    studios?: { edges?: Array<StudioEdgeReply | null> | null } | null
     mediaListEntry?: OwnReply | null
   } | null
 }
@@ -188,22 +263,18 @@ interface CardReply {
 interface SearchReply {
   Page?: {
     pageInfo?: { hasNextPage?: boolean | null; total?: number | null } | null
-    media?: Array<{
-      id?: number
-      idMal?: number | null
-      type?: string | null
-      format?: string | null
-      status?: string | null
-      episodes?: number | null
-      chapters?: number | null
-      seasonYear?: number | null
-      averageScore?: number | null
-      isAdult?: boolean | null
-      nextAiringEpisode?: AiringReply | null
-      title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
-      coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
-      mediaListEntry?: OwnReply | null
-    } | null> | null
+    media?: Array<BriefReply | null> | null
+  } | null
+}
+
+interface StudioReply {
+  Studio?: {
+    id?: number
+    name?: string | null
+    media?: {
+      pageInfo?: { hasNextPage?: boolean | null; total?: number | null } | null
+      nodes?: Array<BriefReply | null> | null
+    } | null
   } | null
 }
 
@@ -223,6 +294,14 @@ export interface ServerEntry {
   startedAt: string | null
   completedAt: string | null
   notes: string | null
+}
+
+/** Студия тайтла: номер нужен переходу к её работам внутри приложения. */
+export interface StudioRef {
+  studioId: number
+  name: string
+  /** Основная студия производства по классификации сервера. */
+  main: boolean
 }
 
 /**
@@ -257,6 +336,8 @@ export interface MediaCard {
   airingEpisode: number | null
   /** Срок выхода той серии в секундах. */
   airingAt: number | null
+  /** Студии тайтла, основная первой. У манги список почти всегда пуст. */
+  studios: StudioRef[]
   /** Запись в списке хозяина или `null`, если тайтл в списке не числится. */
   ownEntry: ServerEntry | null
 }
@@ -291,6 +372,14 @@ export interface MediaBrief {
 
 /** Страница находок. Общего числа у AniList может и не быть — тогда `null`. */
 export interface SearchPage {
+  items: MediaBrief[]
+  hasNext: boolean
+  total: number | null
+}
+
+/** Страница работ студии для её экрана. */
+export interface StudioPage {
+  name: string
   items: MediaBrief[]
   hasNext: boolean
   total: number | null
@@ -377,6 +466,48 @@ function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
   }
 }
 
+/** Студии из ответа: безымянные и битые отброшены, основная едет первой. */
+function readStudios(edges: Array<StudioEdgeReply | null> | null | undefined): StudioRef[] {
+  if (!Array.isArray(edges)) return []
+
+  const studios: StudioRef[] = []
+  for (const edge of edges) {
+    if (!edge?.node || typeof edge.node.id !== 'number') continue
+    const name = textOrNull(edge.node.name)
+    if (name === null) continue
+    studios.push({ studioId: edge.node.id, name, main: edge.isMain === true })
+  }
+
+  studios.sort((a, b) => Number(b.main) - Number(a.main))
+  return studios
+}
+
+/** Выписка сервера в объект показа или `null`, если запись битая. */
+function briefOrNull(item: BriefReply | null | undefined): MediaBrief | null {
+  if (!item || typeof item.id !== 'number') return null
+
+  return {
+    mediaId: item.id,
+    malId: countOrNull(item.idMal),
+    type: item.type === 'MANGA' ? 'MANGA' : 'ANIME',
+    format: textOrNull(item.format),
+    status: textOrNull(item.status),
+    episodes: countOrNull(item.episodes),
+    chapters: countOrNull(item.chapters),
+    seasonYear: countOrNull(item.seasonYear),
+    averageScore: countOrNull(item.averageScore),
+    isAdult: item.isAdult === true,
+    romaji: textOrNull(item.title?.romaji),
+    english: textOrNull(item.title?.english),
+    native: textOrNull(item.title?.native),
+    cover: textOrNull(item.coverImage?.large) ?? textOrNull(item.coverImage?.medium),
+    color: textOrNull(item.coverImage?.color),
+    airingEpisode: countOrNull(item.nextAiringEpisode?.episode),
+    airingAt: countOrNull(item.nextAiringEpisode?.airingAt),
+    ownEntry: ownOrNull(item.mediaListEntry),
+  }
+}
+
 /**
  * Подробности одного тайтла и запись хозяина в нём. Запрос идёт с ключом:
  * без входа сервер отдаст тайтл, но про запись ответит пустотой.
@@ -418,6 +549,7 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     color: textOrNull(media.coverImage?.color),
     airingEpisode: countOrNull(media.nextAiringEpisode?.episode),
     airingAt: countOrNull(media.nextAiringEpisode?.airingAt),
+    studios: readStudios(media.studios?.edges),
     ownEntry: ownOrNull(media.mediaListEntry),
   }
 }
@@ -448,28 +580,8 @@ export async function searchMedia(
 
   const items: MediaBrief[] = []
   for (const item of found.media) {
-    if (!item || typeof item.id !== 'number') continue
-
-    items.push({
-      mediaId: item.id,
-      malId: countOrNull(item.idMal),
-      type: item.type === 'MANGA' ? 'MANGA' : 'ANIME',
-      format: textOrNull(item.format),
-      status: textOrNull(item.status),
-      episodes: countOrNull(item.episodes),
-      chapters: countOrNull(item.chapters),
-      seasonYear: countOrNull(item.seasonYear),
-      averageScore: countOrNull(item.averageScore),
-      isAdult: item.isAdult === true,
-      romaji: textOrNull(item.title?.romaji),
-      english: textOrNull(item.title?.english),
-      native: textOrNull(item.title?.native),
-      cover: textOrNull(item.coverImage?.large) ?? textOrNull(item.coverImage?.medium),
-      color: textOrNull(item.coverImage?.color),
-      airingEpisode: countOrNull(item.nextAiringEpisode?.episode),
-      airingAt: countOrNull(item.nextAiringEpisode?.airingAt),
-      ownEntry: ownOrNull(item.mediaListEntry),
-    })
+    const brief = briefOrNull(item)
+    if (brief) items.push(brief)
   }
 
   Logger('API', `Поиск «${asked}»: страница ${page}, нашлось ${items.length}`)
@@ -478,5 +590,38 @@ export async function searchMedia(
     items,
     hasNext: found.pageInfo?.hasNextPage === true,
     total: countOrNull(found.pageInfo?.total),
+  }
+}
+
+/** Работы студии по популярности, страницами. Подпись не нужна: всё публичное. */
+export async function fetchStudioWorks(studioId: number, page = 1): Promise<StudioPage | null> {
+  const reply = await anilistQuery<StudioReply>(STUDIO_QUERY, {
+    id: studioId,
+    page,
+    perPage: SEARCH_PAGE_SIZE,
+  })
+
+  const studio = reply.data?.Studio
+  if (!studio || typeof studio.id !== 'number') {
+    Logger('WARN', `Студия ${studioId}: сервер её не назвал`, reply.errors)
+    return null
+  }
+
+  const items: MediaBrief[] = []
+  const nodes = studio.media?.nodes
+  if (Array.isArray(nodes)) {
+    for (const node of nodes) {
+      const brief = briefOrNull(node)
+      if (brief) items.push(brief)
+    }
+  }
+
+  Logger('API', `Студия ${studioId}: страница ${page}, работ ${items.length}`)
+
+  return {
+    name: textOrNull(studio.name) ?? `Студия #${studioId}`,
+    items,
+    hasNext: studio.media?.pageInfo?.hasNextPage === true,
+    total: countOrNull(studio.media?.pageInfo?.total),
   }
 }
