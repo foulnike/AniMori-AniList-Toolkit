@@ -13,6 +13,7 @@ import {
   unlinkCollection,
 } from '@/core/collection'
 import { clearCache, getDbStats } from '@/core/db'
+import { saveSetting, settings } from '@/core/settings'
 
 import {
   authStatus,
@@ -72,6 +73,12 @@ const askingDrop = ref(false)
 
 const listCount = ref(0)
 const usedSize = ref('')
+
+/**
+ * Показ взрослого (пункт 3.8). Значение списывается с памяти настроек один раз:
+ * общий объект настроек не реактивен, и v-model по его полю не дал бы ответа на клик.
+ */
+const adult = ref(settings.showAdult)
 
 let stopWatch: (() => void) | null = null
 
@@ -192,6 +199,20 @@ function onDropList(): void {
     await readState()
     note.value = 'Список удалён. На AniList ваши записи остались нетронутыми.'
   })
+}
+
+/**
+ * Переключение показа взрослого. Отбор живёт в core/adult.ts и читает ключ
+ * в момент вопроса, поэтому перезапуска не нужно: следующий поиск уже другой.
+ */
+function onAdult(): void {
+  note.value = ''
+
+  void saveSetting('showAdult', 'set_adult', adult.value)
+
+  note.value = adult.value
+    ? 'Взрослое теперь видно в поиске и каталоге.'
+    : 'Взрослое скрыто из поиска и каталога.'
 }
 
 // Память сбрасывается только руками. Перезагрузка не дёргается сама:
@@ -408,6 +429,21 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="am-panel am-box">
+        <h3 class="am-h3">Показ</h3>
+
+        <label class="am-switch">
+          <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
+          <span class="am-switch__text">
+            <span class="am-switch__name">Показывать взрослое (18+)</span>
+            <span class="am-switch__hint">
+              Хентай и прочее взрослое в поиске и каталоге. Своего списка это не касается:
+              добавленные записи видны всегда.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div class="am-panel am-box">
         <h3 class="am-h3">О программе</h3>
 
         <ul class="am-facts">
@@ -475,6 +511,39 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 13px;
   color: var(--am-good);
+}
+
+/* Настройка-тумблер: вся строка нажимается, пояснение под названием. */
+.am-switch {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.am-switch__box {
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  accent-color: var(--am-accent);
+  cursor: pointer;
+}
+
+.am-switch__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.am-switch__name {
+  font-weight: 550;
+}
+
+.am-switch__hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--am-dim);
 }
 
 /* Состояние подключения точкой: видно без чтения. */
