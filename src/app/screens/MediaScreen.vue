@@ -471,7 +471,6 @@ watch(mediaId, () => {
                 <span class="am-line">
                   <span class="am-line__fill" :style="{ width: donePart }" />
                 </span>
-                <span class="am-mine__share">{{ donePart }}</span>
               </div>
 
               <dl v-if="mineFacts.length > 0" class="am-tiles">
@@ -731,22 +730,14 @@ watch(mediaId, () => {
   font-weight: 650;
 }
 
-/* Полоса стоит отдельно от кнопки и плиток: вплотную к ним она
-   читалась как часть кнопки. */
+/* Полоса ровно по ширине кнопки над ней, без счётчика процентов сбоку. */
 .am-mine__bar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
   padding: 2px 0 6px;
 }
 
-.am-mine__share {
-  flex: none;
-  min-width: 42px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--am-dim);
-  text-align: right;
+.am-mine__bar .am-line {
+  display: block;
+  width: 100%;
 }
 
 /* Факты плитками по две в ряд: каждое значение со своей подписью. */
