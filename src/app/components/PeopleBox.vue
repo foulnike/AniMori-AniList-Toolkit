@@ -3,10 +3,12 @@
 // ответ тяжелее карточки, и ждать его сверху экрана незачем.
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { fetchMediaPeople, type CharacterRef, type StaffRef } from '@/api/anilist-people'
-import { Bridge } from '@/bridge'
+import { fetchMediaPeople, type CharacterRef, type PersonRef, type StaffRef } from '@/api/anilist-people'
+import type { PersonTarget } from '@/api/anilist-person'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
+
+import PersonSheet from './PersonSheet.vue'
 
 const props = defineProps<{ mediaId: number; type: MediaType }>()
 
@@ -56,6 +58,9 @@ const busy = ref(false)
 /** Раскрыт ли хвост списка авторов. */
 const wide = ref(false)
 
+/** Открытый человек или `null`. Окно живёт здесь: плитки о нём не знают. */
+const shown = ref<PersonTarget | null>(null)
+
 /** Номер показа: ответ на прежний тайтл приходит уже не к месту. */
 let run = 0
 
@@ -95,6 +100,7 @@ async function load(): Promise<void> {
   folk.value = []
   crew.value = []
   wide.value = false
+  shown.value = null
 
   if (props.mediaId === 0) return
 
@@ -114,13 +120,9 @@ async function load(): Promise<void> {
   }
 }
 
-/** Уводит наружу через оболочку: в окне приложения переход унёс бы само окно. */
-function onOpen(url: string | null): void {
-  if (url === null) return
-
-  void Bridge.shell.openExternal(url).catch((e) => {
-    Logger('WARN', `Люди тайтла: внешняя ссылка не открылась (${url})`, e)
-  })
+/** Открывает человека окошком поверх экрана: уход на сайт тут ни к чему. */
+function onShow(kind: PersonTarget['kind'], person: PersonRef): void {
+  shown.value = { kind, ...person }
 }
 
 onMounted(() => {
@@ -153,7 +155,7 @@ watch(
             class="am-face__hit"
             type="button"
             :title="person.native ?? person.name"
-            @click="onOpen(person.siteUrl)"
+            @click="onShow('character', person)"
           >
             <img
               v-if="person.image"
@@ -171,9 +173,17 @@ watch(
             <span v-if="roleWord(person.role)" class="am-face__role">
               {{ roleWord(person.role) }}
             </span>
-            <span v-if="type !== 'MANGA' && person.voice" class="am-face__voice">
-              {{ person.voice.name }}
-            </span>
+          </button>
+
+          <!-- Озвучка своей целью: это второй человек, и окно у него своё. -->
+          <button
+            v-if="type !== 'MANGA' && person.voice"
+            class="am-face__voice"
+            type="button"
+            :title="person.voice.native ?? person.voice.name"
+            @click="onShow('staff', person.voice)"
+          >
+            {{ person.voice.name }}
           </button>
         </article>
       </div>
@@ -200,7 +210,7 @@ watch(
           class="am-mate"
           type="button"
           :title="person.native ?? person.name"
-          @click="onOpen(person.siteUrl)"
+          @click="onShow('staff', person)"
         >
           <img
             v-if="person.image"
@@ -224,6 +234,8 @@ watch(
       </div>
     </div>
   </template>
+
+  <PersonSheet v-if="shown" :start="shown" @close="shown = null" />
 </template>
 
 <style scoped>
@@ -236,7 +248,10 @@ watch(
 /* Персонажи полкой, а не сеткой: их бывает два десятка, и сетка
    утопила бы панель записи в самый низ экрана. */
 .am-face {
+  display: flex;
   flex: none;
+  flex-direction: column;
+  gap: 4px;
   width: 132px;
 }
 
@@ -299,8 +314,19 @@ watch(
 
 /* Озвучка бледнее имени: это второй человек в той же плитке. */
 .am-face__voice {
+  padding: 0;
+  font: inherit;
   font-size: 12px;
   color: var(--am-dim);
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.am-face__voice:hover,
+.am-face__voice:focus-visible {
+  color: var(--am-accent);
 }
 
 /* Авторов единицы, полка из четырёх плиток смотрелась бы обрубком. */
