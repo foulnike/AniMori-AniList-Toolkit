@@ -12,6 +12,7 @@ import ListsScreen from './screens/ListsScreen.vue'
 import MediaScreen from './screens/MediaScreen.vue'
 import SearchScreen from './screens/SearchScreen.vue'
 import SettingsScreen from './screens/SettingsScreen.vue'
+import StudioScreen from './screens/StudioScreen.vue'
 import './styles/theme.css'
 
 // Полный набор имён обязателен: забытый экран уронит проверку типов,
@@ -21,6 +22,7 @@ const SCREENS: Record<ScreenName, Component> = {
   lists: ListsScreen,
   search: SearchScreen,
   media: MediaScreen,
+  studio: StudioScreen,
   settings: SettingsScreen,
 }
 

@@ -2,7 +2,7 @@
 // Новый экран = три места: имя здесь, подпись в SCREEN_TITLES
 // и сам компонент в App.vue. Меню — четвёртое и необязательное место.
 
-export const SCREEN_NAMES = ['home', 'lists', 'search', 'media', 'settings'] as const
+export const SCREEN_NAMES = ['home', 'lists', 'search', 'media', 'studio', 'settings'] as const
 
 export type ScreenName = (typeof SCREEN_NAMES)[number]
 
@@ -21,6 +21,7 @@ export type MenuItem = {
 
 // Карточки тайтла в меню нет: на неё попадают из списков и поиска.
 // Манги в меню тоже нет: это подвкладка внутри списков, а не свой экран.
+// Студии в меню нет: на неё ведут чипы карточки.
 export const MENU: ReadonlyArray<MenuItem> = [
   { name: 'home', title: 'Главная', icon: '⌂' },
   { name: 'lists', title: 'Списки', icon: '≡' },
@@ -33,5 +34,6 @@ export const SCREEN_TITLES: Record<ScreenName, string> = {
   lists: 'Списки',
   search: 'Поиск',
   media: 'Тайтл',
+  studio: 'Студия',
   settings: 'Настройки',
 }

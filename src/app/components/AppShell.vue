@@ -15,7 +15,7 @@ const title = computed(() => SCREEN_TITLES[active.value])
 // «Назад» нужен только там, куда пришли изнутри приложения:
 // на экранах из меню он увёл бы в пустую историю окна.
 // Кнопка живёт только здесь: вторая в карточке была дублём.
-const canGoBack = computed(() => active.value === 'media')
+const canGoBack = computed(() => active.value === 'media' || active.value === 'studio')
 
 /** Обновление окна целиком, как в браузере: одна кнопка на все экраны. */
 function onReload(): void {
