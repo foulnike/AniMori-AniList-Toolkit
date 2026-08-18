@@ -14,7 +14,7 @@ const CACHE_KEY = 'STUDIOS1'
 let memory: Map<string, string> | null = null
 
 /** Незавершённая добыча: две карточки могут спросить в один миг. */
-let pending: Promise<Map<string, string> | null> = null
+let pending: Promise<Map<string, string> | null> | null = null
 
 interface ShikiStudio {
   id?: number
