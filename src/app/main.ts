@@ -3,6 +3,8 @@
 
 import { createApp } from 'vue'
 import App from './App.vue'
+import { initCollection } from '@/core/collection'
+import { startEditSender } from '@/core/edit-sender'
 import { loadSettings } from '@/core/settings'
 
 // Корень обязан существовать: он лежит в нашем же index.html.
@@ -17,11 +19,27 @@ if (!root) throw new Error('AniMori: корень #app не найден в inde
  * настоящему было бы хуже короткой паузы на чтение десятка ключей.
  *
  * Своих ошибок loadSettings не бросает: без хранилища он оставляет дефолты,
- * и окно вся равно открывается.
+ * и окно всё равно открывается.
+ *
+ * Отправщик очереди правок запускается после монтирования, а не до него:
+ * чтение снимка задержало бы первую отрисовку, а очередь минуту-другую
+ * подождёт. Раньше его не звали вовсе, и фоновый разбор с повтором при
+ * возврате сети просто не жил: уходила только правка, сделанная руками
+ * при живом сервере.
  */
 async function start(): Promise<void> {
   await loadSettings()
   createApp(App).mount(root as HTMLElement)
+
+  // Отправщику нужна поднятая коллекция: до неё в памяти править нечего.
+  // Ошибка подъёма окно не роняет — список просто останется пустым до
+  // первого действия, а причина уйдёт в журнал.
+  try {
+    await initCollection()
+    startEditSender()
+  } catch (e: unknown) {
+    console.error('AniMori: отправщик правок не запущен', e)
+  }
 }
 
 void start()
