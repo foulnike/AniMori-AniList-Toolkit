@@ -17,6 +17,16 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 /** Предел описания до кнопки «Ещё». */
 const DESC_LIMIT = 400
 
+/** Сэйю из карточки персонажа. */
+type VoiceActor =
+  NonNullable<CharacterCard['media']>['edges'][number]['voiceActors'][number]
+
+/** Кусок описания: просто текст или ссылка наружу. */
+interface DescPart {
+  text: string
+  url: string | null
+}
+
 const charCard = ref<CharacterCard | null>(null)
 const staffCard = ref<StaffCard | null>(null)
 const busy = ref(true)
@@ -40,6 +50,22 @@ function hasMore(): boolean {
   return rawDesc().length > DESC_LIMIT && !expanded.value
 }
 
+/** Описание кусками: маркдаун-ссылки AniList становятся кликабельными. */
+function descParts(): DescPart[] {
+  const d = shortDesc()
+  const parts: DescPart[] = []
+  const link = /\[([^\]]+)\]\((https?:[^)\s]+)\)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = link.exec(d)) !== null) {
+    if (m.index > last) parts.push({ text: d.slice(last, m.index), url: null })
+    parts.push({ text: m[1], url: m[2] })
+    last = m.index + m[0].length
+  }
+  if (last < d.length) parts.push({ text: d.slice(last), url: null })
+  return parts
+}
+
 function fullName(): string {
   const card = props.start.kind === 'character' ? charCard.value : staffCard.value
   return card?.name.full ?? props.start.name
@@ -60,29 +86,70 @@ function largeImage(): string | null {
   return card?.image?.large ?? props.start.image ?? null
 }
 
-/** Форматирует дату { year, month, day } в читаемый вид. */
+const MONTHS_RU = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+]
+
+const MONTHS_RU_NOM = [
+  'январь',
+  'февраль',
+  'март',
+  'апрель',
+  'май',
+  'июнь',
+  'июль',
+  'август',
+  'сентябрь',
+  'октябрь',
+  'ноябрь',
+  'декабрь',
+]
+
+/** Дата { year, month, day } по-русски: «4 декабря», «декабрь 1995», «1995». */
 function fmtDate(
   d: { year: number | null; month: number | null; day: number | null } | null,
 ): string {
   if (!d) return ''
-  const parts: string[] = []
-  if (d.day) parts.push(String(d.day))
-  if (d.month) parts.push(String(d.month))
-  if (d.year) parts.push(String(d.year))
-  return parts.join('.')
+  const day = d.day ?? 0
+  const month = d.month ?? 0
+  const year = d.year ?? 0
+  if (month < 1 || month > 12) return year > 0 ? String(year) : ''
+  if (day > 0) {
+    return year > 0 ? `${day} ${MONTHS_RU[month - 1]} ${year}` : `${day} ${MONTHS_RU[month - 1]}`
+  }
+  return year > 0 ? `${MONTHS_RU_NOM[month - 1]} ${year}` : MONTHS_RU_NOM[month - 1]
 }
 
-/** Первый голос из каждого аниме (приоритет JA, затем любой). */
-function voiceRows() {
-  if (!charCard.value?.media?.edges) return []
-  return charCard.value.media.edges
-    .map((edge) => {
-      const ja = edge.voiceActors.find((v) => v.language === 'JAPANESE')
-      const va = ja ?? edge.voiceActors[0] ?? null
-      return va ? { va, media: edge.node, role: edge.characterRole } : null
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null)
-    .slice(0, 6)
+/** Сэйю без повторов: один человек — одна строка, сколько бы аниме ни было. */
+function voiceActors(): VoiceActor[] {
+  const edges = charCard.value?.media?.edges
+  if (!edges) return []
+  const seen = new Set<number>()
+  const out: VoiceActor[] = []
+  for (const edge of edges) {
+    const va =
+      edge.voiceActors.find((v) => v.language?.toLowerCase() === 'japanese') ??
+      edge.voiceActors[0]
+    if (!va || seen.has(va.id)) continue
+    seen.add(va.id)
+    out.push(va)
+  }
+  return out.slice(0, 6)
+}
+
+function openLink(url: string): void {
+  Bridge.shell.openExternal(url).catch(() => {})
 }
 
 function openSite(): void {
@@ -180,34 +247,38 @@ onBeforeUnmount(() => {
       <!-- Описание -->
       <template v-else>
         <p v-if="rawDesc()" class="am-ps-desc">
-          {{ shortDesc() }}
+          <template v-for="(part, i) in descParts()" :key="i">
+            <a
+              v-if="part.url"
+              class="am-ps-link"
+              href="#"
+              @click.prevent="openLink(part.url)"
+              >{{ part.text }}</a
+            >
+            <template v-else>{{ part.text }}</template>
+          </template>
         </p>
         <button v-if="hasMore()" class="am-btn am-btn--ghost" type="button" @click="expanded = true">
           Показать полностью
         </button>
 
         <!-- Сэйю (только для персонажей) -->
-        <template v-if="start.kind === 'character' && voiceRows().length">
+        <template v-if="start.kind === 'character' && voiceActors().length">
           <h4 class="am-ps-sub">Голоса</h4>
           <div class="am-ps-voices">
-            <div v-for="row in voiceRows()" :key="row.va.id" class="am-ps-va">
+            <div v-for="va in voiceActors()" :key="va.id" class="am-ps-va">
               <img
-                v-if="row.va.image?.medium || row.va.image?.large"
+                v-if="va.image?.medium || va.image?.large"
                 class="am-ps-va__art"
-                :src="(row.va.image.medium ?? row.va.image.large)!"
-                :alt="row.va.name.full"
+                :src="(va.image.medium ?? va.image.large)!"
+                :alt="va.name.full"
                 loading="lazy"
                 decoding="async"
               />
               <span v-else class="am-ps-va__art am-ps-va__art--empty" aria-hidden="true">
-                {{ row.va.name.full.slice(0, 1) }}
+                {{ va.name.full.slice(0, 1) }}
               </span>
-              <span class="am-ps-va__info">
-                <span class="am-ps-va__name">{{ row.va.name.full }}</span>
-                <span class="am-ps-va__media am-dim">
-                  {{ row.media.title.romaji ?? row.media.title.english ?? '' }}
-                </span>
-              </span>
+              <span class="am-ps-va__name">{{ va.name.full }}</span>
             </div>
           </div>
         </template>
@@ -315,6 +386,11 @@ onBeforeUnmount(() => {
   padding-top: 4px;
 }
 
+/* У параграфов браузерные маргины, зазор держит только gap раскладки. */
+.am-ps-names p {
+  margin: 0;
+}
+
 .am-ps-names__full {
   font-size: 18px;
   font-weight: 700;
@@ -337,10 +413,22 @@ onBeforeUnmount(() => {
 
 /* Описание */
 .am-ps-desc {
+  margin: 0;
   font-size: 14px;
   line-height: 1.65;
   white-space: pre-line;
   color: var(--am-dim);
+}
+
+.am-ps-link {
+  color: var(--am-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.am-ps-link:hover,
+.am-ps-link:focus-visible {
+  color: var(--am-accent, var(--am-text));
 }
 
 /* Голоса */
@@ -382,23 +470,9 @@ onBeforeUnmount(() => {
   color: var(--am-faint);
 }
 
-.am-ps-va__info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
 .am-ps-va__name {
   font-size: 13.5px;
   font-weight: 600;
-}
-
-.am-ps-va__media {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Скелетон */
