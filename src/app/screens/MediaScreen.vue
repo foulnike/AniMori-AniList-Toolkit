@@ -13,6 +13,7 @@ import { getRussianTitle, type RussianTitle } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
 
 import EntrySheet from '../components/EntrySheet.vue'
+import PeopleBox from '../components/PeopleBox.vue'
 import { formatWord, partsWord as partsWordFor, statusWord } from '../labels'
 import { mediaLinks, type MediaLink } from '../media-links'
 import { currentRoute } from '../router'
@@ -480,6 +481,8 @@ watch(mediaId, () => {
             </div>
           </aside>
         </div>
+
+        <PeopleBox :media-id="mediaId" :type="card.type" />
 
         <EntrySheet
           v-if="sheetOpen"
