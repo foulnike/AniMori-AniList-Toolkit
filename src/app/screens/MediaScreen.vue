@@ -2,14 +2,21 @@
 // Пункт 3.4: карточка тайтла. Номер из адреса, подробности с сервера,
 // а состояние списка — из памяти: там правда свежее чужого ответа.
 // Настройки записи живут в окне правки, отсюда оно только открывается.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
 import { Bridge } from '@/bridge'
+import { hiddenCount, keepAllowed } from '@/core/adult'
 import { getEntry } from '@/core/collection'
 import { queueEdit, type EntryLook } from '@/core/edit-sender'
+import { fetchFranchise, type FranchiseWork } from '@/core/franchise'
 import { partsOut } from '@/core/media-looks'
-import { getRussianTitle, type RussianTitle } from '@/core/media-title'
+import {
+  getRussianTitle,
+  peekRussianName,
+  prefetchRussianTitles,
+  type RussianTitle,
+} from '@/core/media-title'
 import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
@@ -29,6 +36,15 @@ const sheetOpen = ref(false)
 
 /** Литографии студий с Шикимори: подставляются в чипы по готовности. */
 const logos = ref<Map<string, string> | null>(null)
+
+/** Хронология франшизы: null — дерева нет или оно не приехало. */
+const franchise = ref<FranchiseWork[] | null>(null)
+
+/** Счётчик добора русских имён франшизы: заставляет пересчитать строки. */
+const franchiseStamp = ref(0)
+
+/** Список франшизы: к текущему тайтлу он прокручивается сам. */
+const franList = ref<HTMLElement | null>(null)
 
 /** Счётчик правок этого показа: заставляет пересчитать взятое из памяти. */
 const editStamp = ref(0)
@@ -220,6 +236,19 @@ const facts = computed<string[]>(() => {
   return list
 })
 
+/** Видимые части франшизы: взрослое уходит общим отбором. */
+const franchiseRows = computed<readonly FranchiseWork[]>(() => {
+  // Закладки частей живут в памяти коллекции: пересчёт после своих правок.
+  void editStamp.value
+  void franchiseStamp.value
+  return franchise.value === null ? [] : keepAllowed(franchise.value, (w) => w.isAdult)
+})
+
+/** Скрытые отбором части франшизы. */
+const franchiseHidden = computed<number>(() =>
+  franchise.value === null ? 0 : hiddenCount(franchise.value, (w) => w.isAdult),
+)
+
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -285,6 +314,7 @@ async function load(): Promise<void> {
 
   card.value = null
   russian.value = null
+  franchise.value = null
   trouble.value = ''
   sheetOpen.value = false
 
@@ -312,6 +342,9 @@ async function load(): Promise<void> {
         if (mine === run) logos.value = map
       })
     }
+
+    // Дерево франшизы — фоном: колонка записи его не ждёт.
+    void beginFranchise(mine, id, found)
   } catch (e) {
     if (mine !== run) return
     trouble.value = describe(e)
@@ -328,6 +361,33 @@ async function load(): Promise<void> {
     // Без русского названия карточка живая: останется латиница.
     Logger('WARN', `Карточка ${id}: русское название не добылось`, e)
   }
+}
+
+/** Дерево франшизы: склад или сеть, затем русские имена частей фоном. */
+async function beginFranchise(mine: number, id: number, found: MediaCard): Promise<void> {
+  const works = await fetchFranchise(id, found.malId, found.type)
+  if (mine !== run || works === null) return
+
+  franchise.value = works
+  void nextTick(() => {
+    franList.value?.querySelector('.am-fran__row--here')?.scrollIntoView({ block: 'nearest' })
+  })
+
+  // Русские имена частей — тем же фоновым проходом, двумя группами по типу:
+  // дерево смешанное, в нём бывает и манга.
+  const animeIds = works.flatMap((w) =>
+    w.type === 'ANIME' && w.mediaId !== null ? [w.mediaId] : [],
+  )
+  const mangaIds = works.flatMap((w) =>
+    w.type === 'MANGA' && w.mediaId !== null ? [w.mediaId] : [],
+  )
+  if (animeIds.length + mangaIds.length === 0) return
+
+  await Promise.all([
+    prefetchRussianTitles(animeIds, 'ANIME'),
+    prefetchRussianTitles(mangaIds, 'MANGA'),
+  ])
+  if (mine === run) franchiseStamp.value += 1
 }
 
 /**
@@ -348,6 +408,29 @@ function openStudio(studioId: number): void {
 /** Литография студии по имени; промах — чип без картинки, это штатно. */
 function studioLogo(name: string): string | null {
   return logos.value?.get(name.trim().toLowerCase()) ?? null
+}
+
+/** Имя части франшизы: русское, когда фон уже добыл. */
+function franchiseName(work: FranchiseWork): string {
+  return work.mediaId === null ? work.name : (peekRussianName(work.mediaId) ?? work.name)
+}
+
+/** Своя закладка на части франшизы словом, когда она есть. */
+function franchiseStatus(work: FranchiseWork): string | null {
+  if (work.mediaId === null) return null
+  const status = getEntry(work.mediaId)?.status ?? null
+  return statusWord(work.type ?? 'ANIME', status)
+}
+
+/** Подсказка строки франшизы: полное имя и вид части. */
+function franchiseHint(work: FranchiseWork): string {
+  return work.kind === null ? work.name : `${work.name} · ${work.kind}`
+}
+
+/** Переход на карточку части франшизы: текущая и несопоставленная не ведут. */
+function openFranchiseWork(work: FranchiseWork): void {
+  if (work.mediaId === null || work.mediaId === mediaId.value) return
+  navigate('media', { id: String(work.mediaId) })
 }
 
 /** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
@@ -550,6 +633,45 @@ watch(mediaId, () => {
                   {{ studio.name }}
                 </button>
               </div>
+            </div>
+
+            <div v-if="franchiseRows.length > 0" class="am-fran">
+              <span class="am-fran__label">Франшиза</span>
+
+              <div ref="franList" class="am-fran__list">
+                <template v-for="work in franchiseRows" :key="work.malId ?? work.name">
+                  <button
+                    v-if="work.mediaId !== null && work.mediaId !== mediaId"
+                    class="am-fran__row"
+                    type="button"
+                    :title="franchiseHint(work)"
+                    @click="openFranchiseWork(work)"
+                  >
+                    <span class="am-fran__year">{{ work.year ?? '···' }}</span>
+                    <span class="am-fran__name">{{ franchiseName(work) }}</span>
+                    <span v-if="franchiseStatus(work)" class="am-fran__status">
+                      {{ franchiseStatus(work) }}
+                    </span>
+                  </button>
+                  <div
+                    v-else
+                    class="am-fran__row am-fran__row--still"
+                    :class="{ 'am-fran__row--here': work.mediaId === mediaId }"
+                    :title="franchiseHint(work)"
+                  >
+                    <span class="am-fran__year">{{ work.year ?? '···' }}</span>
+                    <span class="am-fran__name">{{ franchiseName(work) }}</span>
+                    <span v-if="work.mediaId === mediaId" class="am-fran__here">вы здесь</span>
+                    <span v-else-if="franchiseStatus(work)" class="am-fran__status">
+                      {{ franchiseStatus(work) }}
+                    </span>
+                  </div>
+                </template>
+              </div>
+
+              <p v-if="franchiseHidden > 0" class="am-fran__hidden">
+                Скрыто с меткой 18+: {{ franchiseHidden }}
+              </p>
             </div>
           </aside>
         </div>
@@ -979,6 +1101,92 @@ watch(mediaId, () => {
   height: 16px;
   max-width: 32px;
   object-fit: contain;
+}
+
+/* Франшиза — хронология частей в колонке записи, со своей прокруткой. */
+.am-fran {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.am-fran__label {
+  font-size: 12.5px;
+  color: var(--am-faint);
+}
+
+.am-fran__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.am-fran__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  min-height: 30px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--am-text);
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--am-r-s);
+}
+
+.am-fran__row:hover {
+  background: var(--am-hover);
+}
+
+/* Текущий тайтл и части вне каталога — просто строки, не переходы. */
+.am-fran__row--still {
+  cursor: default;
+}
+
+.am-fran__row--still:hover {
+  background: none;
+}
+
+.am-fran__row--here {
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.am-fran__year {
+  flex: none;
+  width: 38px;
+  font-size: 12px;
+  color: var(--am-faint);
+}
+
+.am-fran__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am-fran__status {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--am-accent);
+}
+
+.am-fran__here {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--am-faint);
+}
+
+.am-fran__hidden {
+  margin: 0;
+  font-size: 12px;
+  color: var(--am-faint);
 }
 
 @media (max-width: 1180px) {
