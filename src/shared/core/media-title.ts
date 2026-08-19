@@ -9,8 +9,8 @@ import { resolveTitle } from '../api/titles'
 import { Logger } from '../utils/logger'
 import type { MediaType, ShikiCacheRecord } from './types'
 
-/** Префикс ключа на складе. Цифра — версия формы записи: RU2 — описания без BBcode. */
-const KEY_PREFIX = 'RU2_'
+/** Префикс ключа на складе. Цифра — версия формы записи: RU3 — с оценками площадок. */
+const KEY_PREFIX = 'RU3_'
 
 /** Готовая русская карточка тайтла. */
 export interface RussianTitle {
@@ -19,6 +19,10 @@ export interface RussianTitle {
   url: string
   /** Имя источника для подписи под описанием. */
   sourceName: string
+  /** Оценка MAL из зеркала Шикимори, шкала 0..10. */
+  score: number | null
+  /** Распределение голосов Шикимори для их собственной средней. */
+  rates: Array<{ name: string; value: number }> | null
 }
 
 /**
@@ -82,6 +86,8 @@ async function fetchByMal(
     description: resolved.description,
     url: resolved.url,
     sourceName: resolved.sourceName,
+    score: resolved.score,
+    rates: resolved.rates,
   }
 
   memory.set(mediaId, card)

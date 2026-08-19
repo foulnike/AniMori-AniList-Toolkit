@@ -13,6 +13,10 @@ export interface ResolvedTitle {
   url: string
   /** Человекочитаемое имя источника для подписи в UI. */
   sourceName: string
+  /** Оценка MAL из зеркала Шикимори, шкала 0..10. */
+  score: number | null
+  /** Распределение голосов Шикимори: из него считается их собственная средняя. */
+  rates: Array<{ name: string; value: number }> | null
 }
 
 /** Описание с Шикимори приходит с BBcode: теги выкидываются, текст остаётся. */
@@ -48,11 +52,16 @@ export async function resolveTitle(
         `/api/${type === 'MANGA' ? 'mangas' : 'animes'}/${malId}`,
       )
       if (shiki.data?.russian) {
+        const rawScore = Number(shiki.data.score)
         return {
           russian: shiki.data.russian,
           description: stripBbcode(shiki.data.description ?? null),
           url: 'https://' + (shiki.domain ?? '') + (shiki.data.url ?? ''),
           sourceName: 'Shikimori',
+          score: Number.isFinite(rawScore) && rawScore > 0 ? rawScore : null,
+          rates: Array.isArray(shiki.data.rates_scores_stats)
+            ? shiki.data.rates_scores_stats
+            : null,
         }
       }
     } else if (src === 'anime365') {
@@ -63,6 +72,8 @@ export async function resolveTitle(
           description: stripBbcode(a.description),
           url: a.url,
           sourceName: 'anime365',
+          score: null,
+          rates: null,
         }
       }
     }
