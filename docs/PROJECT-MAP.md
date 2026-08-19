@@ -117,7 +117,7 @@ shared/     общее ядро обоих продуктов
     collection-view.ts  отборы, счётчики, страницы
     adult.ts        единый отбор взрослого на слое показа
     edit-sender.ts  единственный путь правок наружу
-    media-title.ts, media-looks.ts, media-search.ts, studio-logos.ts
+    media-title.ts, media-looks.ts, media-search.ts, franchise.ts, studio-logos.ts
     net-health.ts   учёт доступности источников
     proxy.ts        разбор и сборка настроек прокси
     constants.ts    домены, TTL, регулярки перевода
