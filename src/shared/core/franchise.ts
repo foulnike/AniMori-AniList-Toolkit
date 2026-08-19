@@ -3,6 +3,10 @@
 // Перенос виджета скрипта: там та же хронология рисовалась на чужой
 // странице; здесь переходы внутренние, а статусы берутся из своей
 // памяти списка — авторизованный запрос ради них не нужен.
+//
+// Пространства номеров MAL у аниме и манги раздельны: манга 33255
+// существует отдельно от аниме 33255. Поэтому маппинг ведётся по паре
+// «тип + номер», а тип узла читается из его адреса (/animes/, /mangas/).
 
 import { anilistQuery } from '../api/anilist'
 import { fetchShiki } from '../api/shikimori'
@@ -16,6 +20,8 @@ interface FranchiseNode {
   name: string
   url: string
   year: number | null
+  /** Полная дата узла, unix-секунды: хронология сортируется по ней. */
+  date?: number | null
   kind: string | null
 }
 
@@ -26,6 +32,8 @@ export interface FranchiseWork {
   type: MediaType | null
   name: string
   year: number | null
+  /** Полная дата части, unix-секунды. */
+  date: number | null
   kind: string | null
   cover: string | null
   isAdult: boolean
@@ -58,9 +66,10 @@ const memory = new Map<number, FranchiseWork[] | null>()
 /** Незавершённые добычи по номеру тайтла. */
 const pending = new Map<number, Promise<FranchiseWork[] | null>>()
 
-/** Читает дерево со склада. Записи без постеров или с частями без
- *  сопоставления — старой формы: промах. Проверяется каждая часть, а не
- *  первая: иначе старый склад с клипом в середине выживал. */
+/** Читает дерево со склада. Записи старой формы — без постеров, без полной
+ *  даты или с частями без сопоставления — считаются промахом. Проверяется
+ *  каждая часть, а не первая: иначе старый склад с клипом в середине
+ *  выживал. */
 async function readCache(mediaId: number): Promise<FranchiseWork[] | null> {
   const record = await dbGet<FranchiseCacheRecord>('franchiseCache', mediaId)
   const data = record?.data
@@ -68,7 +77,8 @@ async function readCache(mediaId: number): Promise<FranchiseWork[] | null> {
 
   for (const work of data as Array<Partial<FranchiseWork> | undefined>) {
     if (!work || typeof work.name !== 'string') return null
-    if (!('cover' in work) || work.mediaId === undefined || work.mediaId === null) return null
+    if (!('cover' in work) || !('date' in work)) return null
+    if (work.mediaId === undefined || work.mediaId === null) return null
   }
 
   return data as FranchiseWork[]
@@ -77,6 +87,11 @@ async function readCache(mediaId: number): Promise<FranchiseWork[] | null> {
 /** Кладёт дерево на склад. Отсутствие дерева на склад не пишется. */
 async function writeCache(mediaId: number, works: FranchiseWork[]): Promise<void> {
   await dbSet('franchiseCache', { id: mediaId, data: works, ts: Date.now() })
+}
+
+/** Пространство номеров MAL по адресу узла: /animes/ и /mangas/ раздельны. */
+function nodeType(url: string): MediaType {
+  return url.startsWith('/mangas') ? 'MANGA' : 'ANIME'
 }
 
 /** Добывает и собирает дерево: Шикимори по номеру MAL, затем маппинг. */
@@ -100,7 +115,10 @@ async function load(
     ...new Set(nodes.flatMap((n) => (typeof n.id === 'number' && n.id > 0 ? [n.id] : []))),
   ]
 
-  const mappedByMal = new Map<number, FranchiseMapEntry>()
+  // Две таблицы по пространствам номеров: голый номер MAL не уникален,
+  // и чужая манга с тем же номером перезаписывала сезон аниме.
+  const mappedAnime = new Map<number, FranchiseMapEntry>()
+  const mappedManga = new Map<number, FranchiseMapEntry>()
   if (malIds.length > 0) {
     const answers = await Promise.all([
       anilistQuery<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
@@ -113,17 +131,20 @@ async function load(
       }),
     ])
 
-    for (const answer of answers) {
-      for (const entry of answer.data?.Page?.media ?? []) {
-        if (typeof entry.idMal === 'number') mappedByMal.set(entry.idMal, entry)
-      }
+    for (const entry of answers[0]?.data?.Page?.media ?? []) {
+      if (typeof entry.idMal === 'number') mappedAnime.set(entry.idMal, entry)
+    }
+    for (const entry of answers[1]?.data?.Page?.media ?? []) {
+      if (typeof entry.idMal === 'number') mappedManga.set(entry.idMal, entry)
     }
   }
 
   const works: FranchiseWork[] = []
   for (const node of nodes) {
     if (typeof node.id !== 'number' || node.id <= 0) continue
-    const mapped = mappedByMal.get(node.id)
+
+    const kind = nodeType(node.url ?? '')
+    const mapped = (kind === 'MANGA' ? mappedManga : mappedAnime).get(node.id)
     // Части только на Шикимори выкидываются: это клипы и реклама,
     // которых в каталоге AniList нет нарочно.
     if (mapped === undefined) continue
@@ -134,6 +155,7 @@ async function load(
       type: mapped.type,
       name: node.name,
       year: typeof node.year === 'number' ? node.year : null,
+      date: typeof node.date === 'number' && node.date > 0 ? node.date : null,
       kind: node.kind ?? null,
       cover: mapped.coverImage?.medium ?? null,
       isAdult: mapped.isAdult === true,
@@ -146,7 +168,8 @@ async function load(
     return null
   }
 
-  works.sort((a, b) => (a.year ?? 0) - (b.year ?? 0))
+  // Хронология по полной дате: сезоны одного года иначе ехали.
+  works.sort((a, b) => (a.date ?? Number.MAX_SAFE_INTEGER) - (b.date ?? Number.MAX_SAFE_INTEGER))
 
   memory.set(mediaId, works)
   await writeCache(mediaId, works)
