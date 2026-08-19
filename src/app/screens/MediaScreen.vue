@@ -298,7 +298,7 @@ const franchiseHidden = computed<number>(() =>
  * занимает только свой ряд, люди идут во всю ширину под ней.
  */
 const boardClass = computed<string>(() => {
-  const count = franchiseRows.length
+  const count = franchiseRows.value.length
   if (count === 0) return ''
   return count > 5 ? 'am-board--fran-long' : 'am-board--fran-short'
 })
