@@ -236,6 +236,49 @@ const facts = computed<string[]>(() => {
   return list
 })
 
+/** Оценка площадки для героя. */
+interface Rating {
+  key: string
+  label: string
+  value: string
+}
+
+/** Собственная средняя Шикимори — из распределения голосов, как в виджете скрипта. */
+function shikiScore(rates: Array<{ name: string; value: number }>): number | null {
+  let sum = 0
+  let votes = 0
+  for (const stat of rates) {
+    const mark = Number.parseInt(String(stat.name), 10)
+    const count = Number(stat.value)
+    if (!Number.isFinite(mark) || mark < 1 || mark > 10) continue
+    if (!Number.isFinite(count) || count <= 0) continue
+    sum += mark * count
+    votes += count
+  }
+  return votes > 0 ? sum / votes : null
+}
+
+/**
+ * Рейтинг трёх площадок. AniList — из карточки, MAL — поле score карточки
+ * Шикимori (их зеркало чужой оценки), Шикимori — среднее по голосам.
+ */
+const ratings = computed<Rating[]>(() => {
+  const list: Rating[] = []
+
+  const al = card.value?.averageScore
+  if (typeof al === 'number' && al > 0) {
+    list.push({ key: 'al', label: 'AniList', value: (al / 10).toFixed(1) })
+  }
+
+  const shiki = russian.value?.rates ? shikiScore(russian.value.rates) : null
+  if (shiki !== null) list.push({ key: 'shiki', label: 'Шикимori', value: shiki.toFixed(1) })
+
+  const mal = Number(russian.value?.score)
+  if (Number.isFinite(mal) && mal > 0) list.push({ key: 'mal', label: 'MAL', value: mal.toFixed(1) })
+
+  return list
+})
+
 /** Видимые части франшизы: взрослое уходит общим отбором. */
 const franchiseRows = computed<readonly FranchiseWork[]>(() => {
   // Закладки частей живут в памяти коллекции: пересчёт после своих правок.
@@ -248,6 +291,17 @@ const franchiseRows = computed<readonly FranchiseWork[]>(() => {
 const franchiseHidden = computed<number>(() =>
   franchise.value === null ? 0 : hiddenCount(franchise.value, (w) => w.isAdult),
 )
+
+/**
+ * Облик доски. Длинная франшиза владеет правым краем на две строки —
+ * люди подтягиваются под описание и пустоты не остаётся. Короткая
+ * занимает только свой ряд, люди идут во всю ширину под ней.
+ */
+const boardClass = computed<string>(() => {
+  const count = franchiseRows.length
+  if (count === 0) return ''
+  return count > 5 ? 'am-board--fran-long' : 'am-board--fran-short'
+})
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -536,9 +590,6 @@ watch(mediaId, () => {
                 <li v-if="score10 > 0" class="am-pill am-pill--mine" title="Моя оценка">
                   ★ {{ scoreText(score10) }}
                 </li>
-                <li v-if="progress > 0" class="am-pill am-pill--mine" title="Мой прогресс">
-                  {{ partsText }}
-                </li>
                 <li v-for="item in facts" :key="item" class="am-pill">{{ item }}</li>
                 <li v-if="card.isAdult" class="am-pill am-pill--adult">18+</li>
               </ul>
@@ -548,11 +599,45 @@ watch(mediaId, () => {
                   {{ genreWord(genre) }}
                 </li>
               </ul>
+
+              <ul v-if="ratings.length > 0" class="am-pills">
+                <li
+                  v-for="rate in ratings"
+                  :key="rate.key"
+                  class="am-pill am-pill--rate"
+                  :title="`Средняя оценка на ${rate.label}`"
+                >
+                  <span class="am-pill__src">{{ rate.label }}</span>
+                  ★ {{ rate.value }}
+                </li>
+              </ul>
+
+              <ul v-if="card.studios.length > 0" class="am-pills">
+                <li v-for="studio in card.studios" :key="studio.studioId">
+                  <button
+                    class="am-pill am-pill--studio"
+                    :class="{ 'am-pill--studio-main': studio.main }"
+                    type="button"
+                    :title="`Работы студии ${studio.name}`"
+                    @click="openStudio(studio.studioId)"
+                  >
+                    <img
+                      v-if="studioLogo(studio.name)"
+                      class="am-pill__logo"
+                      :src="studioLogo(studio.name)!"
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    {{ studio.name }}
+                  </button>
+                </li>
+              </ul>
             </div>
           </div>
         </div>
 
-        <div class="am-board" :class="{ 'am-board--full': franchiseRows.length > 0 }">
+        <div class="am-board" :class="boardClass">
           <div class="am-split__main">
             <div class="am-panel am-about-box">
               <h3 class="am-h3">Описание</h3>
@@ -609,32 +694,6 @@ watch(mediaId, () => {
               <p v-if="drifted" class="am-mine__drift">
                 Правка сохранена и ждёт отправки на AniList.
               </p>
-            </div>
-
-            <div v-if="card.studios.length > 0" class="am-studios">
-              <span class="am-studios__label">Производство</span>
-
-              <div class="am-studios__list">
-                <button
-                  v-for="studio in card.studios"
-                  :key="studio.studioId"
-                  class="am-studios__chip"
-                  :class="{ 'am-studios__chip--main': studio.main }"
-                  type="button"
-                  :title="`Работы студии ${studio.name}`"
-                  @click="openStudio(studio.studioId)"
-                >
-                  <img
-                    v-if="studioLogo(studio.name)"
-                    class="am-studios__logo"
-                    :src="studioLogo(studio.name)!"
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  {{ studio.name }}
-                </button>
-              </div>
             </div>
           </aside>
 
@@ -702,9 +761,11 @@ watch(mediaId, () => {
               Скрыто с меткой 18+: {{ franchiseHidden }}
             </p>
           </div>
-        </div>
 
-        <PeopleBox :media-id="mediaId" :type="card.type" />
+          <div class="am-board__folk">
+            <PeopleBox :media-id="mediaId" :type="card.type" />
+          </div>
+        </div>
 
         <EntrySheet
           v-if="sheetOpen"
@@ -864,26 +925,89 @@ watch(mediaId, () => {
   border-color: rgba(255, 90, 90, 0.4);
 }
 
-/* Свои оценка и прогресс — немые пилюли у заголовка: их ищут там, а не в сайдбаре. */
+/* Своя оценка — немая пилюля у заголовка: её ищут там, а не в сайдбаре. */
 .am-pill--mine {
   color: #cfe6ff;
   background: rgba(88, 166, 255, 0.16);
   border-color: rgba(88, 166, 255, 0.4);
 }
 
-/* Доска карточки: описание, колонка записи и франшиза. На узком окне
-   франшиза занимает полный ряд под колонками, на широком — третью колонку. */
+/* Рейтинг площадок: имя площадки тусклое, значение яркое. */
+.am-pill--rate {
+  color: var(--am-text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.am-pill__src {
+  margin-right: 6px;
+  font-weight: 500;
+  color: var(--am-faint);
+}
+
+/* Студии — пилюли героя: это мета тайтла, а не часть записи. */
+.am-pill--studio {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  font: inherit;
+  color: var(--am-text);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.am-pill--studio:hover,
+.am-pill--studio:focus-visible {
+  background: var(--am-hover);
+  border-color: var(--am-accent);
+}
+
+/* Основная студия с акцентным краем: она и отвечает за постановку. */
+.am-pill--studio-main {
+  border-color: rgba(88, 166, 255, 0.45);
+}
+
+.am-pill__logo {
+  height: 14px;
+  max-width: 26px;
+  object-fit: contain;
+}
+
+/* Доска карточки: описание, колонка записи, франшиза и люди на одних
+   областях. На узком окне франшиза — полка на полный ряд, люди ниже. */
 .am-board {
   display: grid;
+  grid-template-areas:
+    "about mine"
+    "fran fran"
+    "folk folk";
   grid-template-columns: minmax(0, 84ch) 380px;
   gap: 18px;
   align-items: start;
   justify-content: start;
 }
 
+.am-split__main {
+  grid-area: about;
+}
+
+.am-split__side {
+  grid-area: mine;
+}
+
 .am-split__main,
 .am-split__side {
   display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.am-board__folk {
+  display: flex;
+  grid-area: folk;
   flex-direction: column;
   gap: 18px;
   min-width: 0;
@@ -1073,64 +1197,11 @@ watch(mediaId, () => {
   border-radius: 50%;
 }
 
-/* Производство — блок в колонке записи: студий у тайтла мало. */
-.am-studios {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.am-studios__label {
-  font-size: 12.5px;
-  color: var(--am-faint);
-}
-
-.am-studios__list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.am-studios__chip {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  min-height: var(--am-ctl);
-  padding: 6px 14px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 550;
-  color: var(--am-text);
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-
-.am-studios__chip:hover {
-  background: var(--am-hover);
-  border-color: var(--am-accent);
-}
-
-/* Основная студия с акцентным краем: она и отвечает за постановку. */
-.am-studios__chip--main {
-  border-color: rgba(88, 166, 255, 0.45);
-}
-
-.am-studios__logo {
-  height: 16px;
-  max-width: 32px;
-  object-fit: contain;
-}
-
 /* Франшиза — полкой постеров на полный ряд доски: хронология длинная,
    а колонка записи от такого списка складывалась стопкой. */
 .am-fran {
   display: flex;
-  grid-column: 1 / -1;
+  grid-area: fran;
   flex-direction: column;
   gap: 14px;
 }
@@ -1195,8 +1266,10 @@ watch(mediaId, () => {
   border-color: var(--am-line-soft);
 }
 
+/* Текущий тайтл подсвечен явно: ореол постера и акцентная метка. */
 .am-part__hit--here .am-part__art {
   border-color: var(--am-accent);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.22);
 }
 
 .am-part__year {
@@ -1217,7 +1290,8 @@ watch(mediaId, () => {
 
 .am-part__here {
   font-size: 11.5px;
-  color: var(--am-faint);
+  font-weight: 600;
+  color: var(--am-accent);
 }
 
 .am-fran__hidden {
@@ -1226,33 +1300,54 @@ watch(mediaId, () => {
   color: var(--am-faint);
 }
 
-/* Широкое окно: франшиза — третья колонка доски, правая треть не пустует.
-   Строка хронологии: мини-постер, год, имя в одну строку, закладка справа. */
+/* Широкое окно: франшиза — третья колонка доски. Длинная владеет правым
+   краем на две строки (люди подтягиваются под описание, пустоты нет),
+   короткая занимает только свой ряд, и люди идут во всю ширину. */
 @media (min-width: 1700px) {
-  .am-board--full {
+  .am-board--fran-long,
+  .am-board--fran-short {
     grid-template-columns: minmax(0, 84ch) 380px minmax(280px, 1fr);
     justify-content: stretch;
   }
 
-  .am-board--full .am-fran {
-    grid-column: auto;
+  .am-board--fran-long {
+    grid-template-areas:
+      "about mine fran"
+      "folk folk fran";
   }
 
-  .am-board--full .am-fran .am-rail {
+  .am-board--fran-short {
+    grid-template-areas:
+      "about mine fran"
+      "folk folk folk";
+  }
+
+  .am-board--fran-long .am-fran {
+    align-self: stretch;
+  }
+
+  .am-board--fran-long .am-fran .am-rail,
+  .am-board--fran-short .am-fran .am-rail {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    max-height: 460px;
     padding: 0;
     overflow-x: hidden;
     overflow-y: auto;
   }
 
-  .am-board--full .am-part {
+  .am-board--fran-long .am-fran .am-rail {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .am-board--fran-long .am-part,
+  .am-board--fran-short .am-part {
     width: auto;
   }
 
-  .am-board--full .am-part__hit {
+  .am-board--fran-long .am-part__hit,
+  .am-board--fran-short .am-part__hit {
     flex-direction: row;
     gap: 10px;
     align-items: center;
@@ -1261,7 +1356,8 @@ watch(mediaId, () => {
     border-radius: var(--am-r-s);
   }
 
-  .am-board--full .am-part__art {
+  .am-board--fran-long .am-part__art,
+  .am-board--fran-short .am-part__art {
     flex: none;
     width: 34px;
     margin-bottom: 0;
@@ -1269,32 +1365,47 @@ watch(mediaId, () => {
   }
 
   /* На строке подъём постера не нужен: ховерит вся строка. */
-  .am-board--full .am-part__hit:hover .am-part__art,
-  .am-board--full .am-part__hit:focus-visible .am-part__art {
+  .am-board--fran-long .am-part__hit:hover .am-part__art,
+  .am-board--fran-long .am-part__hit:focus-visible .am-part__art,
+  .am-board--fran-short .am-part__hit:hover .am-part__art,
+  .am-board--fran-short .am-part__hit:focus-visible .am-part__art {
     transform: none;
     border-color: var(--am-line-soft);
   }
 
-  .am-board--full .am-part__hit:hover,
-  .am-board--full .am-part__hit:focus-visible {
+  .am-board--fran-long .am-part__hit:hover,
+  .am-board--fran-long .am-part__hit:focus-visible,
+  .am-board--fran-short .am-part__hit:hover,
+  .am-board--fran-short .am-part__hit:focus-visible {
     background: var(--am-hover);
   }
 
-  .am-board--full .am-part__hit--still:hover {
+  .am-board--fran-long .am-part__hit--still:hover,
+  .am-board--fran-short .am-part__hit--still:hover {
     background: none;
   }
 
-  .am-board--full .am-part__hit--here {
+  /* Текущая строка: акцентная кромка слева вдобавок к фону. */
+  .am-board--fran-long .am-part__hit--here,
+  .am-board--fran-short .am-part__hit--here {
     background: rgba(88, 166, 255, 0.08);
+    box-shadow: inset 2px 0 0 var(--am-accent);
   }
 
-  .am-board--full .am-part__year {
+  .am-board--fran-long .am-part__hit--here .am-part__art,
+  .am-board--fran-short .am-part__hit--here .am-part__art {
+    box-shadow: none;
+  }
+
+  .am-board--fran-long .am-part__year,
+  .am-board--fran-short .am-part__year {
     flex: none;
     width: 38px;
     font-size: 12px;
   }
 
-  .am-board--full .am-part__name {
+  .am-board--fran-long .am-part__name,
+  .am-board--fran-short .am-part__name {
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -1303,8 +1414,10 @@ watch(mediaId, () => {
     white-space: nowrap;
   }
 
-  .am-board--full .am-part__status,
-  .am-board--full .am-part__here {
+  .am-board--fran-long .am-part__status,
+  .am-board--fran-long .am-part__here,
+  .am-board--fran-short .am-part__status,
+  .am-board--fran-short .am-part__here {
     flex: none;
     margin-left: auto;
   }
@@ -1312,6 +1425,11 @@ watch(mediaId, () => {
 
 @media (max-width: 1180px) {
   .am-board {
+    grid-template-areas:
+      "about"
+      "mine"
+      "fran"
+      "folk";
     grid-template-columns: minmax(0, 1fr);
   }
 
