@@ -41,6 +41,9 @@ const GENRE_WORDS: Readonly<Record<string, string>> = {
   Thriller: 'Триллер',
 }
 
+/** Жанры каталога в объявленном порядке: чипы витрины главной. */
+export const GENRE_CHOICES: readonly string[] = Object.keys(GENRE_WORDS)
+
 /** Пол человека в карточке: существительным, а не отметкой в анкете. */
 const GENDER_WORDS: Readonly<Record<string, string>> = {
   Male: 'Мужчина',
