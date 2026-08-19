@@ -50,14 +50,14 @@ const SHELF_WHERE: Record<ShelfKind, string> = {
   airing: 'season: $season, seasonYear: $seasonYear, sort: [POPULARITY_DESC]',
   trending: 'sort: [TRENDING_DESC]',
   top: 'sort: [SCORE_DESC]',
-  genre: 'genre_in: [$genre], sort: [SCORE_DESC]',
+  genre: 'genre_in: $genres, sort: [SCORE_DESC]',
 }
 
 // Лишняя переменная в объявлении роняет весь запрос: собирается своя под вид.
 function shelfQuery(kind: ShelfKind): string {
   let extra = ''
   if (kind === 'airing') extra = ', $season: MediaSeason, $seasonYear: Int'
-  if (kind === 'genre') extra = ', $genre: String'
+  if (kind === 'genre') extra = ', $genres: [String]'
 
   return `query ($type: MediaType, $perPage: Int!${extra}) {
   Page(page: 1, perPage: $perPage) {
@@ -188,13 +188,13 @@ export function currentSeason(): { season: string; seasonYear: number } {
 export async function fetchShelf(
   kind: ShelfKind,
   type: MediaType,
-  genre?: string,
+  genres?: string[],
 ): Promise<MediaBrief[]> {
-  if (kind === 'genre' && (genre === undefined || genre === '')) return []
+  if (kind === 'genre' && (genres === undefined || genres.length === 0)) return []
 
   const vars: Record<string, unknown> = { type, perPage: SHELF_SIZE }
   if (kind === 'airing') Object.assign(vars, currentSeason())
-  if (kind === 'genre') vars.genre = genre
+  if (kind === 'genre') vars.genres = genres
 
   const reply = await anilistQuery<ShelfReply>(shelfQuery(kind), vars)
   const media = reply.data?.Page?.media
