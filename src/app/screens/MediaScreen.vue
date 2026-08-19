@@ -17,6 +17,7 @@ import {
   prefetchRussianTitles,
   type RussianTitle,
 } from '@/core/media-title'
+import { getTitleRatings, type TitleRatings } from '@/core/ratings'
 import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
@@ -36,6 +37,9 @@ const sheetOpen = ref(false)
 
 /** Литографии студий с Шикимори: подставляются в чипы по готовности. */
 const logos = ref<Map<string, string> | null>(null)
+
+/** Оценки Шикимори и MAL: доход отдельный от русской карточки тайтла. */
+const platformRatings = ref<TitleRatings | null>(null)
 
 /** Хронология франшизы: null — дерева нет или оно не приехало. */
 const franchise = ref<FranchiseWork[] | null>(null)
@@ -243,24 +247,9 @@ interface Rating {
   value: string
 }
 
-/** Собственная средняя Шикимори — из распределения голосов, как в виджете скрипта. */
-function shikiScore(rates: Array<{ name: string; value: number }>): number | null {
-  let sum = 0
-  let votes = 0
-  for (const stat of rates) {
-    const mark = Number.parseInt(String(stat.name), 10)
-    const count = Number(stat.value)
-    if (!Number.isFinite(mark) || mark < 1 || mark > 10) continue
-    if (!Number.isFinite(count) || count <= 0) continue
-    sum += mark * count
-    votes += count
-  }
-  return votes > 0 ? sum / votes : null
-}
-
 /**
- * Рейтинг трёх площадок. AniList — из карточки, MAL — поле score карточки
- * Шикимори (их зеркало чужой оценки), Шикимори — среднее по голосам.
+ * Рейтинг трёх площадок. AniList — из карточки; Шикимори и MAL — своим
+ * доходом: название мог добыть anime365, у которого оценок нет вовсе.
  */
 const ratings = computed<Rating[]>(() => {
   const list: Rating[] = []
@@ -270,11 +259,13 @@ const ratings = computed<Rating[]>(() => {
     list.push({ key: 'al', label: 'AniList', value: (al / 10).toFixed(1) })
   }
 
-  const shiki = russian.value?.rates ? shikiScore(russian.value.rates) : null
-  if (shiki !== null) list.push({ key: 'shiki', label: 'Шикимори', value: shiki.toFixed(1) })
-
-  const mal = Number(russian.value?.score)
-  if (Number.isFinite(mal) && mal > 0) list.push({ key: 'mal', label: 'MAL', value: mal.toFixed(1) })
+  const marks = platformRatings.value
+  if (marks?.shikimori) {
+    list.push({ key: 'shiki', label: 'Шикимори', value: marks.shikimori.toFixed(1) })
+  }
+  if (marks?.mal) {
+    list.push({ key: 'mal', label: 'MAL', value: marks.mal.toFixed(1) })
+  }
 
   return list
 })
@@ -368,6 +359,7 @@ async function load(): Promise<void> {
 
   card.value = null
   russian.value = null
+  platformRatings.value = null
   franchise.value = null
   trouble.value = ''
   sheetOpen.value = false
@@ -396,6 +388,11 @@ async function load(): Promise<void> {
         if (mine === run) logos.value = map
       })
     }
+
+    // Оценки площадок — своим доходом: карточка их не ждёт.
+    void getTitleRatings(id, found.malId, found.type).then((marks) => {
+      if (mine === run) platformRatings.value = marks
+    })
 
     // Дерево франшизы — фоном: полка его не ждёт.
     void beginFranchise(mine, id, found)
@@ -1256,7 +1253,7 @@ watch(mediaId, () => {
   color: var(--am-faint);
 }
 
-/* Текущий тайтл и части вне каталога — просто плитки, не переходы. */
+/* Текущий тайтл — просто плитка, не переход. */
 .am-part__hit--still {
   cursor: default;
 }
