@@ -20,6 +20,8 @@ export interface FranchiseWork {
   name: string
   year: number | null
   kind: string | null
+  /** Постер из карты AniList; null у несопоставленного. */
+  cover: string | null
   /** Метка 18+ из карты AniList; несопоставленное считается безопасным. */
   isAdult: boolean
 }
@@ -35,6 +37,7 @@ const FRANCHISE_MAP_QUERY = `
         idMal
         type
         isAdult
+        coverImage { medium }
       }
     }
   }
@@ -56,6 +59,7 @@ interface MapMediaItem {
   idMal?: number | null
   type?: MediaType | null
   isAdult?: boolean | null
+  coverImage?: { medium?: string | null } | null
 }
 
 /** Сортировка по году, затем по номеру: части без года уходят в конец. */
@@ -101,9 +105,13 @@ export async function fetchFranchise(
 
   const cached = await dbGet<FranchiseCacheRecord>('franchiseCache', mediaId)
   if (cached && Array.isArray(cached.data)) {
-    const works = cached.data as FranchiseWork[]
-    memory.set(mediaId, works)
-    return works
+    const first = cached.data[0] as Record<string, unknown> | undefined
+    // Записи до появления постеров считаются промахом: дерево спросится заново.
+    if (first !== undefined && 'cover' in first) {
+      const works = cached.data as FranchiseWork[]
+      memory.set(mediaId, works)
+      return works
+    }
   }
 
   const reply = await fetchShiki<FranchiseResponse>(
@@ -138,6 +146,7 @@ export async function fetchFranchise(
       name: node.name,
       year: node.year ?? null,
       kind: node.kind ?? null,
+      cover: mapped?.coverImage?.medium ?? null,
       isAdult: mapped?.isAdult ?? false,
     })
   }
