@@ -4,7 +4,7 @@
 // странице; здесь переходы внутренние, а статусы берутся из своей
 // памяти списка — авторизованный запрос ради них не нужен.
 
-import { queryAnilist } from '../api/anilist'
+import { anilistQuery } from '../api/anilist'
 import { fetchShiki } from '../api/shikimori'
 import { dbGet, dbSet } from './db'
 import { Logger } from '../utils/logger'
@@ -101,11 +101,11 @@ async function load(
   const mappedByMal = new Map<number, FranchiseMapEntry>()
   if (malIds.length > 0) {
     const answers = await Promise.all([
-      queryAnilist<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
+      anilistQuery<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
         ids: malIds,
         type: 'ANIME',
       }),
-      queryAnilist<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
+      anilistQuery<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
         ids: malIds,
         type: 'MANGA',
       }),
