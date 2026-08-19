@@ -59,15 +59,17 @@ const memory = new Map<number, FranchiseWork[] | null>()
 const pending = new Map<number, Promise<FranchiseWork[] | null>>()
 
 /** Читает дерево со склада. Записи без постеров или с частями без
- *  сопоставления — старой формы: считаются промахом и переспрашиваются. */
+ *  сопоставления — старой формы: промах. Проверяется каждая часть, а не
+ *  первая: иначе старый склад с клипом в середине выживал. */
 async function readCache(mediaId: number): Promise<FranchiseWork[] | null> {
   const record = await dbGet<FranchiseCacheRecord>('franchiseCache', mediaId)
   const data = record?.data
   if (!Array.isArray(data) || data.length === 0) return null
 
-  const first = data[0] as Partial<FranchiseWork> | undefined
-  if (!first || typeof first.name !== 'string') return null
-  if (!('cover' in first) || first.mediaId === undefined || first.mediaId === null) return null
+  for (const work of data as Array<Partial<FranchiseWork> | undefined>) {
+    if (!work || typeof work.name !== 'string') return null
+    if (!('cover' in work) || work.mediaId === undefined || work.mediaId === null) return null
+  }
 
   return data as FranchiseWork[]
 }
