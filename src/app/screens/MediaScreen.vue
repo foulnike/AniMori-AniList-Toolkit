@@ -552,7 +552,7 @@ watch(mediaId, () => {
           </div>
         </div>
 
-        <div class="am-split">
+        <div class="am-board" :class="{ 'am-board--full': franchiseRows.length > 0 }">
           <div class="am-split__main">
             <div class="am-panel am-about-box">
               <h3 class="am-h3">Описание</h3>
@@ -637,67 +637,71 @@ watch(mediaId, () => {
               </div>
             </div>
           </aside>
-        </div>
 
-        <div v-if="franchiseRows.length > 0" class="am-panel am-fran">
-          <h3 class="am-h3">Франшиза</h3>
+          <div v-if="franchiseRows.length > 0" class="am-panel am-fran">
+            <h3 class="am-h3">Франшиза</h3>
 
-          <div ref="franList" class="am-rail">
-            <article v-for="work in franchiseRows" :key="work.malId ?? work.name" class="am-part">
-              <button
-                v-if="work.mediaId !== null && work.mediaId !== mediaId"
-                class="am-part__hit"
-                type="button"
-                :title="franchiseHint(work)"
-                @click="openFranchiseWork(work)"
+            <div ref="franList" class="am-rail">
+              <article
+                v-for="work in franchiseRows"
+                :key="work.malId ?? work.name"
+                class="am-part"
               >
-                <img
-                  v-if="work.cover"
-                  class="am-part__art"
-                  :src="work.cover"
-                  :alt="work.name"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <span v-else class="am-part__art am-part__art--empty" aria-hidden="true">
-                  {{ work.name.slice(0, 1) }}
-                </span>
-                <span class="am-part__year">{{ work.year ?? '···' }}</span>
-                <span class="am-part__name">{{ franchiseName(work) }}</span>
-                <span v-if="franchiseStatus(work)" class="am-part__status">
-                  {{ franchiseStatus(work) }}
-                </span>
-              </button>
-              <div
-                v-else
-                class="am-part__hit am-part__hit--still"
-                :class="{ 'am-part__hit--here': work.mediaId === mediaId }"
-                :title="franchiseHint(work)"
-              >
-                <img
-                  v-if="work.cover"
-                  class="am-part__art"
-                  :src="work.cover"
-                  :alt="work.name"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <span v-else class="am-part__art am-part__art--empty" aria-hidden="true">
-                  {{ work.name.slice(0, 1) }}
-                </span>
-                <span class="am-part__year">{{ work.year ?? '···' }}</span>
-                <span class="am-part__name">{{ franchiseName(work) }}</span>
-                <span v-if="work.mediaId === mediaId" class="am-part__here">вы здесь</span>
-                <span v-else-if="franchiseStatus(work)" class="am-part__status">
-                  {{ franchiseStatus(work) }}
-                </span>
-              </div>
-            </article>
+                <button
+                  v-if="work.mediaId !== null && work.mediaId !== mediaId"
+                  class="am-part__hit"
+                  type="button"
+                  :title="franchiseHint(work)"
+                  @click="openFranchiseWork(work)"
+                >
+                  <img
+                    v-if="work.cover"
+                    class="am-part__art"
+                    :src="work.cover"
+                    :alt="work.name"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <span v-else class="am-part__art am-part__art--empty" aria-hidden="true">
+                    {{ work.name.slice(0, 1) }}
+                  </span>
+                  <span class="am-part__year">{{ work.year ?? '···' }}</span>
+                  <span class="am-part__name">{{ franchiseName(work) }}</span>
+                  <span v-if="franchiseStatus(work)" class="am-part__status">
+                    {{ franchiseStatus(work) }}
+                  </span>
+                </button>
+                <div
+                  v-else
+                  class="am-part__hit am-part__hit--still"
+                  :class="{ 'am-part__hit--here': work.mediaId === mediaId }"
+                  :title="franchiseHint(work)"
+                >
+                  <img
+                    v-if="work.cover"
+                    class="am-part__art"
+                    :src="work.cover"
+                    :alt="work.name"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <span v-else class="am-part__art am-part__art--empty" aria-hidden="true">
+                    {{ work.name.slice(0, 1) }}
+                  </span>
+                  <span class="am-part__year">{{ work.year ?? '···' }}</span>
+                  <span class="am-part__name">{{ franchiseName(work) }}</span>
+                  <span v-if="work.mediaId === mediaId" class="am-part__here">вы здесь</span>
+                  <span v-else-if="franchiseStatus(work)" class="am-part__status">
+                    {{ franchiseStatus(work) }}
+                  </span>
+                </div>
+              </article>
+            </div>
+
+            <p v-if="franchiseHidden > 0" class="am-fran__hidden">
+              Скрыто с меткой 18+: {{ franchiseHidden }}
+            </p>
           </div>
-
-          <p v-if="franchiseHidden > 0" class="am-fran__hidden">
-            Скрыто с меткой 18+: {{ franchiseHidden }}
-          </p>
         </div>
 
         <PeopleBox :media-id="mediaId" :type="card.type" />
@@ -867,9 +871,9 @@ watch(mediaId, () => {
   border-color: rgba(88, 166, 255, 0.4);
 }
 
-/* Колонка описания равна длине строки, а не всей ширине окна:
-   иначе панель тянется дальше текста и правая половина пустует. */
-.am-split {
+/* Доска карточки: описание, колонка записи и франшиза. На узком окне
+   франшиза занимает полный ряд под колонками, на широком — третью колонку. */
+.am-board {
   display: grid;
   grid-template-columns: minmax(0, 84ch) 380px;
   gap: 18px;
@@ -1122,8 +1126,15 @@ watch(mediaId, () => {
   object-fit: contain;
 }
 
-/* Франшиза — полкой постеров во всю ширину: хронология длинная,
+/* Франшиза — полкой постеров на полный ряд доски: хронология длинная,
    а колонка записи от такого списка складывалась стопкой. */
+.am-fran {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .am-fran .am-rail {
   grid-auto-columns: 108px;
 }
@@ -1215,8 +1226,92 @@ watch(mediaId, () => {
   color: var(--am-faint);
 }
 
+/* Широкое окно: франшиза — третья колонка доски, правая треть не пустует.
+   Строка хронологии: мини-постер, год, имя в одну строку, закладка справа. */
+@media (min-width: 1700px) {
+  .am-board--full {
+    grid-template-columns: minmax(0, 84ch) 380px minmax(280px, 1fr);
+    justify-content: stretch;
+  }
+
+  .am-board--full .am-fran {
+    grid-column: auto;
+  }
+
+  .am-board--full .am-fran .am-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 460px;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .am-board--full .am-part {
+    width: auto;
+  }
+
+  .am-board--full .am-part__hit {
+    flex-direction: row;
+    gap: 10px;
+    align-items: center;
+    min-height: 44px;
+    padding: 4px 8px;
+    border-radius: var(--am-r-s);
+  }
+
+  .am-board--full .am-part__art {
+    flex: none;
+    width: 34px;
+    margin-bottom: 0;
+    border-radius: var(--am-r-s);
+  }
+
+  /* На строке подъём постера не нужен: ховерит вся строка. */
+  .am-board--full .am-part__hit:hover .am-part__art,
+  .am-board--full .am-part__hit:focus-visible .am-part__art {
+    transform: none;
+    border-color: var(--am-line-soft);
+  }
+
+  .am-board--full .am-part__hit:hover,
+  .am-board--full .am-part__hit:focus-visible {
+    background: var(--am-hover);
+  }
+
+  .am-board--full .am-part__hit--still:hover {
+    background: none;
+  }
+
+  .am-board--full .am-part__hit--here {
+    background: rgba(88, 166, 255, 0.08);
+  }
+
+  .am-board--full .am-part__year {
+    flex: none;
+    width: 38px;
+    font-size: 12px;
+  }
+
+  .am-board--full .am-part__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .am-board--full .am-part__status,
+  .am-board--full .am-part__here {
+    flex: none;
+    margin-left: auto;
+  }
+}
+
 @media (max-width: 1180px) {
-  .am-split {
+  .am-board {
     grid-template-columns: minmax(0, 1fr);
   }
 
