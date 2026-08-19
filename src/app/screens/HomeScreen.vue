@@ -1,30 +1,27 @@
 <script setup lang="ts">
-// Пункт 3.9: главная как лицо программы. Своих данных не добывает:
-// берёт то, что уже лежит в памяти коллекции, и добирает только вид.
-// Обновление списка с сервера живёт на экране списков: там ему и место.
-import { computed, onMounted, ref } from 'vue'
+// Главная — витрина рекомендаций (пункт 3.11). Своя полка идёт из памяти
+// коллекции, витрина каталога — через core/recs: сети экран не знает.
+// Статистика с главной убрана: сводке найдётся своё место отдельно.
+import { computed, onMounted, ref, watch } from 'vue'
 
-import { entryCount, initCollection } from '@/core/collection'
-import {
-  averageScore,
-  countByStatus,
-  countEntries,
-  selectEntries,
-  totalProgress,
-} from '@/core/collection-view'
+import type { MediaBrief } from '@/api/anilist-media'
+import { initCollection } from '@/core/collection'
+import { selectEntries } from '@/core/collection-view'
 import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
+import { hideRec, motifShelf, recShelf, tasteShelf } from '@/core/recs'
 import type { SnapshotEntry } from '@/core/snapshot'
 import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
-import { formatWord, partsShort } from '../labels'
+import { formatWord, GENRE_CHOICES, genreWord, partsShort } from '../labels'
 import { navigate } from '../router'
+import { toTileRow, type TileRow } from '../tile-row'
+import { homeGenre, homeKind } from './home-keep'
 
-/** Сколько постеров класть на полку аниме и полку манги. */
-const ANIME_SHELF = 14
-const MANGA_SHELF = 8
+/** Сколько постеров класть на свою полку. */
+const SHELF_SIZE = 14
 
 /** Скольким плиткам добирать русские названия и по скольку за заход. */
 const TITLE_DEPTH = 12
@@ -33,7 +30,7 @@ const TITLE_CHUNK = 6
 /** Сколько заглушек держать на время подъёма снимка. */
 const HOLD_COUNT = 7
 
-/** Плитка полки. Тот же вид, что в списках: вид тайтла везде один. */
+/** Плитка своей полки. Тот же вид, что в списках: вид тайтла везде один. */
 interface Row {
   mediaId: number
   title: string
@@ -46,29 +43,42 @@ interface Row {
   adult: boolean
 }
 
-/** Сводка цифрами: одна карточка — одно число с подписью. */
-interface Sum {
+/** Полка витрины в показе: заголовок и готовые плитки. */
+interface Shelf {
   key: string
-  name: string
-  value: string
+  title: string
+  rows: TileRow[]
+}
+
+/** Описание полки витрины: что грузить и как назвать. */
+interface ShelfDef {
+  key: string
+  title: string
+  load: () => Promise<MediaBrief[]>
 }
 
 const busy = ref(true)
 const trouble = ref('')
-const animeRows = ref<Row[]>([])
-const mangaRows = ref<Row[]>([])
-const sums = ref<Sum[]>([])
-const total = ref(0)
+const ownRows = ref<Row[]>([])
+const recs = ref<Shelf[]>([])
+const recsPending = ref(false)
 
-const empty = computed(() => total.value === 0)
+/** Заголовок своей полки под вкладку: смотрят аниме, читают мангу. */
+const ownTitle = computed(() =>
+  homeKind.value === 'MANGA' ? 'Читаю сейчас' : 'Продолжаю смотреть',
+)
 
-/** Записи полок вне реактивности: по ним плитки пересбираются после добора. */
-let animeEntries: SnapshotEntry[] = []
-let mangaEntries: SnapshotEntry[] = []
+/** Записи своей полки вне реактивности: плитки пересобираются после добора. */
+let ownEntries: SnapshotEntry[] = []
 
-/** Номера идущих доборов: быстрый уход с главной гасит старую работу. */
+/** Приехавшие полки витрины и их порядок: плитки собираются на показ. */
+const staged = new Map<string, MediaBrief[]>()
+let activeDefs: ShelfDef[] = []
+
+/** Номера идущих доборов: уход со вкладки гасит старую работу. */
 let lookRun = 0
 let titleRun = 0
+let recsRun = 0
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -92,7 +102,7 @@ function ownText(entry: SnapshotEntry, parts: number | null): string | null {
   return `${entry.progress} / ${parts} ${short}`
 }
 
-/** Запись памяти в плитку полки. */
+/** Запись памяти в плитку своей полки. */
 function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
 
@@ -119,68 +129,35 @@ function toRow(entry: SnapshotEntry): Row {
   }
 }
 
-/** Что человек смотрит или читает сейчас, свежее — впереди. */
-function pickShelf(type: MediaType, limit: number): SnapshotEntry[] {
-  return selectEntries({ type, status: ['CURRENT', 'REPEATING'] }, { key: 'updated' }, { limit })
+/** Пересобирает плитки своей полки из памяти. */
+function redrawOwn(): void {
+  ownRows.value = ownEntries.map(toRow)
 }
 
-/** Сводка по памяти. Средняя с одним знаком: два здесь ничего не добавляют. */
-function countSums(): Sum[] {
-  const animeByStatus = countByStatus({ type: 'ANIME' })
-  const mangaByStatus = countByStatus({ type: 'MANGA' })
-  const mark = averageScore()
-
-  return [
-    { key: 'watch', name: 'Смотрю', value: String(animeByStatus.get('CURRENT') ?? 0) },
-    { key: 'read', name: 'Читаю', value: String(mangaByStatus.get('CURRENT') ?? 0) },
-    { key: 'done', name: 'Просмотрено', value: String(animeByStatus.get('COMPLETED') ?? 0) },
-    { key: 'plan', name: 'В планах', value: String(animeByStatus.get('PLANNING') ?? 0) },
-    { key: 'eps', name: 'Серий просмотрено', value: String(totalProgress({ type: 'ANIME' })) },
-    { key: 'chs', name: 'Глав прочитано', value: String(totalProgress({ type: 'MANGA' })) },
-    { key: 'mark', name: 'Средняя оценка', value: mark > 0 ? mark.toFixed(1) : '—' },
-    { key: 'all', name: 'Записей всего', value: String(countEntries()) },
-  ]
-}
-
-function redraw(): void {
-  total.value = entryCount()
-  sums.value = countSums()
-  animeRows.value = animeEntries.map(toRow)
-  mangaRows.value = mangaEntries.map(toRow)
-}
-
-/** Добирает обложки показанных полок: два вида — два запроса. */
-async function fillLooks(): Promise<void> {
+/** Добирает обложки своей полки: снимок картинок не хранит. */
+async function fillLooks(type: MediaType): Promise<void> {
   const mine = ++lookRun
+  const wanted = ownEntries
+    .filter((entry) => peekLook(entry.mediaId) === null)
+    .map((entry) => entry.mediaId)
 
-  const pairs: ReadonlyArray<{ type: MediaType; entries: SnapshotEntry[] }> = [
-    { type: 'ANIME', entries: animeEntries },
-    { type: 'MANGA', entries: mangaEntries },
-  ]
+  if (wanted.length === 0) return
 
-  for (const pair of pairs) {
-    const wanted = pair.entries
-      .filter((entry) => peekLook(entry.mediaId) === null)
-      .map((entry) => entry.mediaId)
+  try {
+    await warmLooks(wanted, type)
+    if (mine !== lookRun) return
 
-    if (wanted.length === 0) continue
-
-    try {
-      await warmLooks(wanted, pair.type)
-      if (mine !== lookRun) return
-
-      redraw()
-    } catch (e) {
-      // Без обложки плитка останется с буквой названия — это не повод ругаться.
-      Logger('WARN', 'Главная: обложки добрать не вышло', e)
-    }
+    redrawOwn()
+  } catch (e) {
+    // Без обложки плитка останется с буквой названия — это не повод ругаться.
+    Logger('WARN', 'Главная: обложки добрать не вышло', e)
   }
 }
 
-/** Добирает русские названия верхним плиткам полки аниме. */
-async function fillTitles(): Promise<void> {
+/** Добирает русские названия верхним плиткам своей полки. */
+async function fillTitles(type: MediaType): Promise<void> {
   const mine = ++titleRun
-  const wanted = animeEntries
+  const wanted = ownEntries
     .slice(0, TITLE_DEPTH)
     .filter((entry) => peekRussianName(entry.mediaId) === null)
     .map((entry) => entry.mediaId)
@@ -191,14 +168,126 @@ async function fillTitles(): Promise<void> {
     for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
       if (mine !== titleRun) return
 
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
+      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), type)
       if (mine !== titleRun) return
 
-      redraw()
+      redrawOwn()
     }
   } catch (e) {
     Logger('WARN', 'Главная: названия добрать не вышло', e)
   }
+}
+
+/** Своя полка текущей вкладки: продолжение просмотра и чтения. */
+function buildOwn(type: MediaType): void {
+  ownEntries = selectEntries(
+    { type, status: ['CURRENT', 'REPEATING'] },
+    { key: 'updated' },
+    { limit: SHELF_SIZE },
+  )
+  redrawOwn()
+  void fillLooks(type)
+  void fillTitles(type)
+}
+
+/** Состав витрины: свой подбор впереди; чип жанра замещает три полки каталога. */
+function shelfDefs(type: MediaType): ShelfDef[] {
+  const defs: ShelfDef[] = [
+    { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf(type) },
+    { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf(type) },
+  ]
+
+  const genre = homeGenre.value
+  if (genre !== '') {
+    defs.push({
+      key: 'genre',
+      title: `Жанр: ${genreWord(genre) ?? genre}`,
+      load: () => recShelf('genre', type, [genre]),
+    })
+    return defs
+  }
+
+  defs.push({ key: 'airing', title: 'Сейчас выходит', load: () => recShelf('airing', type) })
+  defs.push({ key: 'trending', title: 'В тренде', load: () => recShelf('trending', type) })
+  defs.push({ key: 'top', title: 'Лучшее за всё время', load: () => recShelf('top', type) })
+  return defs
+}
+
+/** Собирает полки в показ: приехавшее встаёт на своё место в порядке состава. */
+function publish(): void {
+  const out: Shelf[] = []
+  for (const def of activeDefs) {
+    const items = staged.get(def.key)
+    if (items !== undefined && items.length > 0) {
+      out.push({ key: def.key, title: def.title, rows: items.map(toTileRow) })
+    }
+  }
+  recs.value = out
+}
+
+/** Добирает русские названия плиткам полки витрины. */
+async function warmRecTitles(mine: number, key: string, type: MediaType): Promise<void> {
+  const items = staged.get(key)
+  if (items === undefined) return
+
+  const wanted = items
+    .filter((brief) => peekRussianName(brief.mediaId) === null)
+    .map((brief) => brief.mediaId)
+
+  try {
+    for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
+      if (mine !== recsRun) return
+
+      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), type)
+      if (mine !== recsRun) return
+
+      publish()
+    }
+  } catch (e) {
+    Logger('WARN', 'Главная: названия витрины добрать не вышло', e)
+  }
+}
+
+/** Полки витрины текущей вкладки: каждая встаёт сама по готовности. */
+function loadRecs(type: MediaType): void {
+  const mine = ++recsRun
+  staged.clear()
+  recs.value = []
+  activeDefs = shelfDefs(type)
+  recsPending.value = true
+
+  const tasks = activeDefs.map((def) =>
+    def
+      .load()
+      .then((items) => {
+        if (mine !== recsRun || items.length === 0) return
+        staged.set(def.key, items)
+        publish()
+        void warmRecTitles(mine, def.key, type)
+      })
+      .catch((e) => {
+        Logger('WARN', `Главная: полка «${def.key}» не доехала`, e)
+      }),
+  )
+
+  void Promise.allSettled(tasks).then(() => {
+    if (mine === recsRun) recsPending.value = false
+  })
+}
+
+/** Прячет тайтл из витрины: из памяти сразу, в хранилище — вдогонку. */
+function hideOne(mediaId: number): void {
+  void hideRec(mediaId)
+  for (const items of staged.values()) {
+    const at = items.findIndex((brief) => brief.mediaId === mediaId)
+    if (at >= 0) items.splice(at, 1)
+  }
+  publish()
+}
+
+/** Чип жанра: повторное нажатие снимает отбор. */
+function toggleGenre(genre: string): void {
+  homeGenre.value = homeGenre.value === genre ? '' : genre
 }
 
 function open(mediaId: number): void {
@@ -222,20 +311,23 @@ onMounted(() => {
     try {
       // Подъём снимка без сети: главная должна открываться и при лежащем API.
       await initCollection()
-
-      animeEntries = pickShelf('ANIME', ANIME_SHELF)
-      mangaEntries = pickShelf('MANGA', MANGA_SHELF)
-      redraw()
     } catch (e) {
       trouble.value = describe(e)
-      return
-    } finally {
       busy.value = false
+      return
     }
 
-    await fillLooks()
-    await fillTitles()
+    busy.value = false
+    buildOwn(homeKind.value)
+    loadRecs(homeKind.value)
   })()
+})
+
+// Страж busy не пускает пересборку до подъёма снимка: иначе витрина встанет на пустом списке.
+watch([homeKind, homeGenre], () => {
+  if (busy.value) return
+  buildOwn(homeKind.value)
+  loadRecs(homeKind.value)
 })
 </script>
 
@@ -244,7 +336,7 @@ onMounted(() => {
     <div class="am-hey">
       <div class="am-hey__text">
         <h2 class="am-hey__title">С возвращением</h2>
-        <p class="am-hey__sub">Продолжайте с того места, где остановились.</p>
+        <p class="am-hey__sub">Продолжайте с того места, где остановились, или найдите новое.</p>
 
         <div class="am-hey__acts">
           <button class="am-btn" type="button" @click="toLists">Мои списки</button>
@@ -255,12 +347,37 @@ onMounted(() => {
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
-    <ul v-if="!empty" class="am-nums">
-      <li v-for="sum in sums" :key="sum.key" class="am-num">
-        <span class="am-num__value">{{ sum.value }}</span>
-        <span class="am-num__name">{{ sum.name }}</span>
-      </li>
-    </ul>
+    <div class="am-tabs">
+      <button
+        class="am-seg"
+        :class="{ 'am-seg--on': homeKind === 'ANIME' }"
+        type="button"
+        @click="homeKind = 'ANIME'"
+      >
+        Аниме
+      </button>
+      <button
+        class="am-seg"
+        :class="{ 'am-seg--on': homeKind === 'MANGA' }"
+        type="button"
+        @click="homeKind = 'MANGA'"
+      >
+        Манга
+      </button>
+    </div>
+
+    <div class="am-choose">
+      <button
+        v-for="genre in GENRE_CHOICES"
+        :key="genre"
+        class="am-chip"
+        :class="{ 'am-chip--on': homeGenre === genre }"
+        type="button"
+        @click="toggleGenre(genre)"
+      >
+        {{ genreWord(genre) }}
+      </button>
+    </div>
 
     <div v-if="busy" class="am-shelf">
       <ul class="am-rail">
@@ -271,30 +388,17 @@ onMounted(() => {
       </ul>
     </div>
 
-    <div v-else-if="empty" class="am-empty">
-      <span class="am-empty__mark" aria-hidden="true">✧</span>
-      <span>Здесь появятся тайтлы, которые вы смотрите и читаете.</span>
-      <span>Найдите тайтл и добавьте к себе: список ведётся здесь, без всяких входов.</span>
-
-      <div class="am-empty__acts">
-        <button class="am-btn" type="button" @click="toSearch">Найти тайтл</button>
-        <button class="am-btn am-btn--ghost" type="button" @click="toSettings">
-          Перенести список с AniList
-        </button>
-      </div>
-    </div>
-
     <template v-else>
-      <section v-if="animeRows.length > 0" class="am-shelf">
+      <section v-if="ownRows.length > 0" class="am-shelf">
         <div class="am-bar">
-          <h2 class="am-h2">Продолжаю смотреть</h2>
+          <h2 class="am-h2">{{ ownTitle }}</h2>
           <span class="am-bar__gap" />
-          <button class="am-btn am-btn--ghost" type="button" @click="toLists">Все списки</button>
+          <button class="am-btn am-btn--ghost" type="button" @click="toLists">К спискам</button>
         </div>
 
         <ul class="am-rail">
           <MediaTile
-            v-for="row in animeRows"
+            v-for="row in ownRows"
             :key="row.mediaId"
             :title="row.title"
             :facts="row.facts"
@@ -309,34 +413,44 @@ onMounted(() => {
         </ul>
       </section>
 
-      <section v-if="mangaRows.length > 0" class="am-shelf">
+      <section v-for="shelf in recs" :key="shelf.key" class="am-shelf">
         <div class="am-bar">
-          <h2 class="am-h2">Читаю сейчас</h2>
-          <span class="am-bar__gap" />
-          <button class="am-btn am-btn--ghost" type="button" @click="toLists">К манге</button>
+          <h2 class="am-h2">{{ shelf.title }}</h2>
         </div>
 
         <ul class="am-rail">
           <MediaTile
-            v-for="row in mangaRows"
+            v-for="row in shelf.rows"
             :key="row.mediaId"
             :title="row.title"
             :facts="row.facts"
             :cover="row.cover"
             :color="row.color"
+            :score="row.score"
             :mark="row.mark"
+            :repeat="row.repeat"
+            :note="row.note"
             :own="row.own"
             :done="row.done"
             :adult="row.adult"
+            hidable
             @open="open(row.mediaId)"
+            @hide="hideOne(row.mediaId)"
           />
         </ul>
       </section>
 
-      <div v-if="animeRows.length === 0 && mangaRows.length === 0" class="am-empty">
-        <span class="am-empty__mark" aria-hidden="true">▷</span>
-        <span>В закладках «Смотрю» и «Читаю» пусто.</span>
-        <span>Откройте списки и выберите, что смотреть дальше.</span>
+      <div v-if="!recsPending && ownRows.length === 0 && recs.length === 0" class="am-empty">
+        <span class="am-empty__mark" aria-hidden="true">✧</span>
+        <span>Свой список пуст, а каталог не ответил.</span>
+        <span>Когда сеть вернётся, здесь появятся рекомендации.</span>
+
+        <div class="am-empty__acts">
+          <button class="am-btn" type="button" @click="toSearch">Найти тайтл</button>
+          <button class="am-btn am-btn--ghost" type="button" @click="toSettings">
+            Перенести список с AniList
+          </button>
+        </div>
       </div>
     </template>
   </section>
@@ -382,6 +496,18 @@ onMounted(() => {
   margin-top: 6px;
 }
 
+.am-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+/* Восемнадцать чипов в один ряд не встанут: перенос разрешён. */
+.am-choose {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
 .am-empty__acts {
   display: flex;
@@ -389,37 +515,6 @@ onMounted(() => {
   gap: 10px;
   justify-content: center;
   margin-top: 6px;
-}
-
-/* Сводка цифрами: сама раскладывается по ширине окна. */
-.am-nums {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.am-num {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 14px 16px;
-  background: var(--am-panel);
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-m);
-}
-
-.am-num__value {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.am-num__name {
-  font-size: 12.5px;
-  color: var(--am-dim);
 }
 
 .am-shelf {
