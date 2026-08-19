@@ -26,6 +26,8 @@ interface Props {
   /** Доля пройденного от нуля до единицы: полоса внизу постера. */
   done?: number
   adult?: boolean
+  /** Крестик «не интересует» поверх постера: только для плиток витрины. */
+  hidable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -40,9 +42,10 @@ const props = withDefaults(defineProps<Props>(), {
   own: null,
   done: 0,
   adult: false,
+  hidable: false,
 })
 
-const emit = defineEmits<{ (e: 'open'): void }>()
+const emit = defineEmits<{ (e: 'open'): void; (e: 'hide'): void }>()
 
 /** Подложка в тон обложки: серый прямоугольник на месте картинки выглядит брошенным. */
 const artStyle = computed(() => ({
@@ -111,11 +114,22 @@ const hasTags = computed(
       <span class="am-tile__name">{{ title }}</span>
       <span v-if="facts" class="am-tile__facts">{{ facts }}</span>
     </button>
+
+    <button
+      v-if="hidable"
+      class="am-tile__hide"
+      type="button"
+      title="Не интересует"
+      @click="emit('hide')"
+    >
+      ✕
+    </button>
   </li>
 </template>
 
 <style scoped>
 .am-tile {
+  position: relative;
   min-width: 0;
 }
 
@@ -298,5 +312,38 @@ const hasTags = computed(
   color: var(--am-dim);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Крестик «не интересует»: виден под курсором и фокусом, а не всегда. */
+.am-tile__hide {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: #eaf1fb;
+  cursor: pointer;
+  background: rgba(8, 12, 18, 0.85);
+  border: 1px solid var(--am-line-soft);
+  border-radius: 999px;
+}
+
+/* Цель нажатия расширена до 44 пикселей невидимой окантовкой. */
+.am-tile__hide::before {
+  position: absolute;
+  inset: -8px;
+  content: '';
+}
+
+.am-tile:hover .am-tile__hide,
+.am-tile:focus-within .am-tile__hide {
+  display: inline-flex;
 }
 </style>
