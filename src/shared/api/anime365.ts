@@ -7,7 +7,6 @@ import { ANIME365_DOMAINS, ANIME365_FAIL_LIMIT } from '../core/constants'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
 import { MAX_RATE_RETRIES, anime365Limiter } from './rate-limit'
-import type { MediaType } from '../core/types'
 
 /** Коды soft-block: источник жив, но временно не отдаёт данные. */
 const BLOCKED_STATUSES = [403, 502, 503, 520, 521, 522, 523, 524]
@@ -161,15 +160,20 @@ interface Anime365Series {
 
 /**
  * Грузит русский тайтл и описание с anime365 по MAL ID. Только аниме.
+ *
+ * Аргумент вида игнорируется: у источника аниме и так единственный раздел, а проверка
+ * «манга — выходим» потеряла смысл вместе с мангой в приложении. Параметр стоит
+ * в середине и уйдёт вместе с вызовами резолвера названий.
+ *
  * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
  * @returns null при отсутствии данных, soft-block или сбое всех зеркал.
  */
 export async function fetchAnime365ByMal(
   malId: number | null,
-  type: MediaType,
+  _type?: string,
   attempt = 0,
 ): Promise<Anime365Title | null> {
-  if (!malId || type === 'MANGA') return null // только аниме
+  if (!malId) return null // без номера MAL спрашивать нечего
   if (anime365Disabled) return null // отключён на сессию
 
   Logger('API', `Запрос к anime365 API: myAnimeListId=${malId}`)
@@ -217,7 +221,7 @@ export async function fetchAnime365ByMal(
               `повтор ${attempt + 2}/${MAX_RATE_RETRIES} — malId=${malId}`,
           )
           // Повтор сам дождётся конца паузы в acquireSlot() — второго sleep не нужно.
-          return fetchAnime365ByMal(malId, type, attempt + 1)
+          return fetchAnime365ByMal(malId, _type, attempt + 1)
         }
 
         // 403/503 + Cloudflare (520-524) — soft-block, а не «нет данных».
