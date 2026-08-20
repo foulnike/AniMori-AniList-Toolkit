@@ -42,6 +42,38 @@ const DB_MIGRATIONS: Record<number, Migration> = {
 }
 
 /**
+ * Поле статистики, которое наполняется по префиксу ключа. Отдельный тип,
+ * а не строки в таблице: опечатка в имени поля станет ошибкой сборки,
+ * а не вечным нулём на экране.
+ */
+type PrefixField =
+  | 'media'
+  | 'characters'
+  | 'staff'
+  | 'themes'
+  | 'russianTitles'
+  | 'looks'
+  | 'ratings'
+
+/**
+ * Что за запись лежит под префиксом ключа. Таблица, а не череда else if:
+ * счётчик тем уже показывал ноль при живом кэше, потому что ветка искала
+ * THEMES_ вместо THEMES2_, а для RU3_, LOOK2_ и RATE1_ ветки не было вовсе.
+ *
+ * Порядок важен только внутри одного вида: сравнение идёт первым совпадением.
+ */
+const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
+  ['MED2_', 'media'],
+  ['FULL_', 'media'],
+  ['CHR2_', 'characters'],
+  ['STF3_', 'staff'],
+  ['THEMES2_', 'themes'],
+  ['RU3_', 'russianTitles'],
+  ['LOOK2_', 'looks'],
+  ['RATE1_', 'ratings'],
+]
+
+/**
  * Вешает на живое соединение обработчики его собственной смерти.
  *
  * `onversionchange` — профилактика, а не лечение: `blocked` в соседней вкладке
@@ -338,16 +370,22 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
     }
 
     return await new Promise<DbStats | DbStatsError>((resolve) => {
-      const tx = db.transaction(['shikiCache', 'malCache'], 'readonly')
+      const tx = db.transaction(['shikiCache', 'malCache', 'franchiseCache'], 'readonly')
       const shikiStore = tx.objectStore('shikiCache')
       const malStore = tx.objectStore('malCache')
+      const franchiseStore = tx.objectStore('franchiseCache')
 
       const stats: DbStats = {
         media: 0,
         characters: 0,
         staff: 0,
         themes: 0,
+        russianTitles: 0,
+        looks: 0,
+        ratings: 0,
         malMappings: 0,
+        franchises: 0,
+        other: 0,
         totalCacheRecords: 0,
         estimatedSize,
       }
@@ -357,19 +395,25 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
         stats.malMappings = malReq.result
       }
 
+      const franchiseReq = franchiseStore.count()
+      franchiseReq.onsuccess = () => {
+        stats.franchises = franchiseReq.result
+      }
+
       const shikiReq = shikiStore.getAllKeys()
       shikiReq.onsuccess = () => {
         const keys = shikiReq.result
         stats.totalCacheRecords = keys.length
-        keys.forEach((key) => {
-          if (typeof key !== 'string') return
-          if (key.startsWith('MED2_') || key.startsWith('FULL_')) stats.media++
-          else if (key.startsWith('CHR2_')) stats.characters++
-          else if (key.startsWith('STF3_')) stats.staff++
-          // Префикс именно THEMES2_ (см. api/animethemes.ts): счётчик искал THEMES_
-          // и всегда показывал ноль тем, хотя сам кэш работал.
-          else if (key.startsWith('THEMES2_')) stats.themes++
-        })
+
+        for (const key of keys) {
+          if (typeof key !== 'string') continue
+
+          const known = KEY_PREFIXES.find(([prefix]) => key.startsWith(prefix))
+          if (known) stats[known[1]]++
+          // Незнакомый префикс не пропадает: остаток и есть признак того,
+          // что склад пополнился, а таблица выше про это не знает.
+          else stats.other++
+        }
       }
 
       tx.oncomplete = () => resolve(stats)

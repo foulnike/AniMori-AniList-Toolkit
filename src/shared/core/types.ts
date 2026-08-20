@@ -115,13 +115,32 @@ export interface FranchiseCacheRecord {
 
 export type CacheRecord = ShikiCacheRecord | MalCacheRecord | FranchiseCacheRecord
 
-/** Снимок БД для инспектора настроек. */
+/**
+ * Снимок БД для инспектора настроек.
+ *
+ * Поле на каждый вид записи, а не одна сумма: показанный ноль при живом кэше
+ * — это не «пусто», а забытый счётчик, и отличить одно от другого можно только
+ * поимённо. Ровно так молчали сначала темы, потом русские названия.
+ */
 export interface DbStats {
   media: number
   characters: number
   staff: number
   themes: number
+  /** Русские названия и описания: префикс RU3_ (core/media-title.ts). */
+  russianTitles: number
+  /** Обложки, цвета и счёт частей: префикс LOOK2_ (core/media-looks.ts). */
+  looks: number
+  /** Оценки площадок: префикс RATE1_ (core/ratings.ts). */
+  ratings: number
   malMappings: number
+  /** Записи склада франшиз: у него свой ключ-число, а не префикс. */
+  franchises: number
+  /**
+   * Записи с незнакомым префиксом. Считается сознательно: новый вид записи
+   * иначе снова стал бы невидимым, а здесь он выйдет числом в остатке.
+   */
+  other: number
   totalCacheRecords: number
   estimatedSize: string
 }
