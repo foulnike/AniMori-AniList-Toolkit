@@ -19,14 +19,15 @@ export interface EditOutcome {
  *
  * У дат три состояния, а не два: ключа нет — не трогаем, строка — ставим,
  * null — стираем. Поэтому они разбираются через наличие ключа, а не типа.
+ *
+ * Прочитанных томов среди полей нет: у аниме их не бывает, а единственный
+ * вызывающий — отправщик очереди — такой вид правки больше не знает.
  */
 export interface EntryPatch {
   status?: string
   score10?: number
   progress?: number
-  /** Прочитано томов. У аниме не шлётся вовсе. */
-  volumes?: number
-  /** Сколько раз пересмотрели или перечитали. */
+  /** Сколько раз пересмотрели. */
   repeat?: number
   /** Дата вида ГГГГ-ММ-ДД или null, чтобы стереть. */
   startedAt?: string | null
@@ -41,7 +42,6 @@ mutation (
   $status: MediaListStatus
   $score: Float
   $progress: Int
-  $progressVolumes: Int
   $repeat: Int
   $startedAt: FuzzyDateInput
   $completedAt: FuzzyDateInput
@@ -52,7 +52,6 @@ mutation (
     status: $status
     score: $score
     progress: $progress
-    progressVolumes: $progressVolumes
     repeat: $repeat
     startedAt: $startedAt
     completedAt: $completedAt
@@ -135,7 +134,6 @@ export async function saveEntry(mediaId: number, patch: EntryPatch): Promise<Edi
   if (typeof patch.status === 'string') variables.status = patch.status
   if (typeof patch.score10 === 'number') variables.score = patch.score10
   if (typeof patch.progress === 'number') variables.progress = patch.progress
-  if (typeof patch.volumes === 'number') variables.progressVolumes = patch.volumes
   if (typeof patch.repeat === 'number') variables.repeat = patch.repeat
   if ('startedAt' in patch) variables.startedAt = toFuzzy(patch.startedAt ?? null)
   if ('completedAt' in patch) variables.completedAt = toFuzzy(patch.completedAt ?? null)
