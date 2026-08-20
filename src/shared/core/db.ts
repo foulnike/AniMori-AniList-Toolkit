@@ -1,4 +1,4 @@
-// Слой IndexedDB: кэш Shikimori, MAL-соответствий и франшиз.
+// Слой IndexedDB: склад карточек (mediaCache), MAL-соответствий и франшиз.
 // Инстанс базы приватен: наружу идут только функции, сырой IDBDatabase не достать.
 // Через Bridge прятать не нужно: IndexedDB есть и в юзерскрипте, и в WebView Tauri.
 
@@ -6,7 +6,11 @@ import { CACHE_TIME, DB_NAME, DB_VERSION } from './constants'
 import { Logger } from '../utils/logger'
 import type { CacheRecord, CacheStoreName, DbStats, DbStatsError } from './types'
 
-type Migration = (db: IDBDatabase) => void
+/**
+ * Мигратор схемы. Вторым аргументом идёт транзакция обновления: без неё
+ * нельзя перелить содержимое одного стора в другой, а только создавать пустые.
+ */
+type Migration = (db: IDBDatabase, tx: IDBTransaction | null) => void
 
 /**
  * Потолок ожидания открытия. Семь секунд — заведомо больше любого честного
@@ -39,39 +43,74 @@ const DB_MIGRATIONS: Record<number, Migration> = {
     if (!db.objectStoreNames.contains('franchiseCache'))
       db.createObjectStore('franchiseCache', { keyPath: 'id' })
   },
+
+  /**
+   * Переименование склада карточек: shikiCache -> mediaCache.
+   * Сначала копия, и только потом удаление старого: срок хранения
+   * бессрочный, и потеря склада обошлась бы тысячами повторных запросов
+   * к Shikimori под рейт-лимитом.
+   *
+   * На новой установке шаг 5 создаёт старый стор, а этот шаг тут же
+   * его убирает: шаги не переписывают историю друг друга, и один лишний
+   * созданный стор внутри одного обновления ничего не стоит.
+   */
+  6: (db, tx) => {
+    if (!db.objectStoreNames.contains('mediaCache'))
+      db.createObjectStore('mediaCache', { keyPath: 'key' })
+
+    // Старого стора нет — переносить нечего.
+    if (!db.objectStoreNames.contains('shikiCache')) return
+
+    // Без транзакции обновления копировать нечем: оставляем старый стор на месте,
+    // ничего не теряя. Псевдоним в dbGet/dbSet всё равно смотрит в новый стор,
+    // поэтому хуже всего будет только то, что склад наполнится заново.
+    if (!tx) {
+      Logger('WARN', 'Миграция БД: нет транзакции обновления, перенос кэша пропущен')
+      return
+    }
+
+    const from = tx.objectStore('shikiCache')
+    const to = tx.objectStore('mediaCache')
+    const cursorReq = from.openCursor()
+    let moved = 0
+
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        to.put(cursor.value)
+        moved++
+        cursor.continue()
+        return
+      }
+
+      // Копия готова целиком — теперь старый стор можно убирать.
+      try {
+        db.deleteObjectStore('shikiCache')
+      } catch (e) {
+        Logger('WARN', 'Миграция БД: старый стор не удалился, но копия уже на месте', e)
+      }
+
+      Logger('DB', `Миграция БД: в mediaCache перенесено записей — ${moved}`)
+    }
+
+    cursorReq.onerror = () => {
+      // Старый стор намеренно остаётся: лишний стор в базе дешевле потерянного кэша.
+      Logger('ERROR', 'Миграция БД: перенос кэша не удался', cursorReq.error)
+    }
+  },
 }
 
-/**
- * Поле статистики, которое наполняется по префиксу ключа. Отдельный тип,
- * а не строки в таблице: опечатка в имени поля станет ошибкой сборки,
- * а не вечным нулём на экране.
- */
-type PrefixField =
-  | 'media'
-  | 'characters'
-  | 'staff'
-  | 'themes'
-  | 'russianTitles'
-  | 'looks'
-  | 'ratings'
+/** Сторы, которые реально лежат в базе после шестой версии схемы. */
+type PhysicalStore = 'mediaCache' | 'malCache' | 'franchiseCache'
 
 /**
- * Что за запись лежит под префиксом ключа. Таблица, а не череда else if:
- * счётчик тем уже показывал ноль при живом кэше, потому что ветка искала
- * THEMES_ вместо THEMES2_, а для RU3_, LOOK2_ и RATE1_ ветки не было вовсе.
- *
- * Порядок важен только внутри одного вида: сравнение идёт первым совпадением.
+ * Переводит имя стора из вызова в физическое. Старое имя shikiCache — псевдоним:
+ * вызовов dbGet/dbSet десятки и в приложении, и в юзерскрипте, и переписать
+ * их все одним заходом — значит сломать то, что не проверить сборкой по частям.
  */
-const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
-  ['MED2_', 'media'],
-  ['FULL_', 'media'],
-  ['CHR2_', 'characters'],
-  ['STF3_', 'staff'],
-  ['THEMES2_', 'themes'],
-  ['RU3_', 'russianTitles'],
-  ['LOOK2_', 'looks'],
-  ['RATE1_', 'ratings'],
-]
+function physicalStore(store: CacheStoreName): PhysicalStore {
+  return store === 'shikiCache' ? 'mediaCache' : store
+}
 
 /**
  * Вешает на живое соединение обработчики его собственной смерти.
@@ -159,7 +198,9 @@ export async function openDB(): Promise<IDBDatabase | null> {
         const migrate = DB_MIGRATIONS[v]
         if (!migrate) continue
         try {
-          migrate(db)
+          // Транзакция обновления живёт только здесь: шагу, который переливает
+          // данные, без неё не обойтись.
+          migrate(db, req.transaction)
           Logger('DB', `Миграция БД: шаг ${v} выполнен успешно`)
         } catch (err) {
           Logger('ERROR', `Миграция БД: сбой на шаге ${v}`, err)
@@ -210,51 +251,53 @@ export async function openDB(): Promise<IDBDatabase | null> {
 
 /**
  * Читает запись по ключу.
- * @param store Имя object store.
- * @param key keyPath стора: `key` (строка) для shikiCache, `id` (число) для остальных.
+ * @param store Имя object store. Старое `shikiCache` равносильно `mediaCache`.
+ * @param key keyPath стора: `key` (строка) для mediaCache, `id` (число) для остальных.
  */
 export async function dbGet<T = unknown>(
   store: CacheStoreName,
   key: IDBValidKey,
 ): Promise<T | null> {
+  const name = physicalStore(store)
   try {
     const db = await openDB()
     if (!db) return null
 
     return await new Promise<T | null>((resolve) => {
-      const req = db.transaction(store, 'readonly').objectStore(store).get(key)
+      const req = db.transaction(name, 'readonly').objectStore(name).get(key)
       req.onsuccess = () => resolve((req.result as T | undefined) ?? null)
       req.onerror = () => {
-        Logger('ERROR', `Ошибка чтения DB (${store})`, key)
+        Logger('ERROR', `Ошибка чтения DB (${name})`, key)
         resolve(null)
       }
     })
   } catch (e) {
-    Logger('ERROR', `Сбой dbGet (${store})`, e)
+    Logger('ERROR', `Сбой dbGet (${name})`, e)
     return null
   }
 }
 
 /** Пишет (put — вставка или перезапись) запись в object store. */
 export async function dbSet(store: CacheStoreName, data: CacheRecord): Promise<void> {
+  const name = physicalStore(store)
   try {
     const db = await openDB()
     if (!db) return
 
     return await new Promise<void>((resolve) => {
-      const tx = db.transaction(store, 'readwrite')
-      tx.objectStore(store).put(data)
+      const tx = db.transaction(name, 'readwrite')
+      tx.objectStore(name).put(data)
       tx.oncomplete = () => {
-        Logger('DB', `Запись в кэш ${store} успешна`)
+        Logger('DB', `Запись в кэш ${name} успешна`)
         resolve()
       }
       tx.onerror = (e) => {
-        Logger('ERROR', `Ошибка записи DB (${store})`, e)
+        Logger('ERROR', `Ошибка записи DB (${name})`, e)
         resolve()
       }
     })
   } catch (e) {
-    Logger('ERROR', `Сбой dbSet (${store})`, e)
+    Logger('ERROR', `Сбой dbSet (${name})`, e)
   }
 }
 
@@ -289,8 +332,8 @@ export async function clearCache(): Promise<void> {
 
     let tx: IDBTransaction
     try {
-      tx = db.transaction(['shikiCache', 'malCache', 'franchiseCache'], 'readwrite')
-      tx.objectStore('shikiCache').clear()
+      tx = db.transaction(['mediaCache', 'malCache', 'franchiseCache'], 'readwrite')
+      tx.objectStore('mediaCache').clear()
       tx.objectStore('malCache').clear()
       tx.objectStore('franchiseCache').clear()
     } catch (e) {
@@ -319,7 +362,7 @@ export async function clearCache(): Promise<void> {
 }
 
 /**
- * Фоновый GC: курсором по shikiCache удаляет записи старше CACHE_TIME.
+ * Фоновый GC: курсором по mediaCache удаляет записи старше CACHE_TIME.
  * При бессрочном сроке хранения выходит сразу, не обходя базу.
  */
 export async function runGarbageCollector(): Promise<void> {
@@ -330,7 +373,7 @@ export async function runGarbageCollector(): Promise<void> {
     const db = await openDB()
     if (!db) return
 
-    const store = db.transaction(['shikiCache'], 'readwrite').objectStore('shikiCache')
+    const store = db.transaction(['mediaCache'], 'readwrite').objectStore('mediaCache')
     const req = store.openCursor()
     let deletedCount = 0
 
@@ -370,8 +413,8 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
     }
 
     return await new Promise<DbStats | DbStatsError>((resolve) => {
-      const tx = db.transaction(['shikiCache', 'malCache', 'franchiseCache'], 'readonly')
-      const shikiStore = tx.objectStore('shikiCache')
+      const tx = db.transaction(['mediaCache', 'malCache', 'franchiseCache'], 'readonly')
+      const mediaStore = tx.objectStore('mediaCache')
       const malStore = tx.objectStore('malCache')
       const franchiseStore = tx.objectStore('franchiseCache')
 
@@ -400,9 +443,9 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
         stats.franchises = franchiseReq.result
       }
 
-      const shikiReq = shikiStore.getAllKeys()
-      shikiReq.onsuccess = () => {
-        const keys = shikiReq.result
+      const mediaReq = mediaStore.getAllKeys()
+      mediaReq.onsuccess = () => {
+        const keys = mediaReq.result
         stats.totalCacheRecords = keys.length
 
         for (const key of keys) {
@@ -424,3 +467,35 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
     return { error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+/**
+ * Поле статистики, которое наполняется по префиксу ключа. Отдельный тип,
+ * а не строки в таблице: опечатка в имени поля станет ошибкой сборки,
+ * а не вечным нулём на экране.
+ */
+type PrefixField =
+  | 'media'
+  | 'characters'
+  | 'staff'
+  | 'themes'
+  | 'russianTitles'
+  | 'looks'
+  | 'ratings'
+
+/**
+ * Что за запись лежит под префиксом ключа. Таблица, а не череда else if:
+ * счётчик тем уже показывал ноль при живом кэше, потому что ветка искала
+ * THEMES_ вместо THEMES2_, а для RU3_, LOOK2_ и RATE1_ ветки не было вовсе.
+ *
+ * Порядок важен только внутри одного вида: сравнение идёт первым совпадением.
+ */
+const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
+  ['MED2_', 'media'],
+  ['FULL_', 'media'],
+  ['CHR2_', 'characters'],
+  ['STF3_', 'staff'],
+  ['THEMES2_', 'themes'],
+  ['RU3_', 'russianTitles'],
+  ['LOOK2_', 'looks'],
+  ['RATE1_', 'ratings'],
+]

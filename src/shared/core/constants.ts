@@ -31,7 +31,12 @@ export const CACHE_TIME = Number.POSITIVE_INFINITY
 
 // IndexedDB
 export const DB_NAME = 'AniMoriSuperDB'
-export const DB_VERSION = 5
+/**
+ * Версия схемы. Шестая переносит склад карточек из shikiCache в mediaCache:
+ * имя почти год врало, в сторе лежат и обложки AniList, и темы AnimeThemes.
+ * Поднятие версии — единственный способ запустить миграцию из core/db.ts.
+ */
+export const DB_VERSION = 6
 
 // Локализация для парсера дат и времени.
 export const monthsFull: Record<string, string> = {
@@ -68,6 +73,8 @@ export const seasons: Record<string, string> = {
 
 // Регэкспы перевода: роли, даты, время.
 // rxRoleEps, rxRoleOP и rxRoleED имеют флаг /g и общий lastIndex: только через .replace().
+// Главы и тома в rxAct, rxLabel и rxUnit остаются сознательно: это переводчик
+// юзерскрипта, а он работает и на манговых страницах AniList.
 export const rxRole = /^(.+?)\s*\((.+)\)$/
 export const rxRoleEps = /\beps?\b/gi
 export const rxRoleOP = /\bOP\b/gi
