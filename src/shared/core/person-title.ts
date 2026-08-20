@@ -14,7 +14,7 @@ import {
 } from '../api/shikimori-people'
 import { Logger } from '../utils/logger'
 import { scoreNameMatch, type NameTarget } from '../utils/name-match'
-import type { MediaType, ShikiCacheRecord } from './types'
+import type { ShikiCacheRecord } from './types'
 
 /** Чем человек является в карточке тайтла: героем или автором. */
 export type PersonKind = 'character' | 'staff'
@@ -160,10 +160,13 @@ export async function getRussianPerson(
  * Описаний в нём нет, поэтому такие карточки помечаются `partial`, а описание
  * добирается при открытии окошка. Возвращает несопоставленных: их добирает
  * обычный точечный поиск.
+ *
+ * Состав спрашивается всегда в разделе animes, а аргумент вида игнорируется:
+ * его ещё передаёт блок людей, и стоять он обязан на своём месте.
  */
 export async function prefetchRussianPeople(
   malId: number,
-  type: MediaType,
+  _type: string | undefined,
   entries: Array<{ kind: PersonKind; person: PersonRef }>,
 ): Promise<Array<{ kind: PersonKind; person: PersonRef }>> {
   // Сначала память и склад: знакомые люди сети не ждут вовсе, а добытые
@@ -183,7 +186,7 @@ export async function prefetchRussianPeople(
   }
   if (todo.length === 0) return []
 
-  const roles = await fetchShikiRoles(malId, type === 'MANGA' ? 'mangas' : 'animes')
+  const roles = await fetchShikiRoles(malId, 'animes')
   if (!roles) return todo
 
   const left: typeof todo = []
