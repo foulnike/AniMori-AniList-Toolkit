@@ -39,6 +39,16 @@ interface Translation {
   title: string
   link: string
   episodes: number[]
+  /**
+   * Номер серии → адрес её кадра у Kodik. Ответ присылает их вместе с номерами,
+   * и раньше они выбрасывались на месте. Сетке адреса не нужны, но цепочка
+   * прямых ссылок начинается именно с них, и второй запрос за тем же самым
+   * был бы платой за выброшенное.
+   *
+   * Карта бывает пустой законно: у части результатов серий в ответе нет вовсе,
+   * и номера тогда достраиваются по счётчику.
+   */
+  episodeLinks: Map<number, string>
   isSerial: boolean
 }
 
@@ -85,26 +95,62 @@ function heartSVG(filled: boolean): string {
   return `<svg width="15" height="15" viewBox="0 0 24 24" fill="${filled ? c : 'none'}" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5 4.3 12.6a4.7 4.7 0 0 1 0-6.6 4.5 4.5 0 0 1 6.5 0l1.2 1.2 1.2-1.2a4.5 4.5 0 0 1 6.5 0 4.7 4.7 0 0 1 0 6.6z"/></svg>`
 }
 
-/** Номера эпизодов для одного результата Kodik. */
-function collectEpisodes(item: KodikSearchItem): number[] {
+/** Серии одного результата: номера для сетки и адреса кадров для цепочки. */
+interface EpisodeList {
+  numbers: number[]
+  links: Map<number, string>
+}
+
+/**
+ * Адрес кадра серии. Kodik отдаёт его строкой, а с запрошенными данными —
+ * полем link внутри объекта; протокол в ссылках часто опущен, как и у item.link.
+ */
+function episodeLink(value: unknown): string | null {
+  const raw =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'object' && value !== null
+        ? (value as { link?: unknown }).link
+        : null
+
+  if (typeof raw !== 'string' || raw === '') return null
+  return raw.startsWith('//') ? 'https:' + raw : raw
+}
+
+/** Номера эпизодов и адреса их кадров для одного результата Kodik. */
+function collectEpisodes(item: KodikSearchItem): EpisodeList {
   const seasons = item.seasons
   if (seasons) {
     const firstKey = Object.keys(seasons)[0]
     const firstSeason = firstKey === undefined ? undefined : seasons[firstKey]
     const episodes = firstSeason?.episodes
     if (episodes) {
-      const numbers = Object.keys(episodes)
-        .map(Number)
-        .filter((n) => Number.isFinite(n))
-        .sort((a, b) => a - b)
-      if (numbers.length > 0) return numbers
+      const numbers: number[] = []
+      const links = new Map<number, string>()
+
+      for (const [rawNumber, value] of Object.entries(episodes)) {
+        const number = Number(rawNumber)
+        if (!Number.isFinite(number)) continue
+
+        numbers.push(number)
+
+        // Адрес есть не всегда: без запроса данных о сериях ответ бывает пустым.
+        const link = episodeLink(value)
+        if (link) links.set(number, link)
+      }
+
+      if (numbers.length > 0) {
+        numbers.sort((a, b) => a - b)
+        return { numbers, links }
+      }
     }
   }
 
+  // Серий в ответе нет: номера достраиваются по счётчику, а адресам взяться неоткуда.
   const max = item.last_episode || item.episodes_count || 1
   const fallback: number[] = []
   for (let i = 1; i <= max; i++) fallback.push(i)
-  return fallback
+  return { numbers: fallback, links: new Map() }
 }
 
 /** Ответ Kodik → список озвучек без дублей. */
@@ -121,10 +167,13 @@ function parseTranslations(response: KodikSearchResponse): Translation[] {
     // Собственные селекторы Kodik скрыты: сериями рулит наш сайдбар.
     link += (link.includes('?') ? '&' : '?') + 'hide_selectors=true'
 
+    const episodes = collectEpisodes(item)
+
     byTitle.set(title, {
       title,
       link,
-      episodes: collectEpisodes(item),
+      episodes: episodes.numbers,
+      episodeLinks: episodes.links,
       isSerial: item.type === 'anime-serial',
     })
   }
