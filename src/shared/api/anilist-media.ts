@@ -12,9 +12,11 @@ const PAGE_SIZE = 50
 /** Сколько находок на странице поиска. Больше одного экрана всё равно не читают. */
 export const SEARCH_PAGE_SIZE = 20
 
-const MAL_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int) {
+// Вид вписан словом, а не вынесен в переменную: переменная была единственным
+// местом, где ошибка вызова привела бы мангу обратно в ответ.
+const MAL_QUERY = `query ($ids: [Int], $perPage: Int) {
   Page(page: 1, perPage: $perPage) {
-    media(id_in: $ids, type: $type) {
+    media(id_in: $ids, type: ANIME) {
       id
       idMal
     }
@@ -27,6 +29,7 @@ const MAL_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int) {
 // Ближайшая серия — для счёта вышедшего у идущего сезона.
 // Пересмотры, даты и комментарий нужны окну правки: оно открывается из карточки
 // и своих запросов не делает.
+// Глав, томов и прочитанных томов здесь больше нет: аниме их не имеет.
 const CARD_QUERY = `query ($id: Int!) {
   Media(id: $id) {
     id
@@ -35,8 +38,6 @@ const CARD_QUERY = `query ($id: Int!) {
     format
     status
     episodes
-    chapters
-    volumes
     duration
     averageScore
     seasonYear
@@ -72,7 +73,6 @@ const CARD_QUERY = `query ($id: Int!) {
       status
       score(format: POINT_10_DECIMAL)
       progress
-      progressVolumes
       repeat
       notes
       startedAt {
@@ -94,20 +94,19 @@ const CARD_QUERY = `query ($id: Int!) {
 // Обложка просится large: в сетке постеров medium заметно мылится.
 // Пересмотры, даты и комментарий здесь не спрашиваются: в плитке их не видно,
 // а ответ на двадцать находок тяжелеет зазря.
-const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $perPage: Int!) {
+const SEARCH_QUERY = `query ($word: String!, $page: Int!, $perPage: Int!) {
   Page(page: $page, perPage: $perPage) {
     pageInfo {
       hasNextPage
       total
     }
-    media(search: $word, type: $type, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
+    media(search: $word, type: ANIME, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
       id
       idMal
       type
       format
       status
       episodes
-      chapters
       seasonYear
       averageScore
       isAdult
@@ -129,7 +128,6 @@ const SEARCH_QUERY = `query ($word: String!, $type: MediaType, $page: Int!, $per
         status
         score(format: POINT_10_DECIMAL)
         progress
-        progressVolumes
       }
     }
   }
@@ -153,7 +151,6 @@ const STUDIO_QUERY = `query ($id: Int!, $page: Int!, $perPage: Int!) {
         format
         status
         episodes
-        chapters
         seasonYear
         averageScore
         isAdult
@@ -199,7 +196,6 @@ interface OwnReply {
   status?: string | null
   score?: number | null
   progress?: number | null
-  progressVolumes?: number | null
   repeat?: number | null
   notes?: string | null
   startedAt?: FuzzyReply | null
@@ -220,7 +216,6 @@ interface BriefReply {
   format?: string | null
   status?: string | null
   episodes?: number | null
-  chapters?: number | null
   seasonYear?: number | null
   averageScore?: number | null
   isAdult?: boolean | null
@@ -238,8 +233,6 @@ interface CardReply {
     format?: string | null
     status?: string | null
     episodes?: number | null
-    chapters?: number | null
-    volumes?: number | null
     duration?: number | null
     averageScore?: number | null
     seasonYear?: number | null
@@ -283,6 +276,9 @@ interface StudioReply {
  *
  * В выдаче поиска новые поля не спрашиваются и приезжают пустыми: это не ошибка,
  * а осознанная экономия веса ответа; правка таких полей идёт только из карточки.
+ *
+ * Поле томов — остаток от времён манги: сервер о нём больше не спрашивают,
+ * и оно всегда ноль. Уйдёт вместе с его читателями в слое показа.
  */
 export interface ServerEntry {
   status: string | null
@@ -307,6 +303,9 @@ export interface StudioRef {
 /**
  * Подробности тайтла для карточки. В снимке этого нет и не будет:
  * снимок держит состояние списка, а описания и обложки — складское дело.
+ *
+ * Главы и тома осталисы в описании пустыми полями: их ещё читает слой
+ * показа, а убирать их надо вместе с ним, одним шагом.
  */
 export interface MediaCard {
   mediaId: number
@@ -315,7 +314,9 @@ export interface MediaCard {
   format: string | null
   status: string | null
   episodes: number | null
+  /** Глав у аниме не бывает: всегда null. */
   chapters: number | null
+  /** Томов у аниме не бывает: всегда null. */
   volumes: number | null
   duration: number | null
   averageScore: number | null
@@ -336,7 +337,7 @@ export interface MediaCard {
   airingEpisode: number | null
   /** Срок выхода той серии в секундах. */
   airingAt: number | null
-  /** Студии тайтла, основная первой. У манги список почти всегда пуст. */
+  /** Студии тайтла, основная первой. */
   studios: StudioRef[]
   /** Запись в списке хозяина или `null`, если тайтл в списке не числится. */
   ownEntry: ServerEntry | null
@@ -353,6 +354,7 @@ export interface MediaBrief {
   format: string | null
   status: string | null
   episodes: number | null
+  /** Глав у аниме не бывает: всегда null. */
   chapters: number | null
   seasonYear: number | null
   averageScore: number | null
@@ -388,8 +390,10 @@ export interface StudioPage {
 /**
  * Номера MAL для набора тайтлов AniList. Ключ соответствия — номер AniList.
  * Тайтлы без номера MAL в ответ не попадают: русского источника для них нет.
+ *
+ * Аргумент вида игнорируется: вид вписан в запрос словом.
  */
-export async function fetchMalIds(ids: number[], type: MediaType): Promise<Map<number, number>> {
+export async function fetchMalIds(ids: number[], _type?: string): Promise<Map<number, number>> {
   const found = new Map<number, number>()
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
 
@@ -397,7 +401,6 @@ export async function fetchMalIds(ids: number[], type: MediaType): Promise<Map<n
     const chunk = unique.slice(from, from + PAGE_SIZE)
     const reply = await anilistQuery<MalReply>(MAL_QUERY, {
       ids: chunk,
-      type,
       perPage: PAGE_SIZE,
     })
 
@@ -450,7 +453,10 @@ function readFuzzy(date: FuzzyReply | null | undefined): string | null {
   return `${year}-${pad(month)}-${pad(day)}`
 }
 
-/** Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет». */
+/**
+ * Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет».
+ * Тома всегда ноль: у аниме их нет, и сервер о них больше не спрашивают.
+ */
 function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
   if (!own) return null
 
@@ -458,7 +464,7 @@ function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
     status: textOrNull(own.status),
     score10: typeof own.score === 'number' ? own.score : 0,
     progress: typeof own.progress === 'number' ? own.progress : 0,
-    volumes: typeof own.progressVolumes === 'number' ? own.progressVolumes : 0,
+    volumes: 0,
     repeat: typeof own.repeat === 'number' ? own.repeat : 0,
     startedAt: readFuzzy(own.startedAt),
     completedAt: readFuzzy(own.completedAt),
@@ -489,11 +495,12 @@ function briefOrNull(item: BriefReply | null | undefined): MediaBrief | null {
   return {
     mediaId: item.id,
     malId: countOrNull(item.idMal),
-    type: item.type === 'MANGA' ? 'MANGA' : 'ANIME',
+    // Сервер спрошен только про аниме, так что читать вид ответа незачем.
+    type: 'ANIME',
     format: textOrNull(item.format),
     status: textOrNull(item.status),
     episodes: countOrNull(item.episodes),
-    chapters: countOrNull(item.chapters),
+    chapters: null,
     seasonYear: countOrNull(item.seasonYear),
     averageScore: countOrNull(item.averageScore),
     isAdult: item.isAdult === true,
@@ -524,13 +531,13 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
   return {
     mediaId: media.id,
     malId: countOrNull(media.idMal),
-    // Тип решает всё дальше: и подписи, и раздел русского источника.
-    type: media.type === 'MANGA' ? 'MANGA' : 'ANIME',
+    // Вид всегда аниме: другие разделы приложение больше не открывает.
+    type: 'ANIME',
     format: textOrNull(media.format),
     status: textOrNull(media.status),
     episodes: countOrNull(media.episodes),
-    chapters: countOrNull(media.chapters),
-    volumes: countOrNull(media.volumes),
+    chapters: null,
+    volumes: null,
     duration: countOrNull(media.duration),
     averageScore: countOrNull(media.averageScore),
     seasonYear: countOrNull(media.seasonYear),
@@ -557,10 +564,13 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
 /**
  * Поиск тайтлов по слову. Запрос с ключом, иначе в выдаче не будет видно,
  * что тайтл уже в списке. Пустое слово сеть не тревожит.
+ *
+ * Аргумент вида игнорируется: вид вписан в запрос словом. Параметр
+ * стоит в середине, и убрать его можно только вместе с вызовами в ядре.
  */
 export async function searchMedia(
   word: string,
-  type: MediaType,
+  _type: string | undefined,
   page = 1,
 ): Promise<SearchPage | null> {
   const asked = word.trim()
@@ -568,7 +578,7 @@ export async function searchMedia(
 
   const reply = await anilistQuery<SearchReply>(
     SEARCH_QUERY,
-    { word: asked, type, page, perPage: SEARCH_PAGE_SIZE },
+    { word: asked, page, perPage: SEARCH_PAGE_SIZE },
     true,
   )
 
