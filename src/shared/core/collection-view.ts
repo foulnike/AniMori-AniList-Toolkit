@@ -4,15 +4,15 @@
 
 import { eachEntry, entryCount } from './collection'
 import type { SnapshotEntry } from './snapshot'
-import type { MediaType } from './types'
 
 /** Условия отбора. Пустой набор пропускает все записи. */
 export interface EntryFilter {
   /**
-   * Аниме или манга. Без этого условия в выдачу попадают оба типа:
-   * это верно для сводки, но не для экранов — они разделены.
+   * Вид тайтла. Остаток от времён манги: выбирать больше не из чего,
+   * а условие держится ради уже записанных вызовов и записей старых
+   * снимков, где манга ещё может лежать.
    */
-  type?: MediaType
+  type?: 'ANIME'
   status?: string[]
   minScore?: number
   maxScore?: number
@@ -152,7 +152,7 @@ export function findEntry(filter: EntryFilter): SnapshotEntry | undefined {
  * у закладок. Запись без статуса попадает в UNKNOWN, а не теряется.
  *
  * Отбор обязательно тот же, что у строк: иначе число у закладки
- * считало бы записи второго типа, которых на этом экране не увидеть.
+ * считало бы записи, которых на этом экране не увидеть.
  */
 export function countByStatus(filter: EntryFilter = EMPTY_FILTER): Map<string, number> {
   const totals = new Map<string, number>()
@@ -179,7 +179,7 @@ export function averageScore(filter: EntryFilter = EMPTY_FILTER): number {
   return rated === 0 ? 0 : Math.round((sum / rated) * 100) / 100
 }
 
-/** Сумма просмотренных частей по отбору. Нужна сводке на экране настроек. */
+/** Сумма просмотренных серий по отбору. Нужна сводке на экране настроек. */
 export function totalProgress(filter: EntryFilter = EMPTY_FILTER): number {
   let total = 0
   for (const entry of eachEntry()) {
@@ -189,8 +189,11 @@ export function totalProgress(filter: EntryFilter = EMPTY_FILTER): number {
 }
 
 /**
- * Сумма прочитанных томов по отбору. Отдельная величина, а не часть глав:
- * у части записей заполнено только одно из двух полей.
+ * Сумма прочитанных томов по отбору.
+ *
+ * Остаток от времён манги: новые записи всегда дадут ноль, а старые
+ * снимки ещё помнят тома. Уйдёт вместе с полем снимка при поднятии
+ * версии снимка и переносе данных.
  */
 export function totalVolumes(filter: EntryFilter = EMPTY_FILTER): number {
   let total = 0

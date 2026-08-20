@@ -15,7 +15,6 @@ import {
   type PendingEdit,
   type SnapshotEntry,
 } from './snapshot'
-import type { MediaType } from './types'
 
 /**
  * Потолок попыток. После него правка выкидывается: вечная правка
@@ -36,9 +35,12 @@ let sweepTimer: number | undefined
  * Облик тайтла: то, что запись о себе знать не может, а показ требует.
  * Экран берёт его из карточки или плитки и передаёт с правкой, иначе
  * запись, созданная без входа, навсегда осталась бы «Тайтл #id».
+ *
+ * Поле вида — остаток от времён манги: его ещё передают уже записанные
+ * вызовы, а выбирать больше не из чего.
  */
 export type EntryLook = {
-  type: MediaType
+  type?: 'ANIME'
   romaji: string | null
   english: string | null
   isAdult: boolean
@@ -55,8 +57,8 @@ function orNull(value: string): string | null {
 /**
  * Кладёт правку в память, чтобы экран обновился до ответа сервера.
  *
- * @param look Облик тайтла, если экран его знает. Новой записи он даёт имя
- * и тип, известной — заполняет пустоты. Занятые поля не трогаются: ответ
+ * @param look Облик тайтла, если экран его знает. Новой записи он даёт имя,
+ * известной — заполняет пустоты. Занятые поля не трогаются: ответ
  * сервера точнее плитки, с которой пришла правка.
  */
 function applyToMemory(
@@ -72,14 +74,14 @@ function applyToMemory(
 
   const known = getEntry(mediaId)
 
-  // Тип указан явно: новое поле снимка должно ломать сборку здесь, а не живой запуск.
+  // Поля перечислены явно: новое поле снимка должно ломать сборку здесь,
+  // а не живой запуск. Поля type и volumes — остатки от манги: они уйдут
+  // вместе с поднятием версии снимка.
   const entry: SnapshotEntry = known
     ? { ...known }
     : {
         mediaId,
-        // Без облика от экрана остаётся подставка: таких записей большинство,
-        // а обновление списка поле всё равно поправит.
-        type: look?.type ?? 'ANIME',
+        type: 'ANIME',
         status: null,
         score10: 0,
         progress: 0,
@@ -104,7 +106,6 @@ function applyToMemory(
   if (kind === 'status' && typeof value === 'string') entry.status = value
   if (kind === 'score' && typeof value === 'number') entry.score10 = value
   if (kind === 'progress' && typeof value === 'number') entry.progress = value
-  if (kind === 'volumes' && typeof value === 'number') entry.volumes = value
   if (kind === 'repeat' && typeof value === 'number') entry.repeat = value
   if (kind === 'startedAt' && typeof value === 'string') entry.startedAt = orNull(value)
   if (kind === 'completedAt' && typeof value === 'string') entry.completedAt = orNull(value)
@@ -114,7 +115,13 @@ function applyToMemory(
   putEntry(entry)
 }
 
-/** Отправляет одну правку. Вид правки решает, какой запрос пойдёт. */
+/**
+ * Отправляет одну правку. Вид правки решает, какой запрос пойдёт.
+ *
+ * Правки томов среди видов больше нет. Залежавшаяся с прежних версий
+ * уйдёт по общему правилу ниже: с записью в журнал и без повторов,
+ * иначе она заперла бы очередь позади себя навечно.
+ */
 function sendOne(edit: PendingEdit): Promise<EditOutcome> {
   if (edit.kind === 'remove') return removeEntry(edit.mediaId)
   if (edit.kind === 'status' && typeof edit.value === 'string') {
@@ -125,9 +132,6 @@ function sendOne(edit: PendingEdit): Promise<EditOutcome> {
   }
   if (edit.kind === 'progress' && typeof edit.value === 'number') {
     return saveEntry(edit.mediaId, { progress: edit.value })
-  }
-  if (edit.kind === 'volumes' && typeof edit.value === 'number') {
-    return saveEntry(edit.mediaId, { volumes: edit.value })
   }
   if (edit.kind === 'repeat' && typeof edit.value === 'number') {
     return saveEntry(edit.mediaId, { repeat: edit.value })
@@ -144,7 +148,8 @@ function sendOne(edit: PendingEdit): Promise<EditOutcome> {
     return saveEntry(edit.mediaId, { notes: edit.value })
   }
 
-  // Значение не того вида: отправлять нечего, держать тоже незачем.
+  // Значение не того вида или вид, которого больше нет: отправлять
+  // нечего, держать тоже незачем.
   Logger('WARN', `Правка ${edit.id}: значение не подходит к виду ${edit.kind}`)
   return Promise.resolve({ ok: false, retry: false })
 }
@@ -226,7 +231,7 @@ export function flushEdits(): Promise<void> {
  * входа она была бы уже выброшена по числу попыток, а перенос списка
  * с сервера всё равно делается отдельным действием и заменяет местное.
  *
- * @param look Облик тайтла, если экран его знает: тип, имена и метка взрослого.
+ * @param look Облик тайтла, если экран его знает: имена и метка взрослого.
  */
 export async function queueEdit(
   mediaId: number,
