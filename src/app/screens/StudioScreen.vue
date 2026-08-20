@@ -7,7 +7,7 @@ import { fetchStudioWorks, type MediaBrief } from '@/api/anilist-media'
 import { hiddenCount, keepAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
-import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
+import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
@@ -69,7 +69,8 @@ async function fillTitles(): Promise<void> {
     for (let from = 0; from < ids.length; from += TITLE_CHUNK) {
       if (mine !== titleRun) return
 
-      await prefetchRussianTitles(ids.slice(from, from + TITLE_CHUNK))
+      // Сетке нужно только имя: описание и оценки спросит открытая карточка.
+      await prefetchRussianNames(ids.slice(from, from + TITLE_CHUNK))
       if (mine !== titleRun) return
 
       redraw()

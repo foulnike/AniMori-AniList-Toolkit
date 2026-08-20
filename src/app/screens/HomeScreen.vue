@@ -8,7 +8,7 @@ import type { MediaBrief } from '@/api/anilist-media'
 import { initCollection } from '@/core/collection'
 import { selectEntries } from '@/core/collection-view'
 import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
-import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
+import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import { hideRec, motifShelf, recShelf, tasteShelf } from '@/core/recs'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
@@ -162,7 +162,8 @@ async function fillTitles(): Promise<void> {
     for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
       if (mine !== titleRun) return
 
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
+      // Полке нужно только имя: описание и оценки спросит открытая карточка.
+      await prefetchRussianNames(wanted.slice(from, from + TITLE_CHUNK))
       if (mine !== titleRun) return
 
       redrawOwn()
@@ -232,7 +233,7 @@ async function warmRecTitles(mine: number, key: string): Promise<void> {
     for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
       if (mine !== recsRun) return
 
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
+      await prefetchRussianNames(wanted.slice(from, from + TITLE_CHUNK))
       if (mine !== recsRun) return
 
       publish()
