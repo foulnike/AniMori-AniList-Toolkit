@@ -1,24 +1,22 @@
 <script setup lang="ts">
-// Пункт 3.5: списки одним экраном на оба вида. Данные, обновление и
-// снимок у аниме и манги общие, разные только подписи и счёт частей.
-// Здесь же поиск по своему списку и порядок показа: и то и другое про список.
+// Пункт 3.5: свой список одним экраном. Данные, обновление и снимок лежат
+// в коллекции, сборка строки с порядком показа и доборами — в lists-row.
+// Здесь остаётся отбор: закладка, слово, потолок показа и перенос с AniList.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { initCollection, refreshFromServer } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
 import { startEditSender } from '@/core/edit-sender'
-import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { searchOwnList } from '@/core/media-search'
-import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
 import type { SnapshotEntry } from '@/core/snapshot'
-import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
-import { formatWord, partsShort, statusList } from '../labels'
+import { statusList } from '../labels'
 import { navigate } from '../router'
 
-import { keptKind, keptSort, keptStatus, keptWord, type SortName } from './lists-keep'
+import { keptSort, keptStatus, keptWord, type SortName } from './lists-keep'
+import { sortEntries, toRow, useRowWarm, type Row } from './lists-row'
 
 /**
  * Сколько записей рисуется за раз и на сколько растёт потолок при доборе.
@@ -26,9 +24,6 @@ import { keptKind, keptSort, keptStatus, keptWord, type SortName } from './lists
  * и русского названия, поэтому сразу всё мы не рисуем.
  */
 const PAGE_LIMIT = 100
-
-/** По скольку тайтлов просить названия за заход: источники отвечают по одному. */
-const TITLE_CHUNK = 10
 
 /** Сколько найденного показывать. Слово из двух букв иначе вывалит весь список. */
 const FOUND_LIMIT = 60
@@ -42,12 +37,6 @@ const HOLD_COUNT = 18
 /** За сколько до конца списка заказывать добор: раньше видного края. */
 const TAIL_MARGIN = '600px'
 
-/** Подвкладки вида. Сервер знает только эти два типа записей. */
-const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
-  { key: 'ANIME', title: 'Аниме' },
-  { key: 'MANGA', title: 'Манга' },
-]
-
 /** Порядки показа. Все считаются на месте: сети сортировка не требует. */
 const SORT_TABS: ReadonlyArray<{ key: SortName; title: string }> = [
   { key: 'updated', title: 'Свежие правки' },
@@ -57,28 +46,8 @@ const SORT_TABS: ReadonlyArray<{ key: SortName; title: string }> = [
   { key: 'nameDown', title: 'Название Я—А' },
 ]
 
-/** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
-interface Row {
-  mediaId: number
-  title: string
-  facts: string
-  mark: string | null
-  repeat: number
-  note: string | null
-  ongoing: boolean
-  own: string | null
-  done: number
-  cover: string | null
-  color: string | null
-  adult: boolean
-}
-
 /** Идёт ли работа со списком: подъём снимка или ответ сервера. */
 const busy = ref(true)
-
-/** Идёт ли добор названий или обложек. Кнопки списка он держать не должен. */
-const titlesBusy = ref(false)
-const looksBusy = ref(false)
 
 /** Идёт ли отбор по слову. На кириллице перед отбором поднимается склад. */
 const searchBusy = ref(false)
@@ -97,9 +66,8 @@ const note = ref('')
  */
 const asking = ref(false)
 
-// Вид, закладка, порядок и слово берутся из памяти между показами:
-// иначе возврат с карточки открывал чужую закладку и чужой вид.
-const kind = keptKind
+// Закладка, порядок и слово берутся из памяти между показами:
+// иначе возврат с карточки открывал чужую закладку.
 const activeStatus = keptStatus
 const sortKey = keptSort
 const word = keptWord
@@ -120,8 +88,9 @@ const picked = ref(0)
 /** Метка конца списка: по её появлению в окне заказывается добор. */
 const tailMark = ref<HTMLElement | null>(null)
 
-/** Подписи закладок зависят только от вида. */
-const statusTabs = computed(() => statusList(kind.value))
+/** Закладки статуса. Список теперь одного вида, и подписи у него одни. */
+const statusTabs = statusList('ANIME')
+
 const searching = computed(() => word.value.trim() !== '')
 const shown = computed(() =>
   searching.value ? total.value : (counts.value.get(activeStatus.value) ?? 0),
@@ -139,9 +108,7 @@ const restCount = computed(() => Math.max(0, picked.value - rows.value.length))
  */
 let foundEntries: SnapshotEntry[] = []
 
-/** Номера идущих работ: старый цикл видит, что его ответ больше не нужен. */
-let titleRun = 0
-let lookRun = 0
+/** Номер идущего поиска: старый видит, что его ответ больше не нужен. */
 let searchRun = 0
 
 /** Таймер паузы набора. */
@@ -154,179 +121,26 @@ function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/** Короткая подпись под названием: вид и год. Больше в две строки не влезает. */
-function factsText(look: MediaLook | null): string {
-  if (look === null) return ''
-
-  const parts: string[] = []
-
-  const kindWord = formatWord(look.format)
-  if (kindWord !== null) parts.push(kindWord)
-  if (look.seasonYear !== null) parts.push(String(look.seasonYear))
-
-  return parts.join(' · ')
-}
-
-/** Свой счёт частей на постере. Неизвестный итог не выдумывается. */
-function ownText(entry: SnapshotEntry, parts: number | null): string | null {
-  const short = partsShort(entry.type)
-  if (parts === null) return entry.progress > 0 ? `${entry.progress} ${short}` : null
-  return `${entry.progress} / ${parts} ${short}`
-}
-
-/** Доля пройденного для полосы. Завершённое залито целиком даже без итога. */
-function donePart(entry: SnapshotEntry, parts: number | null): number {
-  if (entry.status === 'COMPLETED') return 1
-  if (parts === null || parts <= 0 || entry.progress <= 0) return 0
-  return Math.min(1, entry.progress / parts)
-}
-
-/**
- * Название записи: русское, латиница, английское, номер. Номер остаётся
- * только у записи, созданной правкой до ответа сервера.
- */
-function titleOf(entry: SnapshotEntry): string {
-  return (
-    peekRussianName(entry.mediaId) ??
-    entry.romaji ??
-    entry.english ??
-    peekLook(entry.mediaId)?.romaji ??
-    `Тайтл #${entry.mediaId}`
-  )
-}
-
-/** Средняя оценка каталога для порядка: неизвестная уходит в конец. */
-function ratingOf(entry: SnapshotEntry): number {
-  return peekLook(entry.mediaId)?.averageScore ?? -1
-}
-
-/**
- * Порядок показа. Названия сравниваются по-русски, поэтому список может
- * слегка переставиться, когда доберутся переводы: до них сравнивать нечего.
- */
-function sortEntries(list: SnapshotEntry[]): SnapshotEntry[] {
-  const out = [...list]
-
-  switch (sortKey.value) {
-    case 'score':
-      out.sort((a, b) => b.score10 - a.score10 || b.updatedAt - a.updatedAt)
-      break
-    case 'rating':
-      out.sort((a, b) => ratingOf(b) - ratingOf(a) || b.updatedAt - a.updatedAt)
-      break
-    case 'nameUp':
-      out.sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'ru'))
-      break
-    case 'nameDown':
-      out.sort((a, b) => titleOf(b).localeCompare(titleOf(a), 'ru'))
-      break
-    default:
-      out.sort((a, b) => b.updatedAt - a.updatedAt)
-  }
-
-  return out
-}
-
-/** Запись памяти в плитку. */
-function toRow(entry: SnapshotEntry): Row {
-  const look = peekLook(entry.mediaId)
-
-  // У идущего сезона знаменателем служат вышедшие серии.
-  const parts = partsOut(look, entry.type)
-
-  return {
-    mediaId: entry.mediaId,
-    title: titleOf(entry),
-    facts: factsText(look),
-    mark: entry.score10 > 0 ? `★ ${entry.score10.toFixed(1)}` : null,
-    repeat: entry.repeat,
-    note: entry.notes,
-    ongoing: (look?.airingEpisode ?? null) !== null,
-    own: ownText(entry, parts),
-    done: donePart(entry, parts),
-    cover: look?.cover ?? null,
-    color: look?.color ?? null,
-    adult: entry.isAdult,
-  }
-}
-
 /**
  * Снимает кусок коллекции в свои плитки. При идущем поиске плитки берутся
  * из находок: закладка тогда не главная, а слово главное. Порядок выбирает
  * человек, поэтому потолок отрезается уже после сортировки всей закладки.
  */
 function redraw(): void {
-  counts.value = countByStatus({ type: kind.value })
-  total.value = countEntries({ type: kind.value })
+  counts.value = countByStatus({ type: 'ANIME' })
+  total.value = countEntries({ type: 'ANIME' })
 
   const list = searching.value
     ? foundEntries
-    : selectEntries({ type: kind.value, status: [activeStatus.value] })
+    : selectEntries({ type: 'ANIME', status: [activeStatus.value] })
 
   picked.value = list.length
-  rows.value = sortEntries(list).slice(0, limit.value).map(toRow)
+  rows.value = sortEntries(list, sortKey.value).slice(0, limit.value).map(toRow)
 }
 
-/**
- * Добирает обложки для показанных плиток. Сотня строк стоит двух
- * запросов, а возврат в ту же закладку — ни одного.
- */
-async function fillLooks(): Promise<void> {
-  const mine = ++lookRun
-  const asked = kind.value
-  const wanted = rows.value
-    .filter((row) => peekLook(row.mediaId) === null)
-    .map((row) => row.mediaId)
-
-  if (wanted.length === 0) return
-
-  looksBusy.value = true
-
-  try {
-    await warmLooks(wanted, asked)
-    if (mine !== lookRun) return
-
-    redraw()
-  } catch (e) {
-    // Без обложек список живой: на плитке останется первая буква названия.
-    Logger('WARN', 'Списки: обложки добрать не вышло', e)
-  } finally {
-    if (mine === lookRun) looksBusy.value = false
-  }
-}
-
-/**
- * Добирает русские названия для показанных плиток пачками. Ошибка здесь
- * не стопорит экран: без перевода название останется на латинице.
- */
-async function fillTitles(): Promise<void> {
-  const mine = ++titleRun
-  const asked = kind.value
-  const wanted = rows.value
-    .filter((row) => peekRussianName(row.mediaId) === null)
-    .map((row) => row.mediaId)
-
-  if (wanted.length === 0) return
-
-  titlesBusy.value = true
-
-  try {
-    for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
-      // Закладку или вид успели сменить: остаток пачек этому показу не нужен.
-      if (mine !== titleRun) return
-
-      // Тип обязателен: у Шикимори аниме и манга лежат в разных разделах.
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), asked)
-      if (mine !== titleRun) return
-
-      redraw()
-    }
-  } catch (e) {
-    Logger('WARN', 'Списки: названия добрать не вышло', e)
-  } finally {
-    if (mine === titleRun) titlesBusy.value = false
-  }
-}
+// Доборы обложек и названий живут рядом со сборкой строки: экран отдаёт
+// свои строки и перерисовку. Флажки нужны подвалу и кнопок не держат.
+const { looksBusy, titlesBusy, fillLooks, fillTitles } = useRowWarm(rows, redraw)
 
 /** Отрисовка и два добора вслед. Сами доборы зовут только redraw — круга нет. */
 function refill(): void {
@@ -349,7 +163,7 @@ function showMore(): void {
 }
 
 /**
- * Отбор по слову по всем закладкам выбранного вида. Сети не требует,
+ * Отбор по слову по всем закладкам сразу. Сети не требует,
  * но на кириллице сначала поднимает склад русских названий.
  */
 async function runSearch(): Promise<void> {
@@ -367,7 +181,7 @@ async function runSearch(): Promise<void> {
   searchBusy.value = true
 
   try {
-    const found = await searchOwnList(asked, kind.value, FOUND_LIMIT)
+    const found = await searchOwnList(asked, 'ANIME', FOUND_LIMIT)
     if (mine !== searchRun) return
 
     foundEntries = found
@@ -400,22 +214,6 @@ function onClear(): void {
   foundEntries = []
   searchRun++
   resetLimit()
-  refill()
-}
-
-/** Переключение вида. Сети не требует: в памяти лежат оба вида сразу. */
-function pickKind(next: MediaType): void {
-  if (kind.value === next) return
-
-  kind.value = next
-  activeStatus.value = 'CURRENT'
-  resetLimit()
-
-  if (searching.value) {
-    void runSearch()
-    return
-  }
-
   refill()
 }
 
@@ -519,19 +317,6 @@ onBeforeUnmount(() => {
 <template>
   <section class="am-page">
     <div class="am-bar">
-      <div class="am-seg">
-        <button
-          v-for="tab in KIND_TABS"
-          :key="tab.key"
-          class="am-seg__btn"
-          :class="{ 'am-seg__btn--on': tab.key === kind }"
-          type="button"
-          @click="pickKind(tab.key)"
-        >
-          {{ tab.title }}
-        </button>
-      </div>
-
       <label class="am-search am-search--wide">
         <span class="am-search__mark" aria-hidden="true">⌕</span>
         <input
