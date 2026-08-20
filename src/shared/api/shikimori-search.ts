@@ -2,7 +2,6 @@
 // Отдельно от shikimori.ts: тот отвечает за транспорт, зеркала и темп, здесь — сам запрос.
 // Каталог AniList кириллицу не понимает, поэтому русское слово ищется только тут.
 
-import type { MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
 import { fetchShiki } from './shikimori'
 
@@ -42,15 +41,18 @@ function textOrNull(value: string | null | undefined): string | null {
  *
  * Взрослое из выдачи не вырезается: отбор по этому признаку — дело
  * пункта 3.8, и решать за пользователя здесь неуместно.
+ *
+ * Аргумент вида игнорируется: раздел всегда аниме, других приложение
+ * не открывает. Параметр держится ради вызова из поиска ядра.
  */
-export async function searchShikimori(word: string, type: MediaType): Promise<ShikiFound[]> {
+export async function searchShikimori(word: string, _type?: string): Promise<ShikiFound[]> {
   const asked = word.trim()
   if (asked === '') return []
 
-  // У Шикимори аниме и манга — разные разделы, номер без раздела ведёт не туда.
-  const section = type === 'MANGA' ? 'mangas' : 'animes'
+  // Раздел вписан словом: у Шикимори аниме и манга — разные разделы,
+  // и номер из чужого раздела увёл бы выписку совсем не туда.
   const path =
-    `/api/${section}?search=${encodeURIComponent(asked)}` +
+    `/api/animes?search=${encodeURIComponent(asked)}` +
     `&limit=${SHIKI_SEARCH_LIMIT}&censored=false`
 
   const reply = await fetchShiki<ShikiSearchRow[]>(path)
