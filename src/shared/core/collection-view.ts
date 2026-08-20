@@ -191,14 +191,14 @@ export function totalProgress(filter: EntryFilter = EMPTY_FILTER): number {
 /**
  * Сумма прочитанных томов по отбору.
  *
- * Остаток от времён манги: новые записи всегда дадут ноль, а старые
- * снимки ещё помнят тома. Уйдёт вместе с полем снимка при поднятии
- * версии снимка и переносе данных.
+ * Остаток от времён манги: новые записи томов не знают вовсе, а старые
+ * снимки ещё помнят. Поле читается через ноль нарочно: следующим шагом
+ * оно станет необязательным в снимке, и сборка должна выжить оба раза.
  */
 export function totalVolumes(filter: EntryFilter = EMPTY_FILTER): number {
   let total = 0
   for (const entry of eachEntry()) {
-    if (matchesEntry(entry, filter)) total += entry.volumes
+    if (matchesEntry(entry, filter)) total += entry.volumes ?? 0
   }
   return total
 }
