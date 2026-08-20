@@ -22,9 +22,17 @@ export interface AniMoriSettings {
   enableLinkRutracker: boolean
   enableLinkYummy: boolean
   enableLinkAnimego: boolean
+  /**
+   * Ссылка на MangaLib во внешних ссылках. Приложение манги не знает, и само
+   * оно эту ссылку никогда не ставит. Ключ всё равно живой: внешние ссылки
+   * расставляет юзерскрипт на страницах AniList, а там манга есть и никуда
+   * не делась. Оба манговых ключа уйдут только вместе с разделением
+   * юзерскрипта и приложения, а не раньше.
+   */
   enableLinkMangalib: boolean
   yummyDomain: string
   animegoDomain: string
+  /** Зеркало MangaLib для той же ссылки юзерскрипта: адреса у них меняются часто. */
   mangalibDomain: string
   enableLogger: boolean
   accentPreset: AccentPreset
@@ -77,8 +85,10 @@ export interface AniMoriSettings {
  * Значения НА СЛУЧАЙ ОТСУТСТВИЯ КЛЮЧА, а не «сброс к заводским»: чужое
  * сохранённое значение перебьёт любой дефолт отсюда.
  *
- * Фоллбэк именно Shikimori, а не 'none': у anime365 нет манги вовсе и части русских
- * названий, без фоллбэка там оставалось бы английское название без объяснений.
+ * Фоллбэк именно Shikimori, а не 'none': anime365 знает не все русские названия,
+ * и без фоллбэка на их месте оставалось бы английское название без объяснений.
+ * Про мангу здесь речи больше нет: в приложении её не осталось, а внешние
+ * ссылки юзерскрипта русские названия не спрашивают.
  */
 const DEFAULT_SETTINGS: AniMoriSettings = {
   translateInterface: true,
