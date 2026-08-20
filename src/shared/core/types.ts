@@ -2,6 +2,14 @@
 // Описаны только нужные нам поля, остальное из ответов сознательно не перечисляется.
 // Знак вопроса у поля стоит там, где внешний API реально не гарантирует значение.
 
+/**
+ * Вид тайтла в терминах AniList.
+ *
+ * Приложение мангу больше не спрашивает: вид вписан в запросы словом
+ * ANIME, а не переменной. Тип жив ради юзерскрипта: перенос и сравнение
+ * списков работают с манговыми списками Shikimori, и там без вида не обойтись.
+ * Убирать его можно только вместе с разделением юзерскрипта и приложения.
+ */
 export type MediaType = 'ANIME' | 'MANGA'
 
 /** Статусы в терминах Shikimori — к ним нормализуются и записи AniList. */
@@ -26,7 +34,11 @@ export interface AniListMediaLite {
   relations?: { edges: AniListRelationEdge[] }
 }
 
-/** Полный Media из AniList GraphQL (рендер виджетов страницы тайтла). */
+/**
+ * Полный Media из AniList GraphQL (рендер виджетов страницы тайтла).
+ * Форма юзерскриптная: вид тайтла там приходит со страницы, а страница
+ * может быть и манговой.
+ */
 export interface AniListMedia {
   id: number
   type: MediaType
@@ -38,7 +50,10 @@ export interface AniListMedia {
   mediaListEntry?: { status: string | null; progress?: number }
 }
 
-/** Общая часть нормализованных записей сканера дельты (ключ — malId). */
+/**
+ * Общая часть нормализованных записей сканера дельты (ключ — malId).
+ * Сканер живёт в юзерскрипте и сравнивает списки целиком, вместе с манговыми.
+ */
 export interface CmpEntryBase {
   malId: number
   title: string
@@ -46,6 +61,7 @@ export interface CmpEntryBase {
   /** Оценка 0..10. */
   score10: number
   progress: number
+  /** Прочитано томов. У аниме всегда ноль: поле для манговых списков Shikimori. */
   volumes: number
   rewatches: number
   notes: string
@@ -86,11 +102,25 @@ export interface ShikiMedia {
   rates_scores_stats?: Array<{ name: string; value: number }>
 }
 
-export type CacheStoreName = 'shikiCache' | 'malCache' | 'franchiseCache'
+/**
+ * Имена сторов кэша для dbGet/dbSet.
+ *
+ * `mediaCache` — настоящее имя склада карточек: там давно лежат не только
+ * данные Shikimori, но и обложки с AniList, темы с AnimeThemes и оценки площадок.
+ *
+ * `shikiCache` — устаревший псевдоним того же стора. Оставлен сознательно:
+ * вызовов dbGet/dbSet десятки, они разбросаны по приложению и юзерскрипту,
+ * и переименовать их одним заходом — значит поломать то, что не проверить.
+ * db.ts переводит псевдоним в физическое имя сам.
+ */
+export type CacheStoreName = 'mediaCache' | 'shikiCache' | 'malCache' | 'franchiseCache'
 
 /**
- * Запись в `shikiCache` (keyPath 'key'): карточки тайтлов/персонажей/персонала/тем.
+ * Запись в `mediaCache` (keyPath 'key'): карточки тайтлов/персонажей/персонала/тем.
  * Форма одна, различаются префикс ключа и `data`.
+ *
+ * Имя типа осталось старым из-за числа импортов; для нового кода есть
+ * псевдоним MediaCacheRecord ниже.
  */
 export interface ShikiCacheRecord<T = unknown> {
   /** Составной ключ вида "ПРЕФИКС_id", например "FULL_123". */
@@ -99,6 +129,9 @@ export interface ShikiCacheRecord<T = unknown> {
   /** Unix-таймстамп записи (протухание по CACHE_TIME). */
   ts: number
 }
+
+/** То же самое под верным именем: пишите в новом коде его. */
+export type MediaCacheRecord<T = unknown> = ShikiCacheRecord<T>
 
 /** Запись в `malCache` (keyPath 'id'): AniList ID -> AniListMedia. */
 export interface MalCacheRecord {
