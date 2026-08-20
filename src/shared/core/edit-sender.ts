@@ -37,7 +37,7 @@ let sweepTimer: number | undefined
  * запись, созданная без входа, навсегда осталась бы «Тайтл #id».
  *
  * Поле вида — остаток от времён манги: его ещё передают уже записанные
- * вызовы, а выбирать больше не из чего.
+ * вызовы, а выбирать больше не из чего. В снимок оно уже не попадает.
  */
 export type EntryLook = {
   type?: 'ANIME'
@@ -75,17 +75,15 @@ function applyToMemory(
   const known = getEntry(mediaId)
 
   // Поля перечислены явно: новое поле снимка должно ломать сборку здесь,
-  // а не живой запуск. Поля type и volumes — остатки от манги: они уйдут
-  // вместе с поднятием версии снимка.
+  // а не живой запуск. Вида тайтла и томов среди них уже нет:
+  // снимок шестой версии их не хранит.
   const entry: SnapshotEntry = known
     ? { ...known }
     : {
         mediaId,
-        type: 'ANIME',
         status: null,
         score10: 0,
         progress: 0,
-        volumes: 0,
         repeat: 0,
         startedAt: null,
         completedAt: null,

@@ -2,7 +2,6 @@
 // Живёт отдельно от anilist.ts: там темп, паузы и разбор отказов, и файл уже велик.
 // Наружу отдаётся плоский массив записей без деления на списки сайта.
 
-import type { MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
 import { anilistQuery, canSignAniList } from './anilist'
 
@@ -16,18 +15,16 @@ export interface ViewerInfo {
  * Запись списка в сыром виде. Картинок здесь нет: их даёт склад.
  * Названия есть: без них свой список нечитаем без сети.
  *
- * Типа тайтла здесь нет сознательно: запрос идёт по одному типу сразу,
- * и вызывающий знает его точнее, чем мы вычитали бы из ответа.
+ * Вида тайтла здесь нет и не нужно: спрашивается только аниме.
+ * Прочитанных томов тоже: они ушли вместе с мангой.
  */
 export interface RawListEntry {
   mediaId: number
   status: string | null
   /** Шкала 0..10 с десятыми долями: запрошена явно, независимо от настроек сайта. */
   score: number
-  /** Серий у аниме, глав у манги. */
+  /** Просмотренных серий. */
   progress: number
-  /** Прочитано томов. У аниме всегда ноль — это штатно. */
-  volumes: number
   /** Сколько раз пересматривали или перечитывали. */
   repeat: number
   /** Дата начала в виде ГГГГ-ММ-ДД или null. Неполную дату не отдаём. */
@@ -56,21 +53,24 @@ const VIEWER_QUERY = `query {
  * Шкала оценки задана в запросе, а не взята из настроек пользователя.
  * Иначе одна и та же запись приходила бы то как 85, то как 8.5.
  *
+ * Вид тайтла вписан словом, а не вынесен в переменную: без условия
+ * MediaListCollection отдаёт и аниме, и мангу сразу, а коллекции манга больше
+ * не нужна. Заодно это дешевле: ответ меньше на целый список.
+ *
  * Названия и признак взрослого берутся здесь же: отдельный запрос за ними
  * означал бы второй обход всей коллекции пачками по пятьдесят тайтлов.
  *
  * Пересмотры, даты и комментарий стоят почти ничего в весе ответа, а без них
  * окно правки показывало бы пустоту вместо того, что человек уже вписал.
  */
-const LIST_QUERY = `query ($userId: Int, $type: MediaType) {
-  MediaListCollection(userId: $userId, type: $type) {
+const LIST_QUERY = `query ($userId: Int) {
+  MediaListCollection(userId: $userId, type: ANIME) {
     lists {
       entries {
         mediaId
         status
         score(format: POINT_10_DECIMAL)
         progress
-        progressVolumes
         repeat
         notes
         startedAt {
@@ -179,7 +179,6 @@ function toEntry(value: unknown): RawListEntry | null {
     status: typeof raw.status === 'string' ? raw.status : null,
     score: num(raw.score, 0),
     progress: num(raw.progress, 0),
-    volumes: num(raw.progressVolumes, 0),
     repeat: num(raw.repeat, 0),
     startedAt: readFuzzy(raw.startedAt),
     completedAt: readFuzzy(raw.completedAt),
@@ -221,9 +220,12 @@ export async function fetchViewer(): Promise<ViewerInfo | null> {
 /**
  * Вся коллекция одним запросом. Один тайтл может лежать в нескольких
  * своих подборках сразу, поэтому дубли схлопываются по номеру тайтла.
+ *
+ * Аргумент вида игнорируется: вид вписан в запрос словом. Параметр
+ * держится ради вызова из коллекции и уйдёт вместе с ним.
  */
-export async function fetchUserList(userId: number, type: MediaType): Promise<RawListEntry[]> {
-  const reply = await anilistQuery<ListReply>(LIST_QUERY, { userId, type }, true)
+export async function fetchUserList(userId: number, _type?: string): Promise<RawListEntry[]> {
+  const reply = await anilistQuery<ListReply>(LIST_QUERY, { userId }, true)
   const lists = reply.data?.MediaListCollection?.lists ?? []
 
   const byMedia = new Map<number, RawListEntry>()
@@ -247,7 +249,7 @@ export async function fetchUserList(userId: number, type: MediaType): Promise<Ra
   }
 
   if (skipped > 0) Logger('WARN', `Список AniList: пропущено битых записей ${skipped}`)
-  Logger('API', `Список AniList (${type}): записей ${byMedia.size}`)
+  Logger('API', `Список AniList (аниме): записей ${byMedia.size}`)
 
   return Array.from(byMedia.values())
 }
