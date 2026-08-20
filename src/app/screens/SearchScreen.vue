@@ -8,7 +8,7 @@ import type { MediaBrief } from '@/api/anilist-media'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { searchCatalog } from '@/core/media-search'
-import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
+import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
@@ -73,7 +73,8 @@ async function fillTitles(): Promise<void> {
     for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
       if (mine !== titleRun) return
 
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
+      // Выдаче нужно только имя: описание и оценки спросит открытая карточка.
+      await prefetchRussianNames(wanted.slice(from, from + TITLE_CHUNK))
       if (mine !== titleRun) return
 
       redraw()

@@ -16,7 +16,7 @@ import { partsOut } from '@/core/media-looks'
 import {
   getRussianTitle,
   peekRussianName,
-  prefetchRussianTitles,
+  prefetchRussianNames,
   type RussianTitle,
 } from '@/core/media-title'
 import { getTitleRatings, type TitleRatings } from '@/core/ratings'
@@ -222,7 +222,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   /** Подложка героя: баннер сервера, а без него тон обложки. */
   const heroStyle = computed<{ backgroundImage: string }>(() => {
     const banner = card.value?.banner
-    if (banner) return { backgroundImage: `url("${banner}")` }
+    if (banner) return { backgroundImage: `url(\"${banner}\")` }
 
     const tone = card.value?.color ?? '#1b2534'
     return { backgroundImage: `linear-gradient(120deg, ${tone}, #0b1018)` }
@@ -420,7 +420,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     const ids = works.flatMap((w) => (w.type !== 'MANGA' && w.mediaId !== null ? [w.mediaId] : []))
     if (ids.length === 0) return
 
-    await prefetchRussianTitles(ids, 'ANIME')
+    await prefetchRussianNames(ids)
     if (mine === run) franchiseStamp.value += 1
   }
 
