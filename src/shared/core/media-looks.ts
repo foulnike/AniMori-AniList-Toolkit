@@ -1,4 +1,4 @@
-// Облик тайтла для сетки постеров: обложка, цвет и счёт частей.
+// Облик тайтла для сетки постеров: обложка, цвет и счёт серий.
 // Снимок списка картинок не держит, поэтому вид живёт отдельно: память, склад, сеть.
 // Хозяин обликов: экранам не надо знать, пришла обложка со склада или из сети.
 
@@ -7,7 +7,7 @@ import { dbGet, dbSet } from './db'
 import { fetchBriefsByIds } from '../api/anilist-lookup'
 import type { MediaBrief } from '../api/anilist-media'
 import { Logger } from '../utils/logger'
-import type { MediaType, ShikiCacheRecord } from './types'
+import type { ShikiCacheRecord } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи, а не номер источника. */
 const KEY_PREFIX = 'LOOK2_'
@@ -25,7 +25,6 @@ export interface MediaLook {
   format: string | null
   seasonYear: number | null
   episodes: number | null
-  chapters: number | null
   averageScore: number | null
   romaji: string | null
   english: string | null
@@ -49,22 +48,23 @@ function cacheKey(mediaId: number): string {
 }
 
 /**
- * Сколько частей уже вышло. У манги это главы, у аниме — серии.
+ * Сколько серий уже вышло.
  *
  * У онгоинга объявленного итога часто нет вовсе, зато известен номер
  * ближайшей серии: вышло ровно на одну меньше. Без этого счёта
  * полоса у идущего сезона всегда стояла на нуле.
+ *
+ * Второй аргумент игнорируется: он остался от времён манги и уйдёт
+ * вместе с последним вызовом, который его ещё передаёт.
  */
 export function partsOut(
   look: {
     episodes: number | null
-    chapters: number | null
     airingEpisode: number | null
   } | null,
-  type: MediaType,
+  _type?: string,
 ): number | null {
   if (look === null) return null
-  if (type === 'MANGA') return look.chapters
 
   const aired = look.airingEpisode === null ? null : look.airingEpisode - 1
   if (aired !== null && aired > 0) return aired
@@ -110,7 +110,6 @@ function fromBrief(brief: MediaBrief): MediaLook {
     format: brief.format,
     seasonYear: brief.seasonYear,
     episodes: brief.episodes,
-    chapters: brief.chapters,
     averageScore: brief.averageScore,
     romaji: brief.romaji,
     english: brief.english,
@@ -141,8 +140,10 @@ export function rememberBrief(brief: MediaBrief): void {
 /**
  * Готовит облик для показанного куска списка: сначала склад, потом сеть.
  * Сотня строк стоит двух запросов, а второй заход в ту же закладку — ни одного.
+ *
+ * Второй аргумент игнорируется: остаток от времён манги.
  */
-export async function warmLooks(mediaIds: number[], type: MediaType): Promise<number> {
+export async function warmLooks(mediaIds: number[], _type?: string): Promise<number> {
   const unknown: number[] = []
 
   for (const mediaId of mediaIds) {
@@ -176,7 +177,7 @@ export async function warmLooks(mediaIds: number[], type: MediaType): Promise<nu
 
     let briefs: MediaBrief[]
     try {
-      briefs = await fetchBriefsByIds(chunk, type)
+      briefs = await fetchBriefsByIds(chunk, 'ANIME')
     } catch (e) {
       // Отказ сети не запоминаем: повторный заход на экран спросит снова.
       Logger('WARN', `Облик: пачка из ${chunk.length} не доехала`, e)

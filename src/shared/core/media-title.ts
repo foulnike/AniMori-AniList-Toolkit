@@ -7,7 +7,7 @@ import { dbGet, dbSet } from './db'
 import { fetchMalIds } from '../api/anilist-media'
 import { resolveTitle } from '../api/titles'
 import { Logger } from '../utils/logger'
-import type { MediaType, ShikiCacheRecord } from './types'
+import type { ShikiCacheRecord } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи: RU3 — с оценками площадок. */
 const KEY_PREFIX = 'RU3_'
@@ -69,12 +69,8 @@ async function writeCache(mediaId: number, data: RussianTitle): Promise<void> {
 }
 
 /** Добывает карточку из сети по уже известному номеру MAL. */
-async function fetchByMal(
-  mediaId: number,
-  malId: number,
-  type: MediaType,
-): Promise<RussianTitle | null> {
-  const resolved = await resolveTitle(malId, type)
+async function fetchByMal(mediaId: number, malId: number): Promise<RussianTitle | null> {
+  const resolved = await resolveTitle(malId, 'ANIME')
 
   if (!resolved || !resolved.russian) {
     memory.set(mediaId, null)
@@ -96,36 +92,38 @@ async function fetchByMal(
 }
 
 /** Полный путь для одного тайтла: склад, соответствие MAL, источники. */
-async function loadOne(mediaId: number, type: MediaType): Promise<RussianTitle | null> {
+async function loadOne(mediaId: number): Promise<RussianTitle | null> {
   const cached = await readCache(mediaId)
   if (cached) {
     memory.set(mediaId, cached)
     return cached
   }
 
-  const malId = (await fetchMalIds([mediaId], type)).get(mediaId)
+  const malId = (await fetchMalIds([mediaId], 'ANIME')).get(mediaId)
   if (!malId) {
     memory.set(mediaId, null)
     return null
   }
 
-  return await fetchByMal(mediaId, malId, type)
+  return await fetchByMal(mediaId, malId)
 }
 
 /**
  * Русская карточка тайтла или `null`, если перевода нет.
  * Повторные вызовы пока идёт добыча ждут тот же ответ, а не шлют свой запрос.
+ *
+ * Аргумент вида игнорируется: остаток от времён манги.
  */
 export async function getRussianTitle(
   mediaId: number,
-  type: MediaType = 'ANIME',
+  _type?: string,
 ): Promise<RussianTitle | null> {
   if (memory.has(mediaId)) return memory.get(mediaId) ?? null
 
   const inFlight = pending.get(mediaId)
   if (inFlight) return await inFlight
 
-  const task = loadOne(mediaId, type).catch((e) => {
+  const task = loadOne(mediaId).catch((e) => {
     // Сбой не запоминается в памяти: сеть вернётся — спросим снова.
     Logger('WARN', `Русское название: добыть не вышло (тайтл ${mediaId})`, e)
     return null
@@ -184,11 +182,10 @@ export async function warmRussianTitles(mediaIds: number[]): Promise<number> {
 /**
  * Готовит карточки для видимого куска списка. Соответствия MAL берутся пачкой,
  * а сами источники опрашиваются по очереди: веер запросов сразу упирается в темп.
+ *
+ * Аргумент вида игнорируется: остаток от времён манги.
  */
-export async function prefetchRussianTitles(
-  mediaIds: number[],
-  type: MediaType = 'ANIME',
-): Promise<number> {
+export async function prefetchRussianTitles(mediaIds: number[], _type?: string): Promise<number> {
   const unknown: number[] = []
 
   for (const mediaId of mediaIds) {
@@ -205,7 +202,7 @@ export async function prefetchRussianTitles(
 
   if (unknown.length === 0) return 0
 
-  const malIds = await fetchMalIds(unknown, type)
+  const malIds = await fetchMalIds(unknown, 'ANIME')
   let added = 0
 
   for (const mediaId of unknown) {
@@ -216,7 +213,7 @@ export async function prefetchRussianTitles(
     }
 
     try {
-      if (await fetchByMal(mediaId, malId, type)) added++
+      if (await fetchByMal(mediaId, malId)) added++
     } catch (e) {
       // Один упавший тайтл не повод бросать остальной экран без названий.
       Logger('WARN', `Русское название: тайтл ${mediaId} пропущен`, e)
