@@ -217,31 +217,46 @@ export function rememberRussianName(mediaId: number, russian: string): void {
 }
 
 /**
- * Поднимает в память то, что уже лежит на складе. Сеть не трогается вовсе.
- * Нужно поиску по своему списку: искать на кириллице надо по всей коллекции,
- * а не только по той сотне строк, которую успели показать.
+ * Поднимает в память имена, которые уже лежат на складах. Сеть не трогается
+ * вовсе. Нужно поиску по своему списку: искать на кириллице надо по всей
+ * коллекции, а не только по той сотне строк, которую успели показать.
+ *
+ * Склад имён спрашивается первым, склад карточек — вторым: у давнего
+ * пользователя имена лежат только внутри карточек, а после датасета — только
+ * в своих записях. Одного склада мало ни сейчас, ни потом.
+ *
+ * Обратно в свою запись имя здесь не переносится: строк в коллекции тысячи,
+ * и тысяча записей на одно нажатие клавиши дороже второго чтения. Перенос
+ * делает prefetchRussianNames на видимом куске.
  */
-export async function warmRussianTitles(mediaIds: number[]): Promise<number> {
+export async function warmRussianNames(mediaIds: number[]): Promise<number> {
   let warmed = 0
 
   for (const mediaId of mediaIds) {
-    // Склад спрашивается один раз за запуск: чтений тут тысячи, и второй проход лишний.
-    if (memory.has(mediaId) || asked.has(mediaId)) continue
+    if (memory.has(mediaId) || names.has(mediaId)) continue
 
     try {
-      const cached = await readCache(mediaId)
+      // Склады спрашиваются по одному разу за запуск: чтений тут тысячи.
+      const stored = askedNames.has(mediaId) ? null : await readNameCache(mediaId)
+      if (stored !== null) {
+        names.set(mediaId, stored)
+        warmed++
+        continue
+      }
+
+      const cached = asked.has(mediaId) ? null : await readCache(mediaId)
       if (!cached) continue
 
       memory.set(mediaId, cached)
       warmed++
     } catch (e) {
       // Склад мог не открыться: без него поиск обеднеет, но работать обязан.
-      Logger('WARN', `Русские названия: склад не ответил по тайтлу ${mediaId}`, e)
+      Logger('WARN', `Русские имена: склад не ответил по тайтлу ${mediaId}`, e)
       return warmed
     }
   }
 
-  if (warmed > 0) Logger('DB', `Русские названия: со склада поднято ${warmed}`)
+  if (warmed > 0) Logger('DB', `Русские имена: со склада поднято ${warmed}`)
   return warmed
 }
 

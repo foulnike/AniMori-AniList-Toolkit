@@ -11,7 +11,7 @@ import { hasCyrillic, searchShikimori } from '../api/shikimori-search'
 import { Logger } from '../utils/logger'
 import { hiddenCount, keepAllowed } from './adult'
 import { selectEntries } from './collection-view'
-import { peekRussianName, rememberRussianName, warmRussianTitles } from './media-title'
+import { peekRussianName, rememberRussianName, warmRussianNames } from './media-title'
 import type { SnapshotEntry } from './snapshot'
 
 /**
@@ -63,7 +63,7 @@ function sift(page: SearchPage, word: string): SearchPage {
 
 /**
  * Поиск по своему списку. Слово сверяется с русским, ромадзи и английским
- * названием. Перед отбором поднимается склад переводов: иначе на кириллице
+ * названием. Перед отбором поднимается склад имён: иначе на кириллице
  * нашлось бы только то, что успели показать в этом запуске.
  *
  * Взрослое здесь НЕ отсеивается: своя запись уже своя, и прятать её значит
@@ -83,9 +83,9 @@ export async function searchOwnList(
 
   const all = selectEntries({}, { key: 'updated' }, { limit: OWN_SCAN_LIMIT })
 
-  // Склад поднимается только для русского слова: латиница есть в самом снимке.
+  // Склад имён поднимается только для русского слова: латиница есть в снимке.
   if (hasCyrillic(word)) {
-    await warmRussianTitles(all.map((entry) => entry.mediaId))
+    await warmRussianNames(all.map((entry) => entry.mediaId))
   }
 
   const found: SnapshotEntry[] = []
