@@ -1,18 +1,18 @@
 // Дерево франшизы: хронология частей с Шикимори одним запросом,
-// маппинг номеров MAL в AniList двумя пачками, склад бессрочный.
+// маппинг номеров MAL в AniList одной пачкой, склад бессрочный.
 // Перенос виджета скрипта: там та же хронология рисовалась на чужой
 // странице; здесь переходы внутренние, а статусы берутся из своей
 // памяти списка — авторизованный запрос ради них не нужен.
 //
-// Пространства номеров MAL у аниме и манги раздельны: манга 33255
-// существует отдельно от аниме 33255. Поэтому маппинг ведётся по паре
-// «тип + номер», а тип узла читается из его адреса (/animes/, /mangas/).
+// Дерево у Шикимори смешанное: в хронологии аниме лежит и первоисточник
+// манги. Показывать его негде: переход вёл бы на пустую карточку, так что
+// такие узлы отбрасываются прямо по адресу (/mangas/, /ranobe/).
 
 import { anilistQuery } from '../api/anilist'
 import { fetchShiki } from '../api/shikimori'
 import { dbGet, dbSet } from './db'
 import { Logger } from '../utils/logger'
-import type { FranchiseCacheRecord, MediaType } from './types'
+import type { FranchiseCacheRecord } from './types'
 
 /** Узел дерева франшизы с Шикимори: номер тут — номер MAL. */
 interface FranchiseNode {
@@ -29,7 +29,12 @@ interface FranchiseNode {
 export interface FranchiseWork {
   mediaId: number | null
   malId: number | null
-  type: MediaType | null
+  /**
+   * Вид тайтла со стороны AniList. Остаток от времён манги: теперь здесь
+   * всегда аниме, но поле оставлено строкой ради читателей склада
+   * и старых записей, где манга ещё лежит.
+   */
+  type: string | null
   name: string
   year: number | null
   /** Полная дата части, unix-секунды. */
@@ -42,7 +47,7 @@ export interface FranchiseWork {
 interface FranchiseMapEntry {
   id: number
   idMal: number | null
-  type: MediaType | null
+  type: string | null
   isAdult: boolean
   coverImage: { medium: string | null } | null
 }
@@ -66,10 +71,18 @@ const memory = new Map<number, FranchiseWork[] | null>()
 /** Незавершённые добычи по номеру тайтла. */
 const pending = new Map<number, Promise<FranchiseWork[] | null>>()
 
+/** Адреса узлов, которых у нас больше нет: читать мангу приложение не умеет. */
+const FOREIGN_PATHS = ['/mangas', '/ranobe']
+
+/** Узел чужого вида: первоисточник в дереве аниме встречается часто. */
+function isForeignNode(url: string): boolean {
+  return FOREIGN_PATHS.some((path) => url.startsWith(path))
+}
+
 /** Читает дерево со склада. Записи старой формы — без постеров, без полной
- *  даты или с частями без сопоставления — считаются промахом. Проверяется
- *  каждая часть, а не первая: иначе старый склад с клипом в середине
- *  выживал. */
+ *  даты, с частями без сопоставления или с мангой внутри — считаются
+ *  промахом. Проверяется каждая часть, а не первая: иначе старый склад
+ *  с клипом или с мангой в середине выживал, а склад у нас бессрочный. */
 async function readCache(mediaId: number): Promise<FranchiseWork[] | null> {
   const record = await dbGet<FranchiseCacheRecord>('franchiseCache', mediaId)
   const data = record?.data
@@ -79,6 +92,7 @@ async function readCache(mediaId: number): Promise<FranchiseWork[] | null> {
     if (!work || typeof work.name !== 'string') return null
     if (!('cover' in work) || !('date' in work)) return null
     if (work.mediaId === undefined || work.mediaId === null) return null
+    if (work.type === 'MANGA') return null
   }
 
   return data as FranchiseWork[]
@@ -89,20 +103,14 @@ async function writeCache(mediaId: number, works: FranchiseWork[]): Promise<void
   await dbSet('franchiseCache', { id: mediaId, data: works, ts: Date.now() })
 }
 
-/** Пространство номеров MAL по адресу узла: /animes/ и /mangas/ раздельны. */
-function nodeType(url: string): MediaType {
-  return url.startsWith('/mangas') ? 'MANGA' : 'ANIME'
-}
-
-/** Добывает и собирает дерево: Шикимори по номеру MAL, затем маппинг. */
-async function load(
-  mediaId: number,
-  malId: number,
-  type: MediaType,
-): Promise<FranchiseWork[] | null> {
-  const reply = await fetchShiki<{ nodes?: FranchiseNode[] }>(
-    `/api/${type === 'MANGA' ? 'mangas' : 'animes'}/${malId}/franchise`,
-  )
+/**
+ * Добывает и собирает дерево: Шикимори по номеру MAL, затем маппинг.
+ *
+ * Запрос сопоставления теперь один: пространство номеров MAL у аниме
+ * и манги раздельное, а манга больше не ищется вовсе.
+ */
+async function load(mediaId: number, malId: number): Promise<FranchiseWork[] | null> {
+  const reply = await fetchShiki<{ nodes?: FranchiseNode[] }>(`/api/animes/${malId}/franchise`)
 
   const nodes = Array.isArray(reply.data?.nodes) ? reply.data.nodes : []
   if (nodes.length === 0) {
@@ -110,55 +118,44 @@ async function load(
     return null
   }
 
-  // Дерево смешанное: в хронологии аниме встречается манга и наоборот.
+  // Манга и ранобэ из дерева убираются сразу: их незачем искать в каталоге.
+  const own = nodes.filter((node) => !isForeignNode(node.url ?? ''))
+
   const malIds = [
-    ...new Set(nodes.flatMap((n) => (typeof n.id === 'number' && n.id > 0 ? [n.id] : []))),
+    ...new Set(own.flatMap((n) => (typeof n.id === 'number' && n.id > 0 ? [n.id] : []))),
   ]
 
-  // Две таблицы по пространствам номеров: голый номер MAL не уникален,
-  // и чужая манга с тем же номером перезаписывала сезон аниме.
-  const mappedAnime = new Map<number, FranchiseMapEntry>()
-  const mappedManga = new Map<number, FranchiseMapEntry>()
+  const mapped = new Map<number, FranchiseMapEntry>()
   if (malIds.length > 0) {
-    const answers = await Promise.all([
-      anilistQuery<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
-        ids: malIds,
-        type: 'ANIME',
-      }),
-      anilistQuery<{ Page?: { media?: FranchiseMapEntry[] } }>(FRANCHISE_MAP_QUERY, {
-        ids: malIds,
-        type: 'MANGA',
-      }),
-    ])
+    const answer = await anilistQuery<{ Page?: { media?: FranchiseMapEntry[] } }>(
+      FRANCHISE_MAP_QUERY,
+      { ids: malIds, type: 'ANIME' },
+    )
 
-    for (const entry of answers[0]?.data?.Page?.media ?? []) {
-      if (typeof entry.idMal === 'number') mappedAnime.set(entry.idMal, entry)
-    }
-    for (const entry of answers[1]?.data?.Page?.media ?? []) {
-      if (typeof entry.idMal === 'number') mappedManga.set(entry.idMal, entry)
+    for (const entry of answer?.data?.Page?.media ?? []) {
+      if (typeof entry.idMal === 'number') mapped.set(entry.idMal, entry)
     }
   }
 
   const works: FranchiseWork[] = []
-  for (const node of nodes) {
+  for (const node of own) {
     if (typeof node.id !== 'number' || node.id <= 0) continue
 
-    const kind = nodeType(node.url ?? '')
-    const mapped = (kind === 'MANGA' ? mappedManga : mappedAnime).get(node.id)
+    const found = mapped.get(node.id)
     // Части только на Шикимори выкидываются: это клипы и реклама,
     // которых в каталоге AniList нет нарочно.
-    if (mapped === undefined) continue
+    if (found === undefined) continue
 
     works.push({
-      mediaId: mapped.id,
+      mediaId: found.id,
       malId: node.id,
-      type: mapped.type,
+      type: found.type,
       name: node.name,
       year: typeof node.year === 'number' ? node.year : null,
       date: typeof node.date === 'number' && node.date > 0 ? node.date : null,
       kind: node.kind ?? null,
-      cover: mapped.coverImage?.medium ?? null,
-      isAdult: mapped.isAdult === true,
+      cover: found.coverImage?.medium ?? null,
+      isAdult: found.isAdult === true,
     })
   }
 
@@ -179,11 +176,13 @@ async function load(
 /**
  * Хронология франшизы тайтла или `null`, когда дерева нет.
  * Ошибки глушатся: отсутствие полки — не поломка карточки.
+ *
+ * Аргумент вида игнорируется: его ещё передаёт карточка.
  */
 export async function fetchFranchise(
   mediaId: number,
   malId: number | null,
-  type: MediaType,
+  _type?: string,
 ): Promise<FranchiseWork[] | null> {
   if (malId === null) return null
   if (memory.has(mediaId)) return memory.get(mediaId) ?? null
@@ -198,7 +197,7 @@ export async function fetchFranchise(
       return cached
     }
 
-    return await load(mediaId, malId, type)
+    return await load(mediaId, malId)
   })().catch((e) => {
     Logger('WARN', `Франшиза: дерево тайтла ${mediaId} не добылось`, e)
     return null
