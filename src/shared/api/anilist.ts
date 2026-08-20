@@ -183,6 +183,41 @@ function headerNumber(headers: Record<string, string>, name: string): number {
 }
 
 /**
+ * Заголовки, по которым разбирают отказ. 403 у AniList двусмыслен: так отвечал
+ * и выключенный API, и защита перед сервером, и запрет по стране.
+ *
+ * cf-ray и cf-mitigated выдают ответ самой защиты, retry-after — временный
+ * запрет с известным сроком, а живой остаток окна лимита говорит, что дело
+ * вовсе не в частоте запросов.
+ */
+const FAILURE_HEADERS: readonly string[] = [
+  'cf-ray',
+  'cf-mitigated',
+  'cf-cache-status',
+  'retry-after',
+  'x-ratelimit-limit',
+  'x-ratelimit-remaining',
+  'x-ratelimit-reset',
+  'server',
+]
+
+/**
+ * Выписка пришедших заголовков отказа. Отсутствующие не перечисляются:
+ * строка «cf-ray: нет» не сообщает ничего, а вот пустая выписка при 403
+ * сообщает: отказал не Cloudflare, а само приложение сервера.
+ */
+function failureDetails(headers: Record<string, string>): Record<string, string> {
+  const details: Record<string, string> = {}
+
+  for (const name of FAILURE_HEADERS) {
+    const value = header(headers, name)
+    if (value !== '') details[name] = value
+  }
+
+  return details
+}
+
+/**
  * Учит ограничитель по заголовкам ответа: потолок и остаток окна.
  * Так возврат штатных 90 после техработ не требует правки и выпуска сборок.
  */
@@ -334,6 +369,12 @@ export async function anilistQuery<T = unknown>(
   if (res.status !== 200) {
     // Сервер лежит или закрылся — отступаем, а не пробуем снова через полсекунды.
     if (isServerFailure(res.status)) {
+      // Выписка до отступа и при каждом отказе, а не только при входе в него:
+      // именно различия между отказами и говорят, что происходит. Затопить журнал
+      // выписки не могут: после отступа следующий запрос уйдёт не раньше
+      // чем через полминуты.
+      Logger('ERROR', `AniList ${res.status}: заголовки отказа`, failureDetails(res.headers))
+
       const pause = backOffAfterServerFailure(res.status)
       throw new Error(`AniList недоступен (${res.status}), пауза ${Math.round(pause / 1000)}с`)
     }
