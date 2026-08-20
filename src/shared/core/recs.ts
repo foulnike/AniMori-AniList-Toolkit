@@ -9,7 +9,6 @@ import { Logger } from '../utils/logger'
 import { keepAllowed } from './adult'
 import { getEntry } from './collection'
 import { selectEntries } from './collection-view'
-import type { MediaType } from './types'
 
 /** Сколько любимых записей участвуют в профиле вкуса. */
 const TASTE_DEPTH = 30
@@ -38,8 +37,8 @@ let hidden: Set<number> | null = null
 /** Посчитанное за запуск: переключение вкладки не дёргает сеть снова. */
 const done = new Map<string, Promise<MediaBrief[]>>()
 
-/** Профиль вкуса запуска по типам. */
-const taste = new Map<MediaType, string[]>()
+/** Профиль вкуса запуска. null значит «ещё не считали», пустота — «считали, нету». */
+let taste: string[] | null = null
 
 /** Поднимает список скрытого из хранилища один раз за запуск. */
 async function loadHidden(): Promise<Set<number>> {
@@ -74,13 +73,12 @@ export async function hideRec(mediaId: number): Promise<void> {
 }
 
 /** Любимые жанры хозяина: взвешены оценкой, плоский счёт хвалил бы мусор. */
-async function tasteGenres(type: MediaType): Promise<string[]> {
-  const known = taste.get(type)
-  if (known !== undefined) return known
+async function tasteGenres(): Promise<string[]> {
+  if (taste !== null) return taste
 
   let genres: string[] = []
   const loved = selectEntries(
-    { type, onlyRated: true, minScore: LOVED_SCORE },
+    { onlyRated: true, minScore: LOVED_SCORE },
     { key: 'score' },
     { limit: TASTE_DEPTH },
   )
@@ -89,7 +87,7 @@ async function tasteGenres(type: MediaType): Promise<string[]> {
     try {
       const map = await fetchGenreMap(
         loved.map((entry) => entry.mediaId),
-        type,
+        'ANIME',
       )
       const weight = new Map<string, number>()
       for (const entry of loved) {
@@ -106,14 +104,14 @@ async function tasteGenres(type: MediaType): Promise<string[]> {
     }
   }
 
-  taste.set(type, genres)
+  taste = genres
   return genres
 }
 
 /** Семена «по мотивам»: пара из любимых, каждый запуск другая. */
-function pickSeeds(type: MediaType): number[] {
+function pickSeeds(): number[] {
   const loved = selectEntries(
-    { type, onlyRated: true, minScore: LOVED_SCORE },
+    { onlyRated: true, minScore: LOVED_SCORE },
     { key: 'score' },
     { limit: SEED_POOL },
   )
@@ -143,15 +141,20 @@ function cached(key: string, load: () => Promise<MediaBrief[]>): Promise<MediaBr
   return promise
 }
 
-/** Полка каталога с применённым отбором. Отказ сети — пустая полка. */
+/**
+ * Полка каталога с применённым отбором. Отказ сети — пустая полка.
+ *
+ * Аргумент вида игнорируется и в ключ кэша не идёт: иначе одна и та же
+ * полка считалась бы дважды, пока одни вызовы его передают, а другие нет.
+ */
 export function recShelf(
   kind: ShelfKind,
-  type: MediaType,
+  _type?: string,
   genres?: string[],
 ): Promise<MediaBrief[]> {
-  return cached(`${kind}:${type}:${(genres ?? []).join(',')}`, async () => {
+  return cached(`${kind}:${(genres ?? []).join(',')}`, async () => {
     try {
-      return await visible(await fetchShelf(kind, type, genres))
+      return await visible(await fetchShelf(kind, 'ANIME', genres))
     } catch (e) {
       Logger('WARN', `Рекомендации: полка «${kind}» не доехала`, e)
       return []
@@ -160,24 +163,24 @@ export function recShelf(
 }
 
 /** Подбор «под ваш вкус» по любимым жанрам. Без оценок 8+ полки нет. */
-export function tasteShelf(type: MediaType): Promise<MediaBrief[]> {
-  return cached(`taste:${type}`, async () => {
-    const genres = await tasteGenres(type)
+export function tasteShelf(_type?: string): Promise<MediaBrief[]> {
+  return cached('taste', async () => {
+    const genres = await tasteGenres()
     if (genres.length === 0) return []
-    return recShelf('genre', type, genres)
+    return recShelf('genre', undefined, genres)
   })
 }
 
 /** Советы «по мотивам»: повторы склеиваются суммой весов. */
-export function motifShelf(type: MediaType): Promise<MediaBrief[]> {
-  return cached(`motif:${type}`, async () => {
-    const seeds = pickSeeds(type)
+export function motifShelf(_type?: string): Promise<MediaBrief[]> {
+  return cached('motif', async () => {
+    const seeds = pickSeeds()
     if (seeds.length === 0) return []
 
     const weight = new Map<number, { brief: MediaBrief; rating: number }>()
     for (const seed of seeds) {
       try {
-        for (const rec of await fetchRecsFor(seed, type)) {
+        for (const rec of await fetchRecsFor(seed, 'ANIME')) {
           const known = weight.get(rec.brief.mediaId)
           if (known !== undefined) known.rating += rec.rating
           else weight.set(rec.brief.mediaId, { brief: rec.brief, rating: rec.rating })
