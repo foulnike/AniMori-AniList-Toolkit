@@ -49,17 +49,15 @@ function collectSnapshot(): UserSnapshot {
 /**
  * Запись списка из ответа сервера в виде, пригодном для снимка.
  *
- * Поля type и volumes заполняются потому, что их всё ещё требует снимок:
- * выкинуть их можно только с поднятием версии снимка и переносом данных.
+ * Вида тайтла и прочитанных томов здесь больше нет: снимок шестой версии
+ * их не хранит, а у сервера спрашивается только аниме.
  */
 function fromServer(raw: RawListEntry): SnapshotEntry {
   return {
     mediaId: raw.mediaId,
-    type: 'ANIME',
     status: raw.status,
     score10: raw.score,
     progress: raw.progress,
-    volumes: raw.volumes,
     repeat: raw.repeat,
     startedAt: raw.startedAt,
     completedAt: raw.completedAt,
@@ -79,11 +77,9 @@ function fromServer(raw: RawListEntry): SnapshotEntry {
 function blankEntry(mediaId: number, when: number): SnapshotEntry {
   return {
     mediaId,
-    type: 'ANIME',
     status: null,
     score10: 0,
     progress: 0,
-    volumes: 0,
     repeat: 0,
     startedAt: null,
     completedAt: null,
