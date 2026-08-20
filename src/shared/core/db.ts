@@ -490,6 +490,9 @@ const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
   ['STF3_', 'staff'],
   ['THEMES2_', 'themes'],
   ['RU3_', 'russianTitles'],
+  // Имя тайтла лежит отдельной записью от карточки, но для инспектора это один
+  // и тот же вид кэша: два префикса намеренно ведут в одно поле.
+  ['NAME1_', 'russianTitles'],
   ['LOOK2_', 'looks'],
   ['RATE1_', 'ratings'],
 ]
