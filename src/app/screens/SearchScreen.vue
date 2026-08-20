@@ -9,7 +9,6 @@ import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
-import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
@@ -31,14 +30,7 @@ const TITLE_DEPTH = 20
 /** Сколько плиток-заглушек показать, пока идёт первый ответ. */
 const HOLD_COUNT = 12
 
-/** Подвкладки вида: тип решает и запрос, и раздел русского источника. */
-const KIND_TABS: ReadonlyArray<{ key: MediaType; title: string }> = [
-  { key: 'ANIME', title: 'Аниме' },
-  { key: 'MANGA', title: 'Манга' },
-]
-
 const word = ref('')
-const kind = ref<MediaType>('ANIME')
 const rows = ref<TileRow[]>([])
 const busy = ref(false)
 const trouble = ref('')
@@ -70,7 +62,6 @@ function redraw(): void {
  */
 async function fillTitles(): Promise<void> {
   const mine = ++titleRun
-  const type = kind.value
   const wanted = briefs
     .slice(0, TITLE_DEPTH)
     .filter((brief) => peekRussianName(brief.mediaId) === null)
@@ -82,7 +73,7 @@ async function fillTitles(): Promise<void> {
     for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
       if (mine !== titleRun) return
 
-      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), type)
+      await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
       if (mine !== titleRun) return
 
       redraw()
@@ -116,7 +107,7 @@ async function search(add = false): Promise<void> {
   const wanted = add ? page.value + 1 : 1
 
   try {
-    const found = await searchCatalog(wordNow, kind.value, wanted)
+    const found = await searchCatalog(wordNow, 'ANIME', wanted)
     if (mine !== run) return
 
     if (found === null) {
@@ -152,14 +143,6 @@ function onType(): void {
   }, TYPING_PAUSE_MS)
 }
 
-/** Смена вида: спрашиваем то же слово заново, теперь в другом разделе. */
-function pickKind(next: MediaType): void {
-  if (kind.value === next) return
-
-  kind.value = next
-  void search()
-}
-
 /** Добор следующей страницы. */
 function onMore(): void {
   void search(true)
@@ -187,21 +170,6 @@ onMounted(() => {
 <template>
   <section class="am-page">
     <div class="am-bar">
-      <div class="am-seg">
-        <button
-          v-for="tab in KIND_TABS"
-          :key="tab.key"
-          class="am-seg__btn"
-          :class="{ 'am-seg__btn--on': tab.key === kind }"
-          type="button"
-          @click="pickKind(tab.key)"
-        >
-          {{ tab.title }}
-        </button>
-      </div>
-
-      <span class="am-bar__gap" />
-
       <label class="am-search am-search--wide">
         <span class="am-search__mark" aria-hidden="true">⌕</span>
         <input
@@ -234,7 +202,7 @@ onMounted(() => {
     <div v-else-if="rows.length === 0 && !busy" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⊘</span>
       <span>Ничего не нашлось.</span>
-      <span>Попробуйте другое слово или другой вид.</span>
+      <span>Попробуйте другое слово.</span>
     </div>
 
     <ul v-else class="am-grid">
