@@ -13,7 +13,6 @@ import { hiddenCount, keepAllowed } from './adult'
 import { selectEntries } from './collection-view'
 import { peekRussianName, rememberRussianName, warmRussianTitles } from './media-title'
 import type { SnapshotEntry } from './snapshot'
-import type { MediaType } from './types'
 
 /**
  * Сколько записей своего списка просматривать за поиск. Потолок взят с запасом:
@@ -69,16 +68,20 @@ function sift(page: SearchPage, word: string): SearchPage {
  *
  * Взрослое здесь НЕ отсеивается: своя запись уже своя, и прятать её значит
  * терять свои же данные из вида. Метку 18+ рисует плитка.
+ *
+ * Отбора по виду больше нет: в коллекции только аниме, а лишнее условие
+ * скрыло бы записи старых снимков до их первого обновления с сервера.
+ * Аргумент вида игнорируется: его ещё передают экраны.
  */
 export async function searchOwnList(
   word: string,
-  type: MediaType,
+  _type: string | undefined,
   limit: number,
 ): Promise<SnapshotEntry[]> {
   const needle = fold(word)
   if (needle === '') return []
 
-  const all = selectEntries({ type }, { key: 'updated' }, { limit: OWN_SCAN_LIMIT })
+  const all = selectEntries({}, { key: 'updated' }, { limit: OWN_SCAN_LIMIT })
 
   // Склад поднимается только для русского слова: латиница есть в самом снимке.
   if (hasCyrillic(word)) {
@@ -106,17 +109,19 @@ export async function searchOwnList(
  *
  * У русского пути второй страницы нет: Шикимори отдаёт двадцать лучших
  * совпадений, и дальше по списку идёт шум, а не ответ на вопрос.
+ *
+ * Вид тайтла везде один, так что аргумент вида игнорируется.
  */
 export async function searchCatalog(
   word: string,
-  type: MediaType,
+  _type?: string,
   page = 1,
 ): Promise<SearchPage | null> {
   const asked = word.trim()
   if (asked === '') return { items: [], hasNext: false, total: 0 }
 
   if (!hasCyrillic(asked)) {
-    const found = await searchMedia(asked, type, page)
+    const found = await searchMedia(asked, 'ANIME', page)
     // Отказ сервера остаётся отказом: пустую страницу вместо него подсовывать нельзя.
     return found === null ? null : sift(found, asked)
   }
@@ -124,7 +129,7 @@ export async function searchCatalog(
   // Второй страницы у русского пути нет, поэтому добор возвращает пустоту.
   if (page > 1) return { items: [], hasNext: false, total: null }
 
-  const found = await searchShikimori(asked, type)
+  const found = await searchShikimori(asked, 'ANIME')
   if (found.length === 0) {
     Logger('API', `Поиск «${asked}»: Шикимори ничего не нашёл`)
     return { items: [], hasNext: false, total: 0 }
@@ -140,7 +145,7 @@ export async function searchCatalog(
 
   const items = await fetchBriefsByMal(
     found.map((row) => row.malId),
-    type,
+    'ANIME',
   )
 
   // Имя уже в руках — ходить за ним в сеть по второму кругу было бы глупо.

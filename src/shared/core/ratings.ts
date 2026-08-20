@@ -8,7 +8,7 @@
 import { dbGet, dbSet } from './db'
 import { fetchShiki } from '../api/shikimori'
 import { Logger } from '../utils/logger'
-import type { MediaType, ShikiCacheRecord, ShikiMedia } from './types'
+import type { ShikiCacheRecord, ShikiMedia } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи. */
 const KEY_PREFIX = 'RATE1_'
@@ -51,7 +51,8 @@ async function readCache(mediaId: number): Promise<TitleRatings | null> {
   return data && typeof data === 'object' ? data : null
 }
 
-async function load(mediaId: number, malId: number, type: MediaType): Promise<TitleRatings | null> {
+/** Адрес всегда анимешный: раздела манги у нас больше нет. */
+async function load(mediaId: number, malId: number): Promise<TitleRatings | null> {
   if (!asked.has(mediaId)) {
     const cached = await readCache(mediaId)
     if (cached) {
@@ -60,9 +61,7 @@ async function load(mediaId: number, malId: number, type: MediaType): Promise<Ti
     }
   }
 
-  const reply = await fetchShiki<ShikiMedia>(
-    `/api/${type === 'MANGA' ? 'mangas' : 'animes'}/${malId}`,
-  )
+  const reply = await fetchShiki<ShikiMedia>(`/api/animes/${malId}`)
 
   if (!reply.data) {
     memory.set(mediaId, null)
@@ -85,11 +84,13 @@ async function load(mediaId: number, malId: number, type: MediaType): Promise<Ti
 /**
  * Оценки площадок одного тайтла или `null`. Ошибки глушатся: отсутствие
  * рейтинга — не поломка карточки.
+ *
+ * Аргумент вида игнорируется: его ещё передаёт карточка.
  */
 export async function getTitleRatings(
   mediaId: number,
   malId: number | null,
-  type: MediaType,
+  _type?: string,
 ): Promise<TitleRatings | null> {
   if (malId === null) return null
   if (memory.has(mediaId)) return memory.get(mediaId) ?? null
@@ -97,7 +98,7 @@ export async function getTitleRatings(
   const inFlight = pending.get(mediaId)
   if (inFlight) return await inFlight
 
-  const task = load(mediaId, malId, type).catch((e) => {
+  const task = load(mediaId, malId).catch((e) => {
     Logger('WARN', `Оценки площадок: тайтл ${mediaId} мимо`, e)
     return null
   })
