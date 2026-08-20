@@ -2,7 +2,6 @@
 // советы «по мотивам» и жанры тайтлов для профиля вкуса (пункт 3.11).
 // Отдельно от anilist-media.ts: тот у потолка, а дело здесь самостоятельное.
 
-import type { MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
 import type { MediaBrief } from './anilist-media'
@@ -17,6 +16,8 @@ const SEED_PAGE = 25
 const LOOKUP_PAGE_SIZE = 50
 
 // Поля плитки без записи хозяина: свои метки витрина ставит по памяти (3.14).
+// Вид тайтла спрашивается не ради показа, а ради отбора: в советах сервера
+// анимеи и манга лежат вперемешку, и отсеивать её надо по ответу.
 const BRIEF_FIELDS = `
       id
       idMal
@@ -24,7 +25,6 @@ const BRIEF_FIELDS = `
       format
       status
       episodes
-      chapters
       seasonYear
       averageScore
       isAdult
@@ -54,14 +54,16 @@ const SHELF_WHERE: Record<ShelfKind, string> = {
 }
 
 // Лишняя переменная в объявлении роняет весь запрос: собирается своя под вид.
+// Сам вид тайтла вписан словом: полка манги в приложении не бывает, а через
+// переменную ошибка вызова тихо вернула бы её на главную.
 function shelfQuery(kind: ShelfKind): string {
   let extra = ''
   if (kind === 'airing') extra = ', $season: MediaSeason, $seasonYear: Int'
   if (kind === 'genre') extra = ', $genres: [String]'
 
-  return `query ($type: MediaType, $perPage: Int!${extra}) {
+  return `query ($perPage: Int!${extra}) {
   Page(page: 1, perPage: $perPage) {
-    media(type: $type, ${SHELF_WHERE[kind]}) {
+    media(type: ANIME, ${SHELF_WHERE[kind]}) {
 ${BRIEF_FIELDS}
     }
   }
@@ -83,9 +85,9 @@ ${BRIEF_FIELDS}
   }
 }`
 
-const GENRE_QUERY = `query ($ids: [Int], $type: MediaType, $perPage: Int!) {
+const GENRE_QUERY = `query ($ids: [Int], $perPage: Int!) {
   Page(page: 1, perPage: $perPage) {
-    media(id_in: $ids, type: $type) {
+    media(id_in: $ids, type: ANIME) {
       id
       genres
     }
@@ -105,7 +107,6 @@ interface BriefReply {
   format?: string | null
   status?: string | null
   episodes?: number | null
-  chapters?: number | null
   seasonYear?: number | null
   averageScore?: number | null
   isAdult?: boolean | null
@@ -150,18 +151,25 @@ function textOrNull(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
 }
 
-/** Ответ сервера о тайтле в плитку показа. Без номера — не запись. */
+/**
+ * Ответ сервера о тайтле в плитку показа. Без номера — не запись.
+ *
+ * Манга отбрасывается здесь, а не у вызывающего: полки спрашивают аниме сами,
+ * но советы сервера мешают виды, и один пропущенный отбор снова привёл бы
+ * мангу на главную. Число глав больше не читается: у аниме его не бывает.
+ */
 function toBrief(item: BriefReply | null | undefined): MediaBrief | null {
   if (!item || typeof item.id !== 'number') return null
+  if (item.type === 'MANGA') return null
 
   return {
     mediaId: item.id,
     malId: countOrNull(item.idMal),
-    type: item.type === 'MANGA' ? 'MANGA' : 'ANIME',
+    type: 'ANIME',
     format: textOrNull(item.format),
     status: textOrNull(item.status),
     episodes: countOrNull(item.episodes),
-    chapters: countOrNull(item.chapters),
+    chapters: null,
     seasonYear: countOrNull(item.seasonYear),
     averageScore: countOrNull(item.averageScore),
     isAdult: item.isAdult === true,
@@ -184,15 +192,20 @@ export function currentSeason(): { season: string; seasonYear: number } {
   return { season, seasonYear: now.getFullYear() }
 }
 
-/** Полка каталога одним запросом. Отказ — пустой массив: полка просто не встанет. */
+/**
+ * Полка каталога одним запросом. Отказ — пустой массив: полка просто не встанет.
+ *
+ * Аргумент вида игнорируется: вид вписан в запрос словом. Параметр стоит
+ * в середине и уйдёт вместе с вызовами в ядре.
+ */
 export async function fetchShelf(
   kind: ShelfKind,
-  type: MediaType,
+  _type: string | undefined,
   genres?: string[],
 ): Promise<MediaBrief[]> {
   if (kind === 'genre' && (genres === undefined || genres.length === 0)) return []
 
-  const vars: Record<string, unknown> = { type, perPage: SHELF_SIZE }
+  const vars: Record<string, unknown> = { perPage: SHELF_SIZE }
   if (kind === 'airing') Object.assign(vars, currentSeason())
   if (kind === 'genre') vars.genres = genres
 
@@ -209,12 +222,15 @@ export async function fetchShelf(
     if (brief) items.push(brief)
   }
 
-  Logger('API', `Витрина «${kind}» (${type}): пришло ${items.length}`)
+  Logger('API', `Витрина «${kind}»: пришло ${items.length}`)
   return items
 }
 
-/** Советы сервера для семени «по мотивам». Советы чужого типа отброшены. */
-export async function fetchRecsFor(mediaId: number, type: MediaType): Promise<ServerRec[]> {
+/**
+ * Советы сервера для семени «по мотивам». Мангу отсеивает разбор ответа,
+ * поэтому отбор по виду здесь больше не нужен.
+ */
+export async function fetchRecsFor(mediaId: number, _type?: string): Promise<ServerRec[]> {
   const reply = await anilistQuery<RecsReply>(RECS_QUERY, { id: mediaId, perPage: SEED_PAGE })
   const edges = reply.data?.Media?.recommendations?.edges
   if (!Array.isArray(edges)) {
@@ -226,7 +242,7 @@ export async function fetchRecsFor(mediaId: number, type: MediaType): Promise<Se
   for (const edge of edges) {
     const node = edge?.node
     const brief = toBrief(node?.mediaRecommendation)
-    if (brief === null || brief.type !== type) continue
+    if (brief === null) continue
     found.push({ brief, rating: typeof node?.rating === 'number' ? node.rating : 0 })
   }
 
@@ -234,10 +250,13 @@ export async function fetchRecsFor(mediaId: number, type: MediaType): Promise<Se
   return found
 }
 
-/** Жанры тайтлов пачками: профиль вкуса считается по любимым записям. */
+/**
+ * Жанры тайтлов пачками: профиль вкуса считается по любимым записям.
+ * Аргумент вида игнорируется: в запросе стоит слово ANIME.
+ */
 export async function fetchGenreMap(
   ids: number[],
-  type: MediaType,
+  _type?: string,
 ): Promise<Map<number, string[]>> {
   const found = new Map<number, string[]>()
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
@@ -246,7 +265,6 @@ export async function fetchGenreMap(
     const chunk = unique.slice(from, from + LOOKUP_PAGE_SIZE)
     const reply = await anilistQuery<GenreReply>(GENRE_QUERY, {
       ids: chunk,
-      type,
       perPage: LOOKUP_PAGE_SIZE,
     })
 
