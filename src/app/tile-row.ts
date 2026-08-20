@@ -28,9 +28,9 @@ function scoreText(brief: MediaBrief): string | null {
   return brief.averageScore === null ? null : `${brief.averageScore}%`
 }
 
-/** Сколько всего частей у тайтла: у аниме серии, у манги главы. */
+/** Сколько всего частей у тайтла: теперь это всегда серии. */
 function partsCount(brief: MediaBrief): number | null {
-  return brief.type === 'MANGA' ? brief.chapters : brief.episodes
+  return brief.episodes
 }
 
 /** Короткая подпись под названием: вид и год. Счёт частей ушёл на постер. */
@@ -50,9 +50,9 @@ function briefFacts(brief: MediaBrief): string {
  */
 function markText(brief: MediaBrief): string | null {
   const mine = getEntry(brief.mediaId)
-  if (mine) return statusWord(brief.type, mine.status)
+  if (mine) return statusWord('ANIME', mine.status)
 
-  return statusWord(brief.type, brief.ownEntry?.status ?? null)
+  return statusWord('ANIME', brief.ownEntry?.status ?? null)
 }
 
 /** Свой счёт частей по той же лестнице: память, ответ сервера, ноль. */
@@ -67,7 +67,7 @@ function ownSeen(brief: MediaBrief): number {
 function ownText(brief: MediaBrief): string | null {
   const parts = partsCount(brief)
   const seen = ownSeen(brief)
-  const short = partsShort(brief.type)
+  const short = partsShort('ANIME')
 
   if (seen > 0) return parts === null ? `${seen} ${short}` : `${seen} / ${parts} ${short}`
   return parts === null ? null : `${parts} ${short}`

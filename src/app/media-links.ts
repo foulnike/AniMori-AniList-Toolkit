@@ -3,7 +3,6 @@
 // Адреса собираются из номеров, никакой сети это не стоит.
 
 import { ANIME365_DOMAINS, SHIKI_DOMAINS } from '@/core/constants'
-import type { MediaType } from '@/core/types'
 
 /** Имя узла AniList. Схема добавляется кодом: так же, как у русских зеркал. */
 const ANILIST_HOST = 'anilist.co'
@@ -16,6 +15,12 @@ const MAL_HOST = 'myanimelist.net'
  * считается возможно пустым, а ссылка без узла вела бы в никуда.
  */
 const SHIKI_HOST = SHIKI_DOMAINS[0] ?? 'shikimori.io'
+
+/** Раздел каталога: у AniList и MAL путь аниме называется одинаково. */
+const CATALOG_KIND = 'anime'
+
+/** У Шикимори тот же раздел, но во множественном числе. */
+const SHIKI_KIND = 'animes'
 
 /** Одна ссылка хвоста описания. */
 export interface MediaLink {
@@ -30,20 +35,14 @@ export interface MediaLink {
 export interface MediaLinksInput {
   mediaId: number
   malId: number | null
-  type: MediaType
+  /**
+   * Остаток от времён манги: на разделы каталогов вид больше не влияет.
+   * Поле необязательное, чтобы уже записанные вызовы дожили до своей правки.
+   */
+  type?: 'ANIME'
   /** Адрес страницы, откуда взято описание. Пустая строка — как отсутствие. */
   sourceUrl?: string | null
   sourceName?: string | null
-}
-
-/** Раздел каталога: у аниме и манги свои пути и на AniList, и на MAL. */
-function catalogKind(type: MediaType): string {
-  return type === 'MANGA' ? 'manga' : 'anime'
-}
-
-/** У Шикимори те же разделы, но во множественном числе. */
-function shikiKind(type: MediaType): string {
-  return type === 'MANGA' ? 'mangas' : 'animes'
 }
 
 /** Собирает адрес из имени узла, раздела и номера. */
@@ -63,13 +62,12 @@ function atDomain(url: string, domains: readonly string[]): boolean {
  */
 export function mediaLinks(input: MediaLinksInput): MediaLink[] {
   const list: MediaLink[] = []
-  const kind = catalogKind(input.type)
   const malId = input.malId !== null && input.malId > 0 ? input.malId : null
 
   list.push({
     key: 'anilist',
     text: `AniList #${input.mediaId}`,
-    url: pageUrl(ANILIST_HOST, kind, input.mediaId),
+    url: pageUrl(ANILIST_HOST, CATALOG_KIND, input.mediaId),
     hint: 'Открыть карточку на AniList',
   })
 
@@ -77,7 +75,7 @@ export function mediaLinks(input: MediaLinksInput): MediaLink[] {
     list.push({
       key: 'mal',
       text: `MAL #${malId}`,
-      url: pageUrl(MAL_HOST, kind, malId),
+      url: pageUrl(MAL_HOST, CATALOG_KIND, malId),
       hint: 'Открыть карточку на MyAnimeList',
     })
   }
@@ -99,7 +97,7 @@ export function mediaLinks(input: MediaLinksInput): MediaLink[] {
     list.push({
       key: 'shiki',
       text: 'Шикимори',
-      url: pageUrl(SHIKI_HOST, shikiKind(input.type), malId),
+      url: pageUrl(SHIKI_HOST, SHIKI_KIND, malId),
       hint: 'Открыть карточку на Шикимори',
     })
   }
