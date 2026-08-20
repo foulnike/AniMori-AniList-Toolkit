@@ -5,7 +5,7 @@
 import { ref, type Ref } from 'vue'
 
 import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
-import { peekRussianName, prefetchRussianTitles } from '@/core/media-title'
+import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
 
@@ -194,8 +194,8 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
         // Закладку успели сменить: остаток пачек этому показу не нужен.
         if (mine !== titleRun) return
 
-        // Раздел указывается явно: у Шикимори аниме лежит отдельно от прочего.
-        await prefetchRussianTitles(wanted.slice(from, from + TITLE_CHUNK), 'ANIME')
+        // Строке нужно одно имя: описание с оценками спросит открытая карточка.
+        await prefetchRussianNames(wanted.slice(from, from + TITLE_CHUNK))
         if (mine !== titleRun) return
 
         redraw()
