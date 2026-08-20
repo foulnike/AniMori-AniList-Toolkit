@@ -5,8 +5,6 @@
 // Отправкой занимается карточка: окну о сети и очереди знать незачем.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { MediaType } from '@/core/types'
-
 import { partsWord, statusList, statusWord } from '../labels'
 
 /** Шаг оценки. Десятибалльная шкала у AniList дробная, половины достаточно. */
@@ -19,14 +17,11 @@ const QUICK_MARKS: ReadonlyArray<number> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 const MARK_TONE_MAX = 132
 
 const props = defineProps<{
-  type: MediaType
   title: string
   status: string
   score10: number
   progress: number
-  volumes: number
   partsTotal: number | null
-  volumesTotal: number | null
   repeat: number
   startedAt: string | null
   completedAt: string | null
@@ -38,29 +33,22 @@ const emit = defineEmits<{
   (e: 'status', value: string): void
   (e: 'score', value: number): void
   (e: 'progress', value: number): void
-  (e: 'volumes', value: number): void
   (e: 'repeat', value: number): void
   (e: 'startedAt', value: string): void
   (e: 'completedAt', value: string): void
   (e: 'notes', value: string): void
 }>()
 
-/** Закладки и подписи зависят только от типа тайтла. */
-const statuses = computed(() => statusList(props.type))
-const partsName = computed(() => partsWord(props.type))
-const nowStatus = computed(() => statusWord(props.type, props.status === '' ? null : props.status))
+// Закладки и подпись счёта теперь одни и те же: выбора вида больше нет,
+// и пересчитывать их на каждую правку нечего.
+const statuses = statusList('ANIME')
+const partsName = partsWord('ANIME')
 
-/** Слово для пересмотров: у манги это перечитывания, и путать их незачем. */
-const repeatName = computed(() => (props.type === 'MANGA' ? 'Перечитывания' : 'Пересмотры'))
+const nowStatus = computed(() => statusWord('ANIME', props.status === '' ? null : props.status))
 
 /** Строка счёта вида «7 из 12». Неизвестный итог не выдумывается. */
 const partsText = computed(() =>
   props.partsTotal === null ? String(props.progress) : `${props.progress} из ${props.partsTotal}`,
-)
-
-/** То же для томов: итог тоже известен далеко не всегда. */
-const volumesText = computed(() =>
-  props.volumesTotal === null ? String(props.volumes) : `${props.volumes} из ${props.volumesTotal}`,
 )
 
 /** Доля пройденного для полосы. */
@@ -116,18 +104,11 @@ function setScore(value: number): void {
   if (value !== props.score10) emit('score', value)
 }
 
-/** Счёт частей. Выше известного итога не пускаем: такую правку сервер отвергнет. */
+/** Счёт серий. Выше известного итога не пускаем: такую правку сервер отвергнет. */
 function bumpProgress(delta: number): void {
   const next = props.progress + delta
   const fixed = Math.max(0, props.partsTotal === null ? next : Math.min(props.partsTotal, next))
   if (fixed !== props.progress) emit('progress', fixed)
-}
-
-/** Счёт томов. Правило то же, что у частей. */
-function bumpVolumes(delta: number): void {
-  const next = props.volumes + delta
-  const fixed = Math.max(0, props.volumesTotal === null ? next : Math.min(props.volumesTotal, next))
-  if (fixed !== props.volumes) emit('volumes', fixed)
 }
 
 /** Пересмотры. Потолка у них нет, а ниже нуля уходить бессмысленно. */
@@ -264,17 +245,8 @@ onBeforeUnmount(() => {
           </span>
         </section>
 
-        <section v-if="type === 'MANGA'" class="am-field">
-          <span class="am-field__name">Тома</span>
-          <div class="am-step-row">
-            <button class="am-step" type="button" title="Меньше" @click="bumpVolumes(-1)">−</button>
-            <span class="am-step__value">{{ volumesText }}</span>
-            <button class="am-step" type="button" title="Больше" @click="bumpVolumes(1)">+</button>
-          </div>
-        </section>
-
         <section class="am-field">
-          <span class="am-field__name">{{ repeatName }}</span>
+          <span class="am-field__name">Пересмотры</span>
           <div class="am-step-row">
             <button class="am-step" type="button" title="Меньше" @click="bumpRepeat(-1)">−</button>
             <span class="am-step__value">{{ repeat }}</span>
