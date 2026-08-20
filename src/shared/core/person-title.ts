@@ -66,11 +66,7 @@ async function readCache(kind: PersonKind, personId: number): Promise<RussianPer
 }
 
 /** Кладёт карточку на склад. Отсутствие перевода на склад не пишется. */
-async function writeCache(
-  kind: PersonKind,
-  personId: number,
-  data: RussianPerson,
-): Promise<void> {
+async function writeCache(kind: PersonKind, personId: number, data: RussianPerson): Promise<void> {
   await dbSet('shikiCache', { key: cacheKey(kind, personId), data, ts: Date.now() })
 }
 

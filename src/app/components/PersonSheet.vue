@@ -29,8 +29,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const DESC_LIMIT = 400
 
 /** Сэйю из карточки персонажа. */
-type VoiceActor =
-  NonNullable<CharacterCard['media']>['edges'][number]['voiceActors'][number]
+type VoiceActor = NonNullable<CharacterCard['media']>['edges'][number]['voiceActors'][number]
 
 /** Кусок описания: просто текст или ссылка наружу. */
 interface DescPart {
@@ -182,8 +181,7 @@ function voiceActors(): VoiceActor[] {
   const out: VoiceActor[] = []
   for (const edge of edges) {
     const va =
-      edge.voiceActors.find((v) => v.language?.toLowerCase() === 'japanese') ??
-      edge.voiceActors[0]
+      edge.voiceActors.find((v) => v.language?.toLowerCase() === 'japanese') ?? edge.voiceActors[0]
     if (!va || seen.has(va.id)) continue
     seen.add(va.id)
     out.push(va)
@@ -380,17 +378,18 @@ onBeforeUnmount(() => {
       <template v-else>
         <p v-if="rawDesc()" class="am-ps-desc">
           <template v-for="(part, i) in descParts()" :key="i">
-            <a
-              v-if="part.url"
-              class="am-ps-link"
-              href="#"
-              @click.prevent="openLink(part.url)"
-              >{{ part.text }}</a
-            >
+            <a v-if="part.url" class="am-ps-link" href="#" @click.prevent="openLink(part.url)">{{
+              part.text
+            }}</a>
             <template v-else>{{ part.text }}</template>
           </template>
         </p>
-        <button v-if="hasMore()" class="am-btn am-btn--ghost" type="button" @click="expanded = true">
+        <button
+          v-if="hasMore()"
+          class="am-btn am-btn--ghost"
+          type="button"
+          @click="expanded = true"
+        >
           Показать полностью
         </button>
 

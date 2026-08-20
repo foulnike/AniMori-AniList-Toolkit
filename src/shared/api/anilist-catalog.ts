@@ -254,10 +254,7 @@ export async function fetchRecsFor(mediaId: number, _type?: string): Promise<Ser
  * Жанры тайтлов пачками: профиль вкуса считается по любимым записям.
  * Аргумент вида игнорируется: в запросе стоит слово ANIME.
  */
-export async function fetchGenreMap(
-  ids: number[],
-  _type?: string,
-): Promise<Map<number, string[]>> {
+export async function fetchGenreMap(ids: number[], _type?: string): Promise<Map<number, string[]>> {
   const found = new Map<number, string[]>()
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
 

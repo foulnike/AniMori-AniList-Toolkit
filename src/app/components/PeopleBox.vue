@@ -4,7 +4,12 @@
 import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
 
 import { fetchMalIds } from '@/api/anilist-media'
-import { fetchMediaPeople, type CharacterRef, type PersonRef, type StaffRef } from '@/api/anilist-people'
+import {
+  fetchMediaPeople,
+  type CharacterRef,
+  type PersonRef,
+  type StaffRef,
+} from '@/api/anilist-people'
 import type { PersonTarget } from '@/api/anilist-person'
 import {
   getRussianPerson,

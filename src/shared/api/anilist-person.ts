@@ -100,10 +100,7 @@ export interface StaffCard {
 
 export async function fetchCharacterCard(id: number): Promise<CharacterCard | null> {
   try {
-    const reply = await anilistQuery<{ Character: CharacterCard }>(
-      CHARACTER_CARD_QUERY,
-      { id },
-    )
+    const reply = await anilistQuery<{ Character: CharacterCard }>(CHARACTER_CARD_QUERY, { id })
     const data = reply?.data?.Character ?? null
     Logger('API', `Персонаж ${id}: ${data?.name.full ?? 'нет данных'}`)
     return data
@@ -115,10 +112,7 @@ export async function fetchCharacterCard(id: number): Promise<CharacterCard | nu
 
 export async function fetchStaffCard(id: number): Promise<StaffCard | null> {
   try {
-    const reply = await anilistQuery<{ Staff: StaffCard }>(
-      STAFF_CARD_QUERY,
-      { id },
-    )
+    const reply = await anilistQuery<{ Staff: StaffCard }>(STAFF_CARD_QUERY, { id })
     const data = reply?.data?.Staff ?? null
     Logger('API', `Автор ${id}: ${data?.name.full ?? 'нет данных'}`)
     return data

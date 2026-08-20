@@ -474,13 +474,7 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
  * а не вечным нулём на экране.
  */
 type PrefixField =
-  | 'media'
-  | 'characters'
-  | 'staff'
-  | 'themes'
-  | 'russianTitles'
-  | 'looks'
-  | 'ratings'
+  'media' | 'characters' | 'staff' | 'themes' | 'russianTitles' | 'looks' | 'ratings'
 
 /**
  * Что за запись лежит под префиксом ключа. Таблица, а не череда else if:

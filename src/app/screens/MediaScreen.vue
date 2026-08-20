@@ -232,11 +232,7 @@ watch(mediaId, () => {
             <h3 class="am-h3">Франшиза</h3>
 
             <div ref="franList" class="am-rail">
-              <article
-                v-for="work in franchiseRows"
-                :key="work.malId ?? work.name"
-                class="am-part"
-              >
+              <article v-for="work in franchiseRows" :key="work.malId ?? work.name" class="am-part">
                 <button
                   v-if="work.mediaId !== null && work.mediaId !== mediaId"
                   class="am-part__hit"

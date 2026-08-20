@@ -235,7 +235,9 @@ onBeforeUnmount(() => {
         <section class="am-field">
           <span class="am-field__name">{{ partsName }}</span>
           <div class="am-step-row">
-            <button class="am-step" type="button" title="Меньше" @click="bumpProgress(-1)">−</button>
+            <button class="am-step" type="button" title="Меньше" @click="bumpProgress(-1)">
+              −
+            </button>
             <span class="am-step__value">{{ partsText }}</span>
             <button class="am-step" type="button" title="Больше" @click="bumpProgress(1)">+</button>
           </div>
@@ -263,11 +265,7 @@ onBeforeUnmount(() => {
               :value="startedAt ?? ''"
               @change="onStarted"
             />
-            <button
-              class="am-btn am-btn--ghost"
-              type="button"
-              @click="emit('startedAt', today())"
-            >
+            <button class="am-btn am-btn--ghost" type="button" @click="emit('startedAt', today())">
               Сегодня
             </button>
           </div>

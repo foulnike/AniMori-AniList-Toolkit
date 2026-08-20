@@ -40,11 +40,7 @@ async function load(): Promise<Map<string, string> | null> {
     if (!s || typeof s.image !== 'string' || s.image === '') continue
     const url = s.image.startsWith('http') ? s.image : base + s.image
     if (typeof s.name === 'string' && s.name !== '') map.set(s.name.trim().toLowerCase(), url)
-    if (
-      typeof s.filtered_name === 'string' &&
-      s.filtered_name !== '' &&
-      s.filtered_name !== s.name
-    )
+    if (typeof s.filtered_name === 'string' && s.filtered_name !== '' && s.filtered_name !== s.name)
       map.set(s.filtered_name.trim().toLowerCase(), url)
   }
 

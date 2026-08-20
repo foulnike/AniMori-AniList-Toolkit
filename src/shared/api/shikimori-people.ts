@@ -448,9 +448,7 @@ export async function fetchShikiRoles(
   if (!roles) return null
 
   return {
-    characters: roles
-      .map((r) => r.character)
-      .filter((x): x is PersonCandidate => Boolean(x)),
+    characters: roles.map((r) => r.character).filter((x): x is PersonCandidate => Boolean(x)),
     people: roles.map((r) => r.person).filter((x): x is PersonCandidate => Boolean(x)),
   }
 }

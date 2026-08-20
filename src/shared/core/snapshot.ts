@@ -54,14 +54,7 @@ const QUEUE_LIMIT = 500
  * её с записью в журнал.
  */
 export type EditKind =
-  | 'status'
-  | 'score'
-  | 'progress'
-  | 'repeat'
-  | 'startedAt'
-  | 'completedAt'
-  | 'notes'
-  | 'remove'
+  'status' | 'score' | 'progress' | 'repeat' | 'startedAt' | 'completedAt' | 'notes' | 'remove'
 
 /**
  * Неотправленная правка. `id` свой, а не серверный: отметить принятой

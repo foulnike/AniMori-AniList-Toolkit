@@ -417,9 +417,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
     // Русские имена частей — тем же фоновым проходом. Манга из дерева
     // не показывается, и спрашивать её названия незачем.
-    const ids = works.flatMap((w) =>
-      w.type !== 'MANGA' && w.mediaId !== null ? [w.mediaId] : [],
-    )
+    const ids = works.flatMap((w) => (w.type !== 'MANGA' && w.mediaId !== null ? [w.mediaId] : []))
     if (ids.length === 0) return
 
     await prefetchRussianTitles(ids, 'ANIME')

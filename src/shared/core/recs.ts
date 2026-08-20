@@ -126,7 +126,9 @@ function pickSeeds(): number[] {
 async function visible(briefs: MediaBrief[]): Promise<MediaBrief[]> {
   const hiddenSet = await loadHidden()
   return keepAllowed(
-    briefs.filter((brief) => getEntry(brief.mediaId) === undefined && !hiddenSet.has(brief.mediaId)),
+    briefs.filter(
+      (brief) => getEntry(brief.mediaId) === undefined && !hiddenSet.has(brief.mediaId),
+    ),
     (brief) => brief.isAdult,
   ).slice()
 }
