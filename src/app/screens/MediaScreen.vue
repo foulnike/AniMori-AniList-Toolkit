@@ -294,7 +294,7 @@ watch(mediaId, () => {
           </div>
 
           <div class="am-board__folk">
-            <PeopleBox :media-id="mediaId" :type="card.type" />
+            <PeopleBox :media-id="mediaId" />
           </div>
         </div>
 

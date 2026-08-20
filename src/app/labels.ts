@@ -3,8 +3,7 @@
 // Сюда же словарь строк, приезжающих с AniList: жанры, пол, занятия и прочее.
 // Незнакомый ключ показывается как есть: молчаливая пустота хуже латиницы.
 
-import type { MediaType } from '@/core/types'
-
+/** Виды аниме: список закрыт перечислением сервера. */
 const FORMAT_WORDS: Readonly<Record<string, string>> = {
   TV: 'ТВ',
   TV_SHORT: 'Короткий ТВ',
@@ -13,12 +12,9 @@ const FORMAT_WORDS: Readonly<Record<string, string>> = {
   OVA: 'OVA',
   ONA: 'ONA',
   MUSIC: 'Клип',
-  MANGA: 'Манга',
-  NOVEL: 'Ранобэ',
-  ONE_SHOT: 'Ваншот',
 }
 
-/** Жанры каталога AniList: список закрыт, все восемнадцать здесь. */
+/** Жанры каталога AniList: список закрыт, все девятнадцать здесь. */
 const GENRE_WORDS: Readonly<Record<string, string>> = {
   Action: 'Экшен',
   Adventure: 'Приключения',
@@ -28,7 +24,7 @@ const GENRE_WORDS: Readonly<Record<string, string>> = {
   Fantasy: 'Фэнтези',
   Hentai: 'Хентай',
   Horror: 'Ужасы',
-  'Mahou Shoujo': 'Махо-сёдзё',
+  'Mahou Shoujo': 'Махо-сỏдзỏ',
   Mecha: 'Меха',
   Music: 'Музыка',
   Mystery: 'Детектив',
@@ -123,7 +119,7 @@ const RELEASE_WORDS: Readonly<Record<string, string>> = {
   Hiatus: 'Перерыв',
 }
 
-/** Первоисточник тайтла. */
+/** Первоисточник тайтла: манга и ранобэ тут именно источники аниме. */
 const SOURCE_WORDS: Readonly<Record<string, string>> = {
   Original: 'Оригинал',
   Manga: 'Манга',
@@ -164,22 +160,12 @@ export interface StatusItem {
   title: string
 }
 
-/** Закладки аниме. Порядок как в привычном списке на сайте. */
-const ANIME_STATUS: ReadonlyArray<StatusItem> = [
+/** Закладки своего списка. Порядок как в привычном списке на сайте. */
+const STATUS_ITEMS: ReadonlyArray<StatusItem> = [
   { key: 'CURRENT', title: 'Смотрю' },
   { key: 'REPEATING', title: 'Пересматриваю' },
   { key: 'PLANNING', title: 'В планах' },
   { key: 'COMPLETED', title: 'Просмотрено' },
-  { key: 'PAUSED', title: 'Отложено' },
-  { key: 'DROPPED', title: 'Брошено' },
-]
-
-/** Закладки манги: ключи те же, а подписи обязаны быть про чтение. */
-const MANGA_STATUS: ReadonlyArray<StatusItem> = [
-  { key: 'CURRENT', title: 'Читаю' },
-  { key: 'REPEATING', title: 'Перечитываю' },
-  { key: 'PLANNING', title: 'В планах' },
-  { key: 'COMPLETED', title: 'Прочитано' },
   { key: 'PAUSED', title: 'Отложено' },
   { key: 'DROPPED', title: 'Брошено' },
 ]
@@ -241,25 +227,30 @@ export function relationWord(relation: string | null): string | null {
   return lookup(RELATION_WORDS, relation)
 }
 
-/** Закладки под вид тайтла: порядок важен, поэтому массив, а не словарь. */
-export function statusList(type: MediaType): ReadonlyArray<StatusItem> {
-  return type === 'MANGA' ? MANGA_STATUS : ANIME_STATUS
+/**
+ * Закладки своего списка: порядок важен, поэтому массив, а не словарь.
+ *
+ * Аргумент вида тайтла игнорируется: вид в приложении остался один.
+ * Он держится ради уже записанных вызовов и уйдёт вместе с последним из них.
+ */
+export function statusList(_type?: string): ReadonlyArray<StatusItem> {
+  return STATUS_ITEMS
 }
 
 /** Подпись одной закладки. Пустой ключ значит «тайтла нет в списке». */
-export function statusWord(type: MediaType, key: string | null): string | null {
+export function statusWord(_type: string | undefined, key: string | null): string | null {
   if (key === null || key === '') return null
 
-  const found = statusList(type).find((item) => item.key === key)
+  const found = STATUS_ITEMS.find((item) => item.key === key)
   return found?.title ?? key
 }
 
 /** Подпись строки счёта частей для карточки. */
-export function partsWord(type: MediaType): string {
-  return type === 'MANGA' ? 'Главы' : 'Эпизоды'
+export function partsWord(_type?: string): string {
+  return 'Эпизоды'
 }
 
 /** Короткое слово для плитки: на постере места мало. */
-export function partsShort(type: MediaType): string {
-  return type === 'MANGA' ? 'гл.' : 'эп.'
+export function partsShort(_type?: string): string {
+  return 'эп.'
 }
