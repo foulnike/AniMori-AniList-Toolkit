@@ -5,7 +5,7 @@
 import { settings } from '../core/settings'
 import { fetchShiki } from './shikimori'
 import { fetchAnime365ByMal } from './anime365'
-import type { MediaType, ShikiMedia } from '../core/types'
+import type { ShikiMedia } from '../core/types'
 
 export interface ResolvedTitle {
   russian: string
@@ -37,10 +37,15 @@ function stripBbcode(text: string | null): string | null {
   return clean === '' ? null : clean
 }
 
-/** Резолвит русское название и описание по цепочке источников. */
+/**
+ * Резолвит русское название и описание по цепочке источников.
+ *
+ * Адреса всегда анимешные: раздела манги у нас больше нет, а аргумент
+ * вида игнорируется: его ещё передаёт склад русских названий.
+ */
 export async function resolveTitle(
   malId: number | null,
-  type: MediaType,
+  _type?: string,
 ): Promise<ResolvedTitle | null> {
   const order = [...new Set([settings.titlePrimary, settings.titleFallback])].filter(
     (src) => src && src !== 'off' && src !== 'none',
@@ -48,9 +53,7 @@ export async function resolveTitle(
 
   for (const src of order) {
     if (src === 'shikimori') {
-      const shiki = await fetchShiki<ShikiMedia>(
-        `/api/${type === 'MANGA' ? 'mangas' : 'animes'}/${malId}`,
-      )
+      const shiki = await fetchShiki<ShikiMedia>(`/api/animes/${malId}`)
       if (shiki.data?.russian) {
         const rawScore = Number(shiki.data.score)
         return {
@@ -65,7 +68,7 @@ export async function resolveTitle(
         }
       }
     } else if (src === 'anime365') {
-      const a = await fetchAnime365ByMal(malId, type)
+      const a = await fetchAnime365ByMal(malId, 'ANIME')
       if (a?.russian) {
         return {
           russian: a.russian,
