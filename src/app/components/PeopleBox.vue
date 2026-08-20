@@ -14,13 +14,12 @@ import {
   type RussianPerson,
 } from '@/core/person-title'
 import { settings } from '@/core/settings'
-import type { MediaType } from '@/core/types'
 import { Logger } from '@/utils/logger'
 
 import { CREW_WORDS } from './crew-words'
 import PersonSheet from './PersonSheet.vue'
 
-const props = defineProps<{ mediaId: number; type: MediaType }>()
+const props = defineProps<{ mediaId: number }>()
 
 /** Сколько авторов видно до раскрытия хвоста. */
 const STAFF_HEAD = 6
@@ -135,13 +134,13 @@ async function beginRussian(mine: number): Promise<void> {
   // MAL id текущего тайтла: на нём висят и массовый проход, и гард тёзок.
   let malId: number | undefined
   try {
-    malId = (await fetchMalIds([props.mediaId], props.type)).get(props.mediaId)
+    malId = (await fetchMalIds([props.mediaId], 'ANIME')).get(props.mediaId)
   } catch (e) {
     Logger('WARN', `Русские имена: MAL id тайтла ${props.mediaId} не добыт`, e)
   }
 
   if (malId) {
-    const left = await prefetchRussianPeople(malId, props.type, queue)
+    const left = await prefetchRussianPeople(malId, 'ANIME', queue)
     if (mine !== run) return
 
     // Список ролей разрешил большинство разом: подметаем их в плитки.
@@ -226,7 +225,7 @@ watch(
 
           <!-- Озвучка своей целью: это второй человек, и окно у него своё. -->
           <button
-            v-if="type !== 'MANGA' && person.voice"
+            v-if="person.voice"
             class="am-face__voice"
             type="button"
             :title="person.voice.native ?? person.voice.name"

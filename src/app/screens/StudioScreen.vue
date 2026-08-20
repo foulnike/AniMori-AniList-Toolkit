@@ -55,31 +55,28 @@ function redraw(): void {
 }
 
 /**
- * Добирает русские названия верхним строкам. У студии типы смешанные,
- * поэтому проход идёт двумя группами: источник делит аниме и мангу.
+ * Добирает русские названия верхним строкам. У студии в выдаче только
+ * аниме, поэтому проход один: разбивать строки по видам больше незачем.
  */
 async function fillTitles(): Promise<void> {
   const mine = ++titleRun
-  const wanted = briefs
+  const ids = briefs
     .slice(0, TITLE_DEPTH)
     .filter((brief) => peekRussianName(brief.mediaId) === null)
+    .map((brief) => brief.mediaId)
 
-  for (const type of ['ANIME', 'MANGA'] as const) {
-    const ids = wanted.filter((brief) => brief.type === type).map((brief) => brief.mediaId)
+  try {
+    for (let from = 0; from < ids.length; from += TITLE_CHUNK) {
+      if (mine !== titleRun) return
 
-    try {
-      for (let from = 0; from < ids.length; from += TITLE_CHUNK) {
-        if (mine !== titleRun) return
+      await prefetchRussianTitles(ids.slice(from, from + TITLE_CHUNK))
+      if (mine !== titleRun) return
 
-        await prefetchRussianTitles(ids.slice(from, from + TITLE_CHUNK), type)
-        if (mine !== titleRun) return
-
-        redraw()
-      }
-    } catch (e) {
-      // Без перевода выдача останется на латинице — не повод ругаться на экране.
-      Logger('WARN', 'Студия: названия добрать не вышло', e)
+      redraw()
     }
+  } catch (e) {
+    // Без перевода выдача останется на латинице — не повод ругаться на экране.
+    Logger('WARN', 'Студия: названия добрать не вышло', e)
   }
 }
 
