@@ -34,6 +34,8 @@ const GITHUB_API = 'https://api.github.com'
 const SHIKI_PATH = '/api/animes?ids='
 /** Откуда берутся номера тайтлов. */
 const MANAMI = 'manami-project/anime-offline-database'
+/** Имя базы в выпуске. Точное: рядом лежат тёзки по маске. */
+const ASSET = 'anime-offline-database-minified.json'
 /** Столькими пачками проверяется второе зеркало, когда первое живо. */
 const CHECK_BATCHES = 5
 /** Пол выборки: в базе манами около 32 тысяч записей. Меньше — скачалось не то. */
@@ -48,9 +50,16 @@ const SAMPLE = Number(process.env.PROBE_SAMPLE || 3000)
 const PAUSE_MS = Number(process.env.PROBE_PAUSE || 700)
 const SEED = Number(process.env.PROBE_SEED || 20260822)
 
-/** Падаем громко: тихий выход с нулём — это ложный зелёный прогон. */
+/**
+ * Падаем громко: тихий выход с нулём — это ложный зелёный прогон. Причина едет
+ * и в итог прогона, иначе за ней приходится лезть в лог шага.
+ */
 function fail(message) {
   console.error(`ПРОБА НЕ СОСТОЯЛАСЬ: ${message}`)
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const line = `**Проба не состоялась:** ${message}\n`
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, line, 'utf8')
+  }
   process.exit(1)
 }
 
@@ -95,18 +104,17 @@ async function github(path) {
 }
 
 /**
- * Выбор файла в выпуске манами. Имена там меняются, поэтому берём по порядку
- * предпочтения, а не по заранее вбитому имени: сокращённая база лучше полной,
- * несжатая лучше сжатой. Не нашли ничего знакомого — падаем и показываем список.
+ * Файл базы в выпуске манами. Берётся по точному имени: под маску «minified»
+ * подходят и соседи вроде anidb-minified.json — списки мёртвых записей на
+ * десятки килобайт. Разбор такого файла проходит, массива data в нём нет.
+ * Несжатый идёт первым: расжатие — лишняя развилка, а качается он быстро.
  */
 function pickAsset(assets) {
-  for (const wanted of ['minified', '']) {
-    for (const ext of ['.json', '.json.gz', '.json.zst']) {
-      const hit = assets.find((a) => a.name.includes(wanted) && a.name.endsWith(ext))
-      if (hit) return hit
-    }
+  for (const ext of ['', '.zst', '.gz']) {
+    const hit = assets.find((a) => a.name === ASSET + ext)
+    if (hit) return hit
   }
-  fail(`в выпуске манами нет знакомого файла, лежит: ${assets.map((a) => a.name).join(', ')}`)
+  fail(`в выпуске манами нет ${ASSET}, лежит: ${assets.map((a) => a.name).join(', ')}`)
 }
 
 /**
@@ -133,7 +141,8 @@ function decompress(name, body) {
 async function loadManami() {
   const release = await github(`/repos/${MANAMI}/releases/latest`)
   const asset = pickAsset(release.assets || [])
-  console.log(`Манами: выпуск ${release.tag_name}, файл ${asset.name}`)
+  const sizeMb = round1(asset.size / 1048576)
+  console.log(`Манами: выпуск ${release.tag_name}, файл ${asset.name}, ${sizeMb} МБ`)
 
   const answer = await fetch(asset.browser_download_url, { headers: { 'user-agent': UA } })
   if (!answer.ok) fail(`файл выпуска манами не скачался: HTTP ${answer.status}`)
@@ -147,7 +156,9 @@ async function loadManami() {
   }
 
   const entries = base.data
-  if (!Array.isArray(entries)) fail('в файле манами нет массива data')
+  if (!Array.isArray(entries)) {
+    fail(`в файле ${asset.name} нет массива data, а есть: ${Object.keys(base).join(', ')}`)
+  }
   if (entries.length < MIN_ENTRIES) {
     fail(`в базе манами ${entries.length} записей, ждали хотя бы ${MIN_ENTRIES}`)
   }
