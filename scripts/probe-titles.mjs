@@ -5,11 +5,13 @@
 //   2. ПРОПУСК — пускает ли Шикимори адреса дата-центра GitHub и на каком темпе;
 //   3. ВЕС И ВРЕМЯ — влезает ли полный обход в потолок прогона и сколько весит выпуск.
 //
-// Зеркала те же, что у клиента (SHIKI_DOMAINS в src/shared/core/constants.ts):
-// сначала shikimori.io, следом shikimori.rip. Мерить shikimori.one незачем — клиент
-// туда не ходит. Второе зеркало живёт ради блокировок РКН, у бегунка GitHub их нет,
-// поэтому оно проверяется коротко: жив ли адрес вообще. Если первое зеркало не пустит,
-// короткая проверка становится полной — тогда судьбу шага решает именно второе.
+// Зеркала те же, что у клиента (SHIKI_DOMAINS в src/shared/core/constants.ts): сначала
+// shikimori.io, следом shikimori.rip. Главный адрес shikimori.one клиент не знает, но
+// сборщику ходить теми же дверьми не обязательно: он работает раз в неделю и не
+// в браузере, поэтому .one пробуется третьим, когда оба зеркала клиента молчат.
+// Двери anime365 только осматриваются: их API отдаёт по одному тайтлу за запрос,
+// и обход в тридцать тысяч запросов — отдельный разговор, но знать, пускают ли
+// туда вообще, надо уже сейчас.
 //
 // Проба ничего не выкладывает: пишет probe-result.json и сводку в итог прогона.
 // Запуск только руками, из .github/workflows/probe-titles.yml.
@@ -18,6 +20,7 @@
 // а всё нужное есть в Node 20.
 
 import { spawnSync } from 'node:child_process'
+import { lookup } from 'node:dns/promises'
 import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,18 +30,26 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 const BATCH = 50
 /** Зеркала клиента, в том же порядке. */
 const MIRRORS = ['shikimori.io', 'shikimori.rip']
+/** Главный адрес Шикимори: запасной ход для сборщика, но не для клиента. */
+const MAIN = 'shikimori.one'
+/** Адреса anime365 (ANIME365_DOMAINS в constants.ts): только осмотр. */
+const A365 = ['smotret-anime.online', 'anime365.ru']
+/** Форма запроса взята из api/anime365.ts: по одному тайтлу по номеру MAL. */
+const A365_PATH = '/api/series?myAnimeListId=1&limit=1&fields=titles'
 /** Шикимори требует внятный User-Agent: без него ответом будет отказ. */
 const UA = 'AniMori/3.0 (+https://github.com/foulnike/AniMori-AniList-Toolkit)'
 /** Адреса складываются из частей, как зеркала в api/shikimori.ts. */
 const GITHUB_API = 'https://api.github.com'
 const SHIKI_PATH = '/api/animes?ids='
+/** Потолок одного запроса: виснувшее соединение не должно съесть весь прогон. */
+const TIMEOUT_MS = 15000
 /** Откуда берутся номера тайтлов. */
 const MANAMI = 'manami-project/anime-offline-database'
 /** Имя базы в выпуске. Точное: рядом лежат тёзки по маске. */
 const ASSET = 'anime-offline-database-minified.json'
 /** Столькими пачками проверяется второе зеркало, когда первое живо. */
 const CHECK_BATCHES = 5
-/** Пол выборки: в базе манами около 32 тысяч записей. Меньше — скачалось не то. */
+/** Пол выборки: в базе манами около 40 тысяч записей. Меньше — скачалось не то. */
 const MIN_ENTRIES = 20000
 const MIN_MAL = 15000
 /** Метки источников в записи манами. Без регэкспов: строк тут сотня тысяч. */
@@ -49,6 +60,9 @@ const CYRILLIC = /[А-Яа-яЁё]/
 const SAMPLE = Number(process.env.PROBE_SAMPLE || 3000)
 const PAUSE_MS = Number(process.env.PROBE_PAUSE || 700)
 const SEED = Number(process.env.PROBE_SEED || 20260822)
+
+/** Итоги осмотра адресов: заполняется до обхода, печатается в конце. */
+const doors = []
 
 /**
  * Падаем громко: тихий выход с нулём — это ложный зелёный прогон. Причина едет
@@ -61,6 +75,16 @@ function fail(message) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, line, 'utf8')
   }
   process.exit(1)
+}
+
+/**
+ * Разбор отказа сети. У Node в message всегда одно и то же «fetch failed»,
+ * а самое нужное лежит в cause: ENOTFOUND — не разобралось имя, ECONNREFUSED и
+ * ETIMEDOUT — адрес закрыт, UND_ERR_CONNECT_TIMEOUT — соединение молча уронили.
+ */
+function why(e) {
+  const cause = e.cause || {}
+  return cause.code || cause.message || e.message || String(e)
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -193,6 +217,37 @@ function collectIds(entries) {
 }
 
 /**
+ * Осмотр одной двери до обхода: разрешается ли имя и что отвечает адрес.
+ * Без этого в логе одинаковое «fetch failed» и на мёртвом имени, и на закрытом порту.
+ */
+async function diagnose(domain, path) {
+  let ips = ''
+  try {
+    const found = await lookup(domain, { all: true })
+    ips = found.map((a) => a.address).join(', ')
+  } catch (e) {
+    doors.push({ domain, ips: `имя не разобралось: ${why(e)}`, answer: 'не спрашивали' })
+    console.log(`${domain}: имя не разобралось — ${why(e)}`)
+    return
+  }
+
+  const started = Date.now()
+  let answer = ''
+  try {
+    const res = await fetch('https://' + domain + path, {
+      headers: { 'user-agent': UA, accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    answer = `HTTP ${res.status} за ${Date.now() - started} мс`
+  } catch (e) {
+    answer = `${why(e)} за ${Date.now() - started} мс`
+  }
+
+  doors.push({ domain, ips, answer })
+  console.log(`${domain}: ${ips} — ${answer}`)
+}
+
+/**
  * Одна пачка к зеркалу. Куки не шлём — клиент их тоже не шлёт: с ними заголовок
  * разрастался и Шикимори отвечал 400.
  */
@@ -203,6 +258,7 @@ async function ask(domain, batch) {
   try {
     const answer = await fetch(url, {
       headers: { 'user-agent': UA, accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     })
     const took = Date.now() - started
 
@@ -215,7 +271,7 @@ async function ask(domain, batch) {
     if (!Array.isArray(items)) return { status: 'ответ не массив', took }
     return { status: 200, took, items }
   } catch (e) {
-    return { status: `сеть: ${e.message}`, took: Date.now() - started }
+    return { status: `сеть: ${why(e)}`, took: Date.now() - started }
   }
 }
 
@@ -315,6 +371,11 @@ function report(lines) {
 async function main() {
   console.log(`Проба: выборка ${SAMPLE} номеров, пауза ${PAUSE_MS} мс, зерно ${SEED}`)
 
+  // Сначала осмотр всех дверей: одно разрешение имени и один запрос на адрес.
+  // Дешёво и сразу видно, куда дата-центр пускают, а куда нет.
+  for (const domain of [...MIRRORS, MAIN]) await diagnose(domain, SHIKI_PATH + '1&limit=1')
+  for (const domain of A365) await diagnose(domain, A365_PATH)
+
   const manami = await loadManami()
   const { mal, paired } = collectIds(manami.entries)
   if (mal.length < MIN_MAL) {
@@ -333,7 +394,11 @@ async function main() {
   const firstPassed = first.stat.ok > 0
   const short = sample.slice(0, CHECK_BATCHES * BATCH)
   const second = await probeMirror(MIRRORS[1], firstPassed ? short : sample)
-  const lead = firstPassed ? first : second
+
+  // Оба зеркала клиента молчат — пробуем главный адрес.
+  const attempts = [first, second]
+  if (!firstPassed && second.stat.ok === 0) attempts.push(await probeMirror(MAIN, sample))
+  const lead = attempts.find((a) => a.stat.ok > 0) || first
 
   const coverage = lead.stat.answered ? lead.stat.withCyrillic / lead.stat.answered : 0
   const known = lead.stat.asked ? lead.stat.answered / lead.stat.asked : 0
@@ -343,10 +408,10 @@ async function main() {
   const weight = weigh(lead.rows, mal.length, paired)
 
   const verdict = []
-  if (!firstPassed && second.stat.ok === 0) {
-    verdict.push('Оба зеркала из дата-центра не ответили ни разу: шаг 3 закрыт, нужен свой адрес.')
-  } else if (!firstPassed) {
-    verdict.push(`Первое зеркало молчит, отвечает только ${MIRRORS[1]} — собирать через него.`)
+  if (lead.stat.ok === 0) {
+    verdict.push('Ни один адрес Шикимори не пустил дата-центр: шаг 3 закрыт.')
+  } else if (lead !== first) {
+    verdict.push(`Отвечает только ${lead.stat.domain} — собирать через него.`)
   } else if (lead.stat.codes[429]) {
     verdict.push(`Лимит сработал ${lead.stat.codes[429]} раз на паузе ${PAUSE_MS} мс: пауза мала.`)
   } else {
@@ -355,16 +420,20 @@ async function main() {
   if (lead.stat.ok > 0 && coverage < 0.5) {
     verdict.push(`Кириллица лишь у ${pct(coverage)} ответов: датасет закроет меньше половины.`)
   }
-  if (fullMinutes > 300) {
-    verdict.push(`Полный обход занял бы ${fullMinutes} мин — это впритык к потолку прогона в 6 ч.`)
+  if (lead.stat.ok > 0 && fullMinutes > 300) {
+    verdict.push(`Полный обход занял бы ${fullMinutes} мин — это впритык к потолку в 6 ч.`)
   }
 
-  const weightRow = weight
-    ? `| Вес выпуска | имена ~${weight.titlesMb} МБ, карта ~${weight.mapMb} МБ (gzip) |`
-    : ''
+  const weightRows = weight
+    ? [`| Вес выпуска | имена ~${weight.titlesMb} МБ, карта ~${weight.mapMb} МБ (gzip) |`]
+    : []
 
   report([
     `## Проба обхода: ${lead.stat.domain}`,
+    '',
+    '| Дверь | Адреса | Ответ |',
+    '| --- | --- | --- |',
+    ...doors.map((d) => `| ${d.domain} | ${d.ips} | ${d.answer} |`),
     '',
     '| Что | Сколько |',
     '| --- | --- |',
@@ -375,8 +444,10 @@ async function main() {
     `| Запросов | ${lead.stat.requests}, ответы: ${codesText(lead.stat)} |`,
     `| Время | ${round1(lead.stat.tookMs / 1000)} с, по ${Math.round(perRequest)} мс на запрос |`,
     `| Полный обход | ${fullRequests} запросов ≈ ${fullMinutes} мин |`,
-    weightRow,
-    `| Второе зеркало | ${second.stat.domain}: ${codesText(second.stat)} |`,
+    ...weightRows,
+    ...attempts
+      .filter((a) => a !== lead)
+      .map((a) => `| Ещё пробовали | ${a.stat.domain}: ${codesText(a.stat)} |`),
     '',
     ...verdict.map((line) => `**${line}**`),
   ])
@@ -387,6 +458,7 @@ async function main() {
       {
         ranAt: new Date().toISOString(),
         settings: { sample: SAMPLE, pauseMs: PAUSE_MS, seed: SEED, batch: BATCH },
+        doors,
         manami: {
           tag: manami.tag,
           asset: manami.asset,
@@ -394,7 +466,7 @@ async function main() {
           malIds: mal.length,
           withAnilist: paired,
         },
-        mirrors: [first.stat, second.stat],
+        mirrors: attempts.map((a) => a.stat),
         lead: lead.stat.domain,
         coverage,
         known,
