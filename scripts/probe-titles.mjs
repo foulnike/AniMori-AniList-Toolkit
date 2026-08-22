@@ -29,6 +29,9 @@ const BATCH = 50
 const MIRRORS = ['shikimori.io', 'shikimori.rip']
 /** Шикимори требует внятный User-Agent: без него ответом будет отказ. */
 const UA = 'AniMori/3.0 (+https://github.com/foulnike/AniMori-AniList-Toolkit)'
+/** Адреса складываются из частей, как зеркала в api/shikimori.ts. */
+const GITHUB_API = 'https://api.github.com'
+const SHIKI_PATH = '/api/animes?ids='
 /** Откуда берутся номера тайтлов. */
 const MANAMI = 'manami-project/anime-offline-database'
 /** Столькими пачками проверяется второе зеркало, когда первое живо. */
@@ -86,7 +89,7 @@ function pickSome(list, count, rand) {
 async function github(path) {
   const headers = { 'user-agent': UA, accept: 'application/vnd.github+json' }
   if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`
-  const answer = await fetch(`https://api.github.com${path}`, { headers })
+  const answer = await fetch(GITHUB_API + path, { headers })
   if (!answer.ok) fail(`GitHub ответил ${answer.status} на ${path}`)
   return answer.json()
 }
@@ -183,7 +186,7 @@ function collectIds(entries) {
  * разрастался и Шикимори отвечал 400.
  */
 async function ask(domain, batch) {
-  const url = `https://${domain}/api/animes?ids=${batch.join(',')}&limit=${BATCH}`
+  const url = 'https://' + domain + SHIKI_PATH + batch.join(',') + '&limit=' + BATCH
   const started = Date.now()
 
   try {
@@ -339,11 +342,15 @@ async function main() {
     verdict.push(`Обход проходит: ${lead.stat.requests} запросов подряд без единого отказа.`)
   }
   if (lead.stat.ok > 0 && coverage < 0.5) {
-    verdict.push(`Кириллица лишь у ${pct(coverage)} ответов: датасет закроет меньше половины показа.`)
+    verdict.push(`Кириллица лишь у ${pct(coverage)} ответов: датасет закроет меньше половины.`)
   }
   if (fullMinutes > 300) {
     verdict.push(`Полный обход занял бы ${fullMinutes} мин — это впритык к потолку прогона в 6 ч.`)
   }
+
+  const weightRow = weight
+    ? `| Вес выпуска | имена ~${weight.titlesMb} МБ, карта ~${weight.mapMb} МБ (gzip) |`
+    : ''
 
   report([
     `## Проба обхода: ${lead.stat.domain}`,
@@ -357,7 +364,7 @@ async function main() {
     `| Запросов | ${lead.stat.requests}, ответы: ${codesText(lead.stat)} |`,
     `| Время | ${round1(lead.stat.tookMs / 1000)} с, по ${Math.round(perRequest)} мс на запрос |`,
     `| Полный обход | ${fullRequests} запросов ≈ ${fullMinutes} мин |`,
-    weight ? `| Вес выпуска | имена ~${weight.titlesMb} МБ, карта ~${weight.mapMb} МБ (gzip) |` : '',
+    weightRow,
     `| Второе зеркало | ${second.stat.domain}: ${codesText(second.stat)} |`,
     '',
     ...verdict.map((line) => `**${line}**`),
