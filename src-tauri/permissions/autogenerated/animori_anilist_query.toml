@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-animori-anilist-query"
+description = "Enables the animori_anilist_query command without any pre-configured scope."
+commands.allow = ["animori_anilist_query"]
+
+[[permission]]
+identifier = "deny-animori-anilist-query"
+description = "Denies the animori_anilist_query command without any pre-configured scope."
+commands.deny = ["animori_anilist_query"]
