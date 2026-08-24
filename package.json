@@ -3,30 +3,20 @@
   "private": true,
   "version": "2.0.2",
   "type": "module",
-  "description": "AniMori — Toolkit for AniList. Единая кодовая база для юзерскрипта и десктопного клиента.",
+  "description": "AniMori — Toolkit for AniList. Юзерскрипт для anilist.co.",
   "license": "MIT",
   "author": "foulnike",
   "scripts": {
-    "dev": "vite --mode userscript",
-    "build": "vue-tsc --noEmit && vite build --mode userscript",
-    "build:userscript": "vite build --mode userscript",
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "format": "prettier --write \"src/**/*.{ts,vue,scss}\" \"*.{ts,json,md}\"",
-    "build:tauri": "vue-tsc --noEmit && vite build --mode tauri",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "format": "prettier --write \"src/**/*.{ts,vue,scss}\" \"*.{ts,json,md}\""
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
-    "@tauri-apps/plugin-http": "^2.5.9",
-    "@tauri-apps/plugin-store": "^2.4.4",
     "vue": "^3.5.13"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
     "@types/greasemonkey": "^4.0.7",
     "@types/node": "^26.1.2",
     "@vitejs/plugin-vue": "^5.2.1",
