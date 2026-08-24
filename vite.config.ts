@@ -39,9 +39,7 @@ export default defineConfig({
       // правки импортов при первой же нужде в другой платформе (Android из планов).
       //
       // Ключ обязан идти до '@': совпадение строковых алиасов идёт по порядку.
-      '@bridge-impl': fileURLToPath(
-        new URL('./src/shared/bridge/TauriBridge.ts', import.meta.url),
-      ),
+      '@bridge-impl': fileURLToPath(new URL('./src/shared/bridge/TauriBridge.ts', import.meta.url)),
       // Пункт 1.3: имена модулей при переезде в shared не менялись, сменилось только
       // их место — старые имена сведены на новые каталоги здесь.
       //
