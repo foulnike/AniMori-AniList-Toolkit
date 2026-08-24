@@ -1,33 +1,31 @@
-# Сборка и выкладка релиза (пункт П.1 из RM4.md).
+# Выпуск юзерскрипта.
 #
-# Запуск только по тегу вида v2.0.0. По пушу в ветку сборка не идёт: каждый
-# прогон — это полная компиляция Rust на windows-latest, а смысл она имеет
-# только для выпуска.
+# Запуск только по тегу вида script-2.1.0. Приставка обязательна: у двух продуктов
+# одного проекта теги должны различаться, иначе выпуск скрипта будет заодно запускать
+# сборку приложения в другой ветке. Старые теги v1.7.4…v2.0.2 остаются как есть:
+# тогда оба продукта действительно выходили вместе из одного тега.
 #
 # Что уезжает в релиз:
-#   1. AniMori_<версия>_x64-setup.exe — установщик, на который смотрит апдейтер;
-#   2. его же .sig — подпись, без неё обновление не будет принято;
-#   3. latest.json — манифест обновлений;
-#   4. AniMori_Setup.exe — копия установщика под коротким именем для людей и README;
-#   5. animori.user.js — сборка юзерскрипта для GreasyFork;
-#   6. AniMori_<версия>_x64-portable.zip — приложение без установки.
+#   1. animori.user.js — сама сборка;
+#   2. animori.meta.js — один заголовок. По нему менеджеры скриптов проверяют обновление,
+#      не скачивая весь файл.
 #
-# Почему копия, а не переименование. latest.json ссылается на файл по имени,
-# которое ему дал Tauri. Переименуешь артефакт — манифест покажет на несуществующий
-# адрес, и обновление упадёт у всех сразу. Подпись считается от содержимого,
-# поэтому копия под другим именем ничему не мешает.
+# Раздача идёт через Greasy Fork: downloadURL и updateURL в заголовке смотрят туда,
+# и обновление людям приходит оттуда. Артефакты релиза — копия для тех, кто ставит
+# руками, и точка, с которой Greasy Fork можно синхронизировать.
 #
-# ВАЖНО ПРО ОТМЕНУ. Удаление тега уже запущенный прогон не останавливает: он
-# работает со своей копией кода и на финальном шаге создаёт тег заново вместе
-# с релизом. Чтобы отменить выпуск, сначала жми Cancel во вкладке Actions,
-# и только потом удаляй тег.
+# ubuntu-latest, а не windows-latest: Rust, WebView2 и подпись установщика здесь больше
+# не участвуют, и прогон из десятков минут превращается в пару.
+#
+# Отмена выпуска — как и прежде: сначала Cancel во вкладке Actions, потом удаление
+# тега. Удалённый тег уже запущенный прогон не останавливает.
 
 name: release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'script-*'
 
 # Без этого токен прогона только читает, и создание релиза упадёт на 403.
 permissions:
@@ -35,43 +33,11 @@ permissions:
 
 jobs:
   release:
-    # Только Windows: цель сборки одна — nsis, а сетевой блокировщик опирается
-    # на COM-интерфейсы WebView2, которых больше нигде нет.
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Исходный код
         uses: actions/checkout@v4
-
-      # Текст верхнего раздела CHANGELOG уходит и в описание релиза, и в окно
-      # обновления внутри приложения: апдейтер показывает пользователю ровно
-      # то, что лежит в поле notes манифеста, а туда попадает описание релиза.
-      # Поэтому отсылка вида "См. CHANGELOG.md" здесь бесполезна — человек
-      # видит её в диалоге вместо перечня изменений.
-      #
-      # Разбор простой: находим строки вида "## [" и берём всё между первой
-      # и второй. Заголовок раздела не нужен — номер версии и так в имени релиза.
-      - name: Описание релиза из CHANGELOG
-        id: notes
-        shell: pwsh
-        run: |
-          $lines = Get-Content CHANGELOG.md -Encoding utf8
-          $marks = 0..($lines.Count - 1) | Where-Object { $lines[$_] -match '^## \[' }
-          if ($marks.Count -eq 0) {
-            throw 'В CHANGELOG.md не найдено ни одного раздела вида "## [версия]"'
-          }
-          $from = $marks[0] + 1
-          $to = if ($marks.Count -gt 1) { $marks[1] - 1 } else { $lines.Count - 1 }
-          $body = ($lines[$from..$to] -join "`n").Trim()
-          # Потолок на случай очень большого раздела: тело релиза уходит в манифест
-          # обновлений, раздувать его нечем.
-          if ($body.Length -gt 3000) {
-            $body = $body.Substring(0, 3000).TrimEnd() + "`n`n…полный список изменений — в CHANGELOG.md"
-          }
-          Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value 'body<<ANIMORI_NOTES'
-          Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value $body
-          Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value 'ANIMORI_NOTES'
-          Write-Host "Взято строк описания: $($to - $from + 1)"
 
       - name: Node.js
         uses: actions/setup-node@v4
@@ -79,109 +45,59 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Окружение Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      # Компиляция зависимостей Tauri с нуля — это минуты. Кэш привязан к Cargo.lock,
-      # который у нас закоммичен, поэтому попадание будет стабильным.
-      - name: Кэш Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      # Заголовок скрипта берёт версию из package.json — это единственный источник
+      # номера в ветке. Если тег и package.json расходятся, люди получат обновление
+      # с чужим номером, и менеджер скриптов больше не увидит следующее. Лучше
+      # сломаться здесь, чем выложить такое.
+      - name: Сверка версии с тегом
+        id: ver
+        run: |
+          tag="${GITHUB_REF_NAME#script-}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "Тег script-$tag не совпадает с version в package.json ($pkg)." >&2
+            exit 1
+          fi
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Зависимости npm
         run: npm ci
 
-      # ПОРЯДОК ЗДЕСЬ ОБЯЗАТЕЛЕН. В vite.config.ts стоит emptyOutDir: !isTauri —
-      # юзерскриптовая сборка чистит dist/, тауриная — нет. Сначала скрипт,
-      # потом приложение. Наоборот — и первая снесёт animori.tauri.js вместе
-      # с CSS, а include_str! в lib.rs упадёт на компиляции.
-      # Сборку режима tauri запускает сам tauri-action через beforeBuildCommand.
-      - name: Сборка юзерскрипта
+      # Внутри — vue-tsc --noEmit и только потом vite build: выкладывать сборку, не
+      # прошедшую проверку типов, незачем. Порядка шагов, как прежде, теперь
+      # соблюдать не надо: в dist пишет один продукт.
+      - name: Сборка
         run: npm run build
 
-      # Копия скрипта в отдельную папку: следующим шагом тауриная сборка пишет
-      # в тот же dist/, и держать готовый артефакт в рабочей папке сборщика незачем.
-      - name: Отложить артефакт скрипта
-        shell: pwsh
+      # Текст верхнего раздела CHANGELOG уходит в описание релиза. Разбор тот же,
+      # что был: строки между первым и вторым заголовками вида "## [".
+      #
+      # Потолка в 3000 символов больше нет: он стоял из-за манифеста обновлений
+      # приложения, куда этот же текст попадал целиком. Здесь манифеста нет.
+      - name: Описание релиза из CHANGELOG
+        id: notes
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item dist/animori.user.js artifacts/animori.user.js
+          body=$(awk '/^## \[/ { n++; if (n == 2) exit; next } n == 1' CHANGELOG.md)
+          if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+            echo 'В CHANGELOG.md не найден непустой верхний раздел вида "## [версия]"' >&2
+            exit 1
+          fi
+          {
+            echo 'body<<ANIMORI_NOTES'
+            printf '%s\n' "$body"
+            echo 'ANIMORI_NOTES'
+          } >> "$GITHUB_OUTPUT"
 
-      # Собирает приложение, создаёт релиз по тегу, подписывает установщик
-      # и сам генерирует latest.json. Писать манифест вручную не надо.
-      #
-      # Ключ подписи приходит только из секретов репозитория. В исходных файлах
-      # его нет ни в каком виде и быть не может.
-      - name: Сборка приложения и публикация релиза
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: AniMori ${{ github.ref_name }}
-          releaseBody: ${{ steps.notes.outputs.body }}
-          # Черновик и предварительный релиз оба выключены осознанно:
-          # адрес releases/latest/download/... видит только опубликованный
-          # непредварительный релиз, и апдейтер любой другой просто не заметит.
-          releaseDraft: false
-          prerelease: false
-          includeUpdaterJson: true
-
-      # Короткое имя для человека. Исходный файл остаётся на месте нетронутым —
-      # именно на него ссылается latest.json.
-      - name: Копия установщика под коротким именем
-        shell: pwsh
-        run: |
-          $setup = Get-ChildItem -Path src-tauri/target -Recurse -Filter *-setup.exe |
-            Where-Object { $_.DirectoryName -match 'bundle\\nsis$' } |
-            Select-Object -First 1
-          if (-not $setup) {
-            throw 'Установщик NSIS не найден — сборка что-то положила не туда'
-          }
-          Copy-Item $setup.FullName artifacts/AniMori_Setup.exe
-          Write-Host "Исходный артефакт: $($setup.FullName)"
-
-      # Портабл-версия. Отдельной цели сборки под неё у Tauri нет: приложение —
-      # это один самодостаточный exe, интерфейс вшит в бинарник на этапе
-      # компиляции. Поэтому просто берём его из target и упаковываем.
-      #
-      # Поиск рекурсивный: без явной цели Cargo кладёт бинарник в target/release,
-      # а если сборщик передаст --target — в target/<тройка>/release. Отбираем
-      # только файл из самой папки release: в deps лежат промежуточные копии.
-      #
-      # В автообновлении архив не участвует: подпись и latest.json Tauri считает
-      # только для установщика. Портабл обновляется заменой файла вручную.
-      #
-      # Настройки и токен всё равно лягут в профиль пользователя
-      # (AppData\Roaming\com.foulnike.animori) — переносимым является сам запуск
-      # без установки, а не хранилище.
-      - name: Портабл-архив
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem -Path src-tauri/target -Recurse -Filter AniMori.exe |
-            Where-Object { $_.DirectoryName -match 'release$' } |
-            Select-Object -First 1
-          if (-not $exe) {
-            throw 'AniMori.exe не найден в src-tauri/target'
-          }
-          $version = '${{ github.ref_name }}'.TrimStart('v')
-          $stage = "portable/AniMori_$version"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item $exe.FullName (Join-Path $stage 'AniMori.exe')
-          Copy-Item README.md (Join-Path $stage 'README.md')
-          Copy-Item LICENSE (Join-Path $stage 'LICENSE')
-          Compress-Archive -Path "$stage/*" -DestinationPath "artifacts/AniMori_${version}_x64-portable.zip" -Force
-          Write-Host "Портабл собран из: $($exe.FullName)"
-
-      # Докладывает недостающие файлы в уже созданный релиз того же тега.
-      - name: Доложить артефакты в релиз
+      - name: Релиз
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          name: AniMori — юзерскрипт ${{ steps.ver.outputs.value }}
+          body: ${{ steps.notes.outputs.body }}
+          draft: false
+          prerelease: false
+          # Если сборка не положила файл на место — падать, а не выкладывать пустой релиз.
+          fail_on_unmatched_files: true
           files: |
-            artifacts/animori.user.js
-            artifacts/AniMori_Setup.exe
-            artifacts/AniMori_*_x64-portable.zip
+            dist/animori.user.js
+            dist/animori.meta.js
