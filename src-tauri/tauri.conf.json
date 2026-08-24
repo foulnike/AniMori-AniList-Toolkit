@@ -5,9 +5,9 @@
   "identifier": "com.foulnike.animori",
   "build": {
     "frontendDist": "../dist/app",
-    "beforeBuildCommand": "npm run build:app && npm run build:tauri",
+    "beforeBuildCommand": "npm run build:app",
     "beforeDevCommand": {
-      "script": "npm run build:app && npm run build:tauri",
+      "script": "npm run build:app",
       "wait": true
     }
   },
