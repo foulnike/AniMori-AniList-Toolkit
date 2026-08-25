@@ -1,7 +1,5 @@
 <div align="center">
-
-<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/assets/icon/128x128@2x.png" width="128" alt="AniMori">
-
+  
 # AniMori — Toolkit for AniList
 
 **Русификатор и набор инструментов для [AniList](https://anilist.co) — перевод интерфейса, плеер, рейтинги, дерево франшиз, экспорт и сравнение списков с Shikimori.**
