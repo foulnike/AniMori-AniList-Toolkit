@@ -22,22 +22,26 @@ function netId(domain: string): string {
 }
 
 /**
- * Уходят ли запросы без куки сессии.
- * Проверяется платформа моста: в WebView window есть, а сессии Shikimori в нём нет.
+ * Уходят ли запросы без куки сессии. В приложении — всегда: запрос выполняет
+ * Rust, и куки WebView ему не видны (риск 2 из docs/DECISIONS.md). Прежде здесь
+ * стояло сравнение с платформой надстройки, истинное при любом её значении.
+ *
+ * Функция, а не константа: платформа с куками вернётся сюда одной правкой.
  */
 export function isAnonymousShikiAccess(): boolean {
-  return Bridge.platform !== 'userscript'
+  return true
 }
 
 /**
- * Текст отказа в доступе: в десктопе причина другая, чем в браузере.
- * Одинаковое «Профиль скрыт.» гнало бы в настройки приватности вместо транспорта.
+ * Текст отказа в доступе. Причина всегда одна: списки читаются анонимно,
+ * а скрытый профиль сервер анониму не отдаёт. Короткое «Профиль скрыт.»
+ * гнало бы в настройки приватности вместо настоящей причины.
  */
 export function hiddenProfileMessage(): string {
-  return isAnonymousShikiAccess()
-    ? 'Профиль скрыт либо недоступен анонимно. В десктопной версии списки читаются без ' +
-        'входа в аккаунт, поэтому профиль Shikimori должен быть открыт (публичен).'
-    : 'Профиль скрыт.'
+  return (
+    'Профиль скрыт либо недоступен анонимно. В десктопной версии списки читаются без ' +
+    'входа в аккаунт, поэтому профиль Shikimori должен быть открыт (публичен).'
+  )
 }
 
 export interface ShikiUserResponse<T> {
@@ -55,9 +59,7 @@ export interface ShikiUserResponse<T> {
  * @param path Путь, начинающийся со слэша. Домен подставляется сам.
  */
 export async function shikiUserGet<T>(path: string): Promise<ShikiUserResponse<T>> {
-  const anonymous = isAnonymousShikiAccess()
-
-  if (anonymous && !anonymousNoticeShown) {
+  if (!anonymousNoticeShown) {
     anonymousNoticeShown = true
     Logger(
       'WARN',
@@ -66,8 +68,8 @@ export async function shikiUserGet<T>(path: string): Promise<ShikiUserResponse<T
     )
   }
 
-  // Юзерскрипт подставляет куки сессии через мост; из Rust их не видно, оттого omit.
-  const credentials: 'include' | 'omit' = anonymous ? 'omit' : 'include'
+  // Куки сессии из Rust не видны, поэтому запрос уходит без них.
+  const credentials = 'omit' as const
   let lastError: unknown = null
 
   for (const domain of SHIKI_DOMAINS) {

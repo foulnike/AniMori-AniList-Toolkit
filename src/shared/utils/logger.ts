@@ -169,16 +169,16 @@ export function Logger(type: LogType | string, message: string, details: unknown
   else if (type === 'WARN') console.warn(`[AniMori WARN] ${message}`, details || '')
 }
 
-/** Наша ли ошибка (по маркерам filename/stack). */
+/**
+ * Наша ли ошибка. В приложении чужого кода на странице нет: своё и есть всё,
+ * что до нас доехало. Отсев по словам «userscript», «tampermonkey» и «.user.js»
+ * снят вместе с надстройкой — заодно он глотал и свои ошибки: путь бандла
+ * в WebView ни одного из этих слов не содержит.
+ *
+ * Пустой источник по-прежнему не наш: у отказа без стека взять нечего.
+ */
 export function isOwnScriptSource(str: unknown): boolean {
-  if (!str) return false
-  const s = String(str).toLowerCase()
-  return (
-    s.includes('userscript') ||
-    s.includes('tampermonkey') ||
-    s.includes('animori') ||
-    s.includes('.user.js')
-  )
+  return Boolean(str)
 }
 
 /**

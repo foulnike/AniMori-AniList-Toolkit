@@ -1,6 +1,6 @@
 // IBridge для десктопной оболочки Tauri.
-// В бандл юзерскрипта не попадает: alias '@bridge-impl' в vite.config.ts разводит
-// реализации по mode. Ветвлением не обойтись — new LazyStore ниже даёт побочный эффект.
+// Единственная реализация: псевдопуть '@bridge-impl' из vite.config.ts ведёт сюда.
+// Ветвлением его не заменить — new LazyStore ниже даёт побочный эффект при импорте.
 
 import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
@@ -69,7 +69,7 @@ const pendingWrites = new Set<Promise<void>>()
 /** Предел проходов flush(): без него непрерывный поток set() держит ожидание вечно. */
 const FLUSH_MAX_ROUNDS = 5
 
-// Перегрузки как в MonkeyBridge: объектный литерал перегруженный метод не реализует.
+// Перегрузки объявлены функцией: объектный литерал перегруженный метод не реализует.
 async function storageGet<T>(key: string, defaultValue: T): Promise<T>
 async function storageGet<T = unknown>(key: string): Promise<T | undefined>
 async function storageGet<T>(key: string, defaultValue?: T): Promise<T | undefined> {
@@ -349,5 +349,5 @@ export const tauriBridge: IBridge = {
   proxyDiagnostics: tauriProxyDiagnostics,
 }
 
-// Общее для обеих реализаций имя экспорта.
+// Имя экспорта, которого ждёт '@bridge-impl'. Общее для любой реализации.
 export { tauriBridge as platformBridge }
