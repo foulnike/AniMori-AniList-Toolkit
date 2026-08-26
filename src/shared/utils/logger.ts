@@ -3,15 +3,15 @@
 // UI сюда не входит: ядро не должно знать о модалке, связь идёт через
 // подписку registerLogSink().
 //
-// Риск №6 из docs/DECISIONS.md закрыт здесь: один кольцевой буфер на LOG_CAPACITY
-// записей суммарно, согласованный с MAX_UI_LOGS в features/ui/logger-state.ts. В браузере
+// Буфер один и кольцевой: LOG_CAPACITY записей суммарно на все виды,
+// согласованно с потолком показа в модалке журнала. В браузере
 // переход между страницами обнулял массив, в оболочке окно живёт сутками.
 // Вытеснение не слепое: ERROR держится, пока в буфере есть что-то ещё — иначе ошибки
 // теряются ровно при обвале, который сам же заливает журнал записями API и QUEUE.
 //
 // Настройки асинхронны, поэтому settings.enableLogger не спрашивается на верхнем
-// уровне модуля: импорты выполняются до bootstrap(), там всегда лежал бы дефолт true
-// и логи сессии восстанавливались бы даже при выключенном логгере.
+// уровне модуля: импорты выполняются до start() в app/main.ts, там всегда лежал бы
+// дефолт true и логи сессии восстанавливались бы даже при выключенном логгере.
 //
 // Запись в sessionStorage пакетная: синхронный JSON.stringify по сотням объектов
 // на каждую запись тормозил то, что логирует.
@@ -170,22 +170,15 @@ export function Logger(type: LogType | string, message: string, details: unknown
 }
 
 /**
- * Наша ли ошибка. В приложении чужого кода на странице нет: своё и есть всё,
- * что до нас доехало. Отсев по словам «userscript», «tampermonkey» и «.user.js»
- * снят вместе с надстройкой — заодно он глотал и свои ошибки: путь бандла
- * в WebView ни одного из этих слов не содержит.
+ * Глобальные перехватчики ошибок. Ставятся из start() в app/main.ts сразу после
+ * чтения настроек: импорт модуля сайд-эффектов не имеет, а до настроек
+ * неизвестно, включён ли журнал вообще.
  *
- * Пустой источник по-прежнему не наш: у отказа без стека взять нечего.
- */
-export function isOwnScriptSource(str: unknown): boolean {
-  return Boolean(str)
-}
-
-/**
- * Глобальные перехватчики ошибок. Вызываются явно из bootstrap(): импорт модуля
- * не должен иметь сайд-эффектов.
+ * Прежде их не звал никто, и всё, что вылетало мимо try/catch, до журнала
+ * не доезжало. Отсев чужого источника снят целиком: в окне приложения
+ * чужого кода нет, а путь своего бандла отсев как раз и не узнавал.
  *
- * Здесь же восстанавливаются логи предыдущей страницы сессии: оба действия зависят
+ * Здесь же восстанавливаются ��аписи прошлой сессии: оба действия зависят
  * от одного флага и оба требуют уже загруженных настроек.
  */
 export function installGlobalErrorHandlers(): void {
@@ -194,25 +187,20 @@ export function installGlobalErrorHandlers(): void {
   restoreSessionLogs()
 
   window.addEventListener('error', (e: ErrorEvent) => {
-    // Только свои, не баги AniList/Shikimori
-    if (isOwnScriptSource(e.filename) || isOwnScriptSource(e.error?.stack)) {
-      Logger('ERROR', `Uncaught Error: ${e.message}`, {
-        file: e.filename,
-        line: e.lineno,
-        col: e.colno,
-        stack: e.error?.stack,
-      })
-    }
+    Logger('ERROR', `Uncaught Error: ${e.message}`, {
+      file: e.filename,
+      line: e.lineno,
+      col: e.colno,
+      stack: e.error?.stack,
+    })
   })
 
   window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
-    if (isOwnScriptSource(e.reason && e.reason.stack)) {
-      Logger(
-        'ERROR',
-        `Unhandled Promise Rejection: ${e.reason}`,
-        typeof e.reason === 'object' ? e.reason : { reason: e.reason },
-      )
-    }
+    Logger(
+      'ERROR',
+      `Unhandled Promise Rejection: ${e.reason}`,
+      typeof e.reason === 'object' ? e.reason : { reason: e.reason },
+    )
   })
 }
 

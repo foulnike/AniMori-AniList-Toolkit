@@ -6,6 +6,7 @@ import App from './App.vue'
 import { initCollection } from '@/core/collection'
 import { startEditSender } from '@/core/edit-sender'
 import { loadSettings } from '@/core/settings'
+import { installGlobalErrorHandlers } from '@/utils/logger'
 
 // Корень обязан существовать: он лежит в нашем же index.html.
 // Если его нет, разметка разошлась с кодом — молчать об этом вредно.
@@ -29,6 +30,11 @@ if (!root) throw new Error('AniMori: корень #app не найден в inde
  */
 async function start(): Promise<void> {
   await loadSettings()
+
+  // Перехватчики ставятся до первой отрисовки: сбой монтирования — тоже
+  // событие для журнала. Раньше настроек нельзя: тумблер журнала не прочтён.
+  installGlobalErrorHandlers()
+
   createApp(App).mount(root as HTMLElement)
 
   // Отправщику нужна поднятая коллекция: до неё в памяти править нечего.
