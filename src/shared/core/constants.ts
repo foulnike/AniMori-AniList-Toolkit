@@ -1,5 +1,5 @@
 // Глобальные константы: только неизменяемые значения и регэкспы переводчика.
-// Состояние сессии — паузы, инстанс БД, словарь — живёт в своих модулях, не здесь.
+// Состояние сессии — паузы и инстанс БД — живёт в своих модулях, не здесь.
 
 export const IS_SHIKI = window.location.hostname.includes('shikimori')
 export const IS_ANILIST = window.location.hostname.includes('anilist.co')
@@ -9,10 +9,6 @@ export const IS_ANILIST = window.location.hostname.includes('anilist.co')
  * Имя живёт в ядре: его ставит монтировщик Vue, а читает переводчик.
  */
 export const NO_TRANSLATE_CLASS = 'am-notr'
-
-/** Словарь перевода интерфейса. */
-export const DICT_URL =
-  'https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/dictionary.json'
 
 /** `.rip` — фоллбэк для удалённых по РКН. */
 export const SHIKI_DOMAINS: readonly string[] = ['shikimori.io', 'shikimori.rip']
