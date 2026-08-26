@@ -1,15 +1,6 @@
 // Глобальные константы: только неизменяемые значения и регэкспы переводчика.
 // Состояние сессии — паузы и инстанс БД — живёт в своих модулях, не здесь.
 
-export const IS_SHIKI = window.location.hostname.includes('shikimori')
-export const IS_ANILIST = window.location.hostname.includes('anilist.co')
-
-/**
- * Класс-иммунитет: всё, что внутри, переводчик не трогает (РИСК №4).
- * Имя живёт в ядре: его ставит монтировщик Vue, а читает переводчик.
- */
-export const NO_TRANSLATE_CLASS = 'am-notr'
-
 /** `.rip` — фоллбэк для удалённых по РКН. */
 export const SHIKI_DOMAINS: readonly string[] = ['shikimori.io', 'shikimori.rip']
 

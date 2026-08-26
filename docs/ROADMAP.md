@@ -109,15 +109,11 @@
 - Проверить, что связка `<style scoped src="./media-screen.css">`
   собирается плагином Vue именно как ожидается. Если нет — вынести блоки
   карточки в свои компоненты или снять `scoped`.
-- `IS_SHIKI` и `IS_ANILIST` в `core/constants.ts`: оба читают
-  `window.location.hostname`, а в окне приложения он `tauri.localhost` —
-  значения всегда false. Снимать вместе с тем, что на них ветвится.
 - Комментарии, объясняющие код надстройкой: `core/db.ts`, `core/types.ts`,
-  `core/settings.ts`, `auth/session.ts`, `api/shikimori-people.ts`. Правятся
-  вместе с кодом, который описывают: отдельным проходом смысла нет.
-- `NO_TRANSLATE_CLASS` в `core/constants.ts` и его установка
-  в `utils/vue-mounter.ts`: класс защищал разметку от переводчика чужой
-  страницы, а переводчика в ветке нет.
+  `core/settings.ts`, `auth/session.ts`, `api/shikimori-people.ts`, а с ними
+  ссылки на нумерованные риски (`риск 2` в мосте и в `api/shikimori-user.ts`):
+  нумерации рисков в `DECISIONS.md` больше нет. Правятся вместе с кодом,
+  который описывают: отдельным проходом смысла нет.
 
 ### 1.5. Разрезать документацию — сделано
 

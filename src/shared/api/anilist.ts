@@ -3,7 +3,6 @@
 // Сам запрос собирает мост (пункт 2.3): в десктопе пропуск в разметку не попадает.
 
 import { Bridge, BridgeHttpError, type HttpResponse } from '@/bridge'
-import { IS_ANILIST } from '../core/constants'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
 import { anilistLimiter, MAX_RATE_RETRIES } from './rate-limit'
@@ -107,21 +106,13 @@ export function setAlToken(token: string): void {
   })
 }
 
-/** Токен AniList: из настроек, либо (на anilist.co) из Vuex у залогиненного пользователя. */
+/**
+ * Токен AniList из настроек. Второго источника больше нет: сессию страницы
+ * anilist.co читала надстройка из её же Vuex-хранилища, а у своего окна
+ * чужого хранилища не существует.
+ */
 export function getAlToken(): string | null {
-  if (alTokenCache) return alTokenCache
-
-  if (IS_ANILIST) {
-    try {
-      const vuex = JSON.parse(localStorage.getItem('vuex') ?? 'null') as {
-        auth?: { token?: string }
-      } | null
-      if (vuex?.auth?.token) return vuex.auth.token
-    } catch (e) {
-      Logger('ERROR', 'Ошибка чтения Vuex хранилища AniList', e)
-    }
-  }
-  return null
+  return alTokenCache || null
 }
 
 /**
@@ -140,8 +131,8 @@ export function setShellSigned(value: boolean): void {
 }
 
 /**
- * Есть ли чем подписать запрос. Два источника и оба нужны: свой токен
- * в скрипте и пропуск оболочки в настольном приложении.
+ * Есть ли чем подписать запрос. Главный источник — пропуск оболочки;
+ * токен из настроек остаётся вторым для тех, кто вписал его руками.
  *
  * Спрашивают те, кому без подписи идти в сеть вовсе незачем: список
  * и очередь правок.
@@ -151,22 +142,8 @@ export function canSignAniList(): boolean {
 }
 
 /**
- * Отдаёт мосту токен, найденный только в Vuex: подписывает запрос теперь мост,
- * а сессию сайта он сам не видит и без этого ответил бы «вход не выполнен».
- */
-function shareVuexToken(): void {
-  if (alTokenCache) return
-
-  const token = getAlToken()
-  if (!token) return
-
-  setAlToken(token)
-  Logger('INFO', 'AniList: токен сессии сайта сохранён для запросов через мост')
-}
-
-/**
  * Значение заголовка в любом регистре имени.
- * Мост в Rust понижает имена, а скриптовый отдаёт так, как пришло от браузера.
+ * Мост в Rust имена понижает, поэтому обращение по точному имени не годится.
  */
 function header(headers: Record<string, string>, name: string): string {
   const direct = headers[name]
@@ -302,8 +279,6 @@ export async function anilistQuery<T = unknown>(
   if (useAuth && !signed) {
     Logger('API', 'AniList: вход не выполнен, запрос идёт без подписи')
   }
-
-  if (signed) shareVuexToken()
 
   Logger('API', 'GraphQL запрос (AniList)', {
     query: query.substring(0, 100) + '...',
