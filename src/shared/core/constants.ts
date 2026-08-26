@@ -60,8 +60,8 @@ export const seasons: Record<string, string> = {
 
 // Регэкспы перевода: роли, даты, время.
 // rxRoleEps, rxRoleOP и rxRoleED имеют флаг /g и общий lastIndex: только через .replace().
-// Главы и тома в rxAct, rxLabel и rxUnit остаются сознательно: это переводчик
-// юзерскрипта, а он работает и на манговых страницах AniList.
+// Главы и тома в rxAct, rxLabel и rxUnit пока остаются: снимать их вместе
+// с MediaType — пункт 1.4 в docs/ROADMAP.md.
 export const rxRole = /^(.+?)\s*\((.+)\)$/
 export const rxRoleEps = /\beps?\b/gi
 export const rxRoleOP = /\bOP\b/gi

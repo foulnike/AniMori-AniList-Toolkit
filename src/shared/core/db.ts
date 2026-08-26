@@ -1,6 +1,6 @@
 // Слой IndexedDB: склад карточек (mediaCache), MAL-соответствий и франшиз.
 // Инстанс базы приватен: наружу идут только функции, сырой IDBDatabase не достать.
-// Через Bridge прятать не нужно: IndexedDB есть и в юзерскрипте, и в WebView Tauri.
+// Через Bridge прятать не нужно: в WebView Tauri IndexedDB работает напрямую.
 
 import { CACHE_TIME, DB_NAME, DB_VERSION } from './constants'
 import { Logger } from '../utils/logger'
@@ -105,8 +105,8 @@ type PhysicalStore = 'mediaCache' | 'malCache' | 'franchiseCache'
 
 /**
  * Переводит имя стора из вызова в физическое. Старое имя shikiCache — псевдоним:
- * вызовов dbGet/dbSet десятки и в приложении, и в юзерскрипте, и переписать
- * их все одним заходом — значит сломать то, что не проверить сборкой по частям.
+ * вызовов dbGet/dbSet по приложению десятки, и переписать их все одним
+ * заходом — значит сломать то, что не проверить сборкой по частям.
  */
 function physicalStore(store: CacheStoreName): PhysicalStore {
   return store === 'shikiCache' ? 'mediaCache' : store
