@@ -63,9 +63,7 @@ shared/api/ → shared/bridge/
     и `invoke_handler` в `lib.rs`, `AppManifest::commands` в `build.rs`,
     разрешение в `capabilities/default.json`. Пропуск третьего даёт отказ
     в рантайме без ошибки компиляции.
-11. Для вызова команды из разметки добавляются тип в `IBridge`, реализация
-    в `TauriBridge` и заглушка в `MonkeyBridge`. Заглушка нужна, пока в союзе
-    платформ жива `'userscript'`: без неё падает тайпчек ядра.
+11. Для вызова команды из разметки добавляются тип в `IBridge` и реализация в `TauriBridge`.
 
 ---
 
