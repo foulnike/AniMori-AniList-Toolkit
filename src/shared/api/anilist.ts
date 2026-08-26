@@ -90,14 +90,6 @@ export async function loadAlToken(): Promise<void> {
   }
 }
 
-/**
- * Токен ровно в том виде, в каком его сохранил пользователь, без подстановки из Vuex.
- * Нужен полям ввода: там нельзя показывать сессионный токен сайта как «сохранённый».
- */
-export function getStoredAlToken(): string {
-  return alTokenCache
-}
-
 /** Сохраняет токен: сначала в память, потом в хранилище. Никогда не отклоняется. */
 export function setAlToken(token: string): void {
   alTokenCache = token

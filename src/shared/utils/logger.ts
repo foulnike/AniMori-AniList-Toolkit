@@ -31,16 +31,8 @@ export interface LogEntry {
   stack: string
 }
 
-/** Сколько записей всего живёт в памяти. Совпадает с MAX_UI_LOGS в logger-state.ts. */
+/** Сколько записей всего живёт в памяти: буфер один на все виды записей. */
 export const LOG_CAPACITY = 500
-
-/**
- * Прежнее имя лимита. Оставлено ради внешних импортов и читается теперь как
- * «вместимость буфера», а не «лимит на тип».
- *
- * @deprecated используйте LOG_CAPACITY
- */
-export const LOG_LIMIT = LOG_CAPACITY
 
 /** Сколько последних записей переживает переход между страницами (квота sessionStorage). */
 const SESSION_KEEP = 200
