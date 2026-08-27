@@ -1,6 +1,6 @@
-// Ручной прогон по адресам приложения с записью итога в core/net-health.ts.
+// Ручной прогон по адресам скрипта с записью итога в core/net-health.ts.
 // Идентификаторы источников заданы литералами и обязаны совпадать с клиентами.
-// Ограничения проб и правила добавления адреса — docs/DECISIONS.md.
+// Новый адрес добавляем только тот, до которого дотягивается @connect из шапки.
 
 import { Bridge } from '@/bridge'
 import { anime365Limiter, animeThemesLimiter, shikiLimiter } from '../../api/rate-limit'
@@ -26,13 +26,6 @@ const PROBE_SKIP_DOMAINS = ['anime365.ru']
  */
 const KODIK_TOKEN = '16f20d024a6fa20700b389c44d9ab159'
 
-/** Обложка существующего тайтла — самый дешёвый способ проверить CDN картинок. */
-const ANILIST_IMAGE =
-  'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx20-YJvLbgJQPCoI.jpg'
-
-const UPDATE_MANIFEST =
-  'https://github.com/foulnike/AniMori-AniList-Toolkit/releases/latest/download/latest.json'
-
 type LimiterKey = 'shiki' | 'anime365' | 'animethemes'
 
 interface NetProbe {
@@ -45,8 +38,6 @@ interface NetProbe {
   headers?: Record<string, string>
   credentials: 'omit' | 'include'
   limiter?: LimiterKey
-  /** true — адрес недоступен юзерскрипту из-за списка @connect. */
-  desktopOnly?: boolean
 }
 
 /** Строка отчёта для интерфейса. */
@@ -72,14 +63,6 @@ function buildProbes(): NetProbe[] {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       // Куки AniList к API прикладывать нельзя: с ними приходит 403.
       credentials: 'omit',
-    },
-    {
-      id: 'anilist:images',
-      label: 'Картинки AniList',
-      url: ANILIST_IMAGE,
-      method: 'GET',
-      credentials: 'omit',
-      desktopOnly: true,
     },
   ]
 
@@ -126,27 +109,11 @@ function buildProbes(): NetProbe[] {
       credentials: 'omit',
     },
     {
-      id: 'kodik:player',
-      label: 'Плеер Kodik',
-      url: 'https://kodikplayer.com/find-player?shikimoriID=20&types=anime-serial,anime',
-      method: 'GET',
-      credentials: 'omit',
-      desktopOnly: true,
-    },
-    {
       id: 'dictionary',
       label: 'Словарь (GitHub)',
       url: DICT_URL,
       method: 'GET',
       credentials: 'omit',
-    },
-    {
-      id: 'updates:manifest',
-      label: 'Файл обновления',
-      url: UPDATE_MANIFEST,
-      method: 'GET',
-      credentials: 'omit',
-      desktopOnly: true,
     },
   )
 
@@ -206,7 +173,7 @@ export function isNetCheckRunning(): boolean {
 }
 
 /**
- * Прогоняет проверку по всем доступным на этой платформе адресам.
+ * Прогоняет проверку по всем адресам, которыми пользуется скрипт.
  * onRow вызывается после каждой строки, чтобы интерфейс заполнялся по ходу дела.
  */
 export async function runNetCheck(onRow?: (row: NetCheckRow) => void): Promise<NetCheckRow[]> {
@@ -214,13 +181,10 @@ export async function runNetCheck(onRow?: (row: NetCheckRow) => void): Promise<N
   running = true
   lastRunAt = Date.now()
 
-  const isDesktop = Bridge.platform === 'tauri'
   const rows: NetCheckRow[] = []
 
   try {
     for (const probe of buildProbes()) {
-      if (probe.desktopOnly && !isDesktop) continue
-
       await acquire(probe.limiter)
 
       // Отсчёт только после слота: ожидание очереди — не задержка сети.
@@ -269,7 +233,7 @@ export async function runNetCheck(onRow?: (row: NetCheckRow) => void): Promise<N
       bad.length > 0
         ? 'Проверка сети: не отвечают — ' + bad.join(', ')
         : 'Проверка сети: все источники отвечают',
-      { checked: rows.length, platform: Bridge.platform },
+      { checked: rows.length },
     )
   } finally {
     running = false

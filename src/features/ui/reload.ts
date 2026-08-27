@@ -1,5 +1,5 @@
-// Единая точка перезагрузки страницы и клавиатурные сочетания для неё.
-// Почему не location.reload() и зачем ожидание записи — docs/DECISIONS.md.
+// Единая точка перезагрузки страницы: сначала дожидаемся записи настроек,
+// потом уходим: иначе правка настройки теряется вместе со старой страницей.
 
 import { Bridge } from '@/bridge'
 import { Logger } from '@/utils/logger'
@@ -42,43 +42,4 @@ export async function reloadPage(): Promise<void> {
   } catch (e) {
     Logger('ERROR', 'Не удалось перезагрузить страницу', e)
   }
-}
-
-/** Повторный вызов initReloadControls() не должен вешать второй обработчик клавиатуры. */
-let controlsInstalled = false
-
-/**
- * Вешает F5 и Ctrl+R в десктопной сборке.
- * Только Tauri: в браузере эти сочетания обрабатывает он сам, и перебивать его нельзя.
- */
-export function initReloadControls(): void {
-  if (Bridge.platform !== 'tauri') return
-  if (controlsInstalled) return
-  controlsInstalled = true
-
-  window.addEventListener(
-    'keydown',
-    (e: KeyboardEvent) => {
-      // Ctrl+Shift+R не трогаем: жёсткую перезагрузку без кэша мы обещать не можем.
-      if (e.altKey || e.shiftKey || e.metaKey) return
-
-      const isF5 = e.key === 'F5' && !e.ctrlKey
-      const isCtrlR = e.ctrlKey && (e.key === 'r' || e.key === 'R')
-      if (!isF5 && !isCtrlR) return
-
-      // В поле ввода Ctrl+R не перехватываем: промах по клавише стоил бы набранного текста.
-      if (isCtrlR) {
-        const el = document.activeElement as HTMLElement | null
-        const tag = el?.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) {
-          return
-        }
-      }
-
-      e.preventDefault()
-      void reloadPage()
-    },
-    // capture: сайт может гасить клавиатуру на своих узлах, а перезагрузка обязана работать.
-    { capture: true },
-  )
 }

@@ -1,7 +1,7 @@
 <!--
-  Панель «Поддержать»: звезда на GitHub, обратная связь и ссылка на установку.
-  Вторая кнопка и ссылка разные у скрипта и приложения; идентификаторы am-sup-* сохранены.
-  Ссылки идут через window.open: в десктопе их перехватывает оболочка и отдаёт браузеру.
+  Панель «Поддержать»: звезда на GitHub, отзыв на Greasy Fork и ссылка на установку.
+  Идентификаторы am-sup-* сохранены: по ним верстались стили ещё до Vue.
+  Ссылки идут через window.open — это штатная новая вкладка браузера.
 -->
 <template>
   <div class="amk-card">
@@ -97,25 +97,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-import { Bridge } from '@/bridge'
 import { amCopy } from '../../utils/dom'
-import { ISSUES_CHOOSE, SUP_GITHUB, SUP_GREASY, SUP_GREASY_FEEDBACK } from './settings-state'
+import { SUP_GITHUB, SUP_GREASY, SUP_GREASY_FEEDBACK } from './settings-state'
 
-/** Платформа константна на всю сессию, поэтому не ref и не computed. */
-const isDesktop = Bridge.platform === 'tauri'
+// Отзыв на Greasy Fork имеет смысл тому, кто ставил оттуда скрипт, — а оттуда
+// ставят почти все: именно через Greasy Fork приходят и обновления.
+const feedbackUrl = SUP_GREASY_FEEDBACK
+const feedbackLabel = 'Оценить на Greasy Fork'
+const feedbackHint = 'Отзыв двигает скрипт в выдаче — так его находят новые пользователи.'
 
-// Отзыв на Greasy Fork имеет смысл только тому, кто ставил оттуда скрипт.
-const feedbackUrl = isDesktop ? ISSUES_CHOOSE : SUP_GREASY_FEEDBACK
-const feedbackLabel = isDesktop ? 'Отзыв или идея на GitHub' : 'Оценить на Greasy Fork'
-const feedbackHint = isDesktop
-  ? 'Отчёт об ошибке или идея — самая полезная помощь приложению.'
-  : 'Отзыв двигает скрипт в выдаче — так его находят новые пользователи.'
-
-// Другу даём ту точку установки, которой пользуется сам отправитель.
-const shareUrl = isDesktop ? SUP_GITHUB : SUP_GREASY
-const shareHint = isDesktop
-  ? 'Рассказать друзьям — тоже поддержка. Страница проекта с установщиком:'
-  : 'Рассказать друзьям — тоже поддержка. Ссылка на установку:'
+// Другу даём ту же точку установки, которой пользуется сам отправитель.
+const shareUrl = SUP_GREASY
+const shareHint = 'Рассказать друзьям — тоже поддержка. Ссылка на установку:'
 
 const supportCopyLabel = ref('Копировать')
 

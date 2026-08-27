@@ -1,6 +1,6 @@
 <!--
   Панель настроек #am-panel: каркас модалки, навигация и простые вкладки.
-  Решения по вкладкам, очистке кэша и перезагрузке — docs/DECISIONS.md.
+  Сложные вкладки вынесены в свои компоненты, состояние — в settings-state.ts.
 -->
 <template>
   <div
@@ -308,17 +308,6 @@
 
           <!-- ==== Прочее ==== -->
           <div class="amk-pane" :class="{ active: activeTab === 'misc' }" data-pane="misc">
-            <div class="amk-card" v-if="isAdblockAvailable">
-              <div class="amk-card-title">Прочее</div>
-              <div class="amk-row">
-                <span class="amk-row-label"><b>Блокировщик рекламы</b></span>
-                <label class="amk-switch">
-                  <input type="checkbox" id="set_hide_ads" v-model="hideAds" />
-                  <span class="amk-track"></span><span class="amk-thumb"></span>
-                </label>
-              </div>
-            </div>
-
             <div class="amk-card">
               <div class="amk-card-title">Панель действий</div>
               <div class="amk-row-hint" style="padding: 2px 2px 8px; line-height: 1.5">
@@ -345,9 +334,6 @@
                 </label>
               </div>
             </div>
-
-            <!-- Карточка сама молчит там, где прокси не поддержан. -->
-            <SettingsProxyCard />
           </div>
 
           <!-- ==== Разработчик ==== -->
@@ -400,7 +386,6 @@ import { Logger } from '../../utils/logger'
 import SettingsDevTab from './SettingsDevTab.vue'
 import SettingsDictTab from './SettingsDictTab.vue'
 import SettingsLinksTab from './SettingsLinksTab.vue'
-import SettingsProxyCard from './SettingsProxyCard.vue'
 import SettingsSupportTab from './SettingsSupportTab.vue'
 import { reloadPage } from './reload'
 import {
@@ -423,8 +408,6 @@ import {
   enableThemes,
   fallbackDisabled,
   generateAuthLink,
-  hideAds,
-  isAdblockAvailable,
   isFallbackOptionDisabled,
   isSettingsOpen,
   loadAuthState,
@@ -548,7 +531,8 @@ function disarmClear(): void {
 
 /**
  * Сброс кэша в два шага: первый клик взводит кнопку, второй запускает очистку.
- * Почему не confirm() и почему перезагрузка безусловна — docs/DECISIONS.md.
+ * Перезагрузка безусловна: половина виджетов уже держит в памяти то,
+ * что только что стёрто.
  */
 function onClearCache(): void {
   if (clearBusy.value) return

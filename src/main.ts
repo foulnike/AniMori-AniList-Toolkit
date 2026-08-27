@@ -24,14 +24,11 @@ import { initScannerUI } from './features/scanner'
 import { initSearch } from './features/search'
 import { initTranslator, resetTranslatorRetries } from './features/translator'
 import { initActionBar } from './features/ui/actions'
-import { initLinks } from './features/ui/links'
 import { initLoggerUI } from './features/ui/logger-ui'
-import { initNavPanel } from './features/ui/nav'
 import { initNetToast } from './features/ui/net-toast'
 import { initSettingsUI } from './features/ui/settings'
 import { installGlobalErrorHandlers, Logger } from './utils/logger'
 import { sweepPhantomRoots, unmountAll, unmountPageScoped } from './utils/vue-mounter'
-import { Bridge } from './bridge'
 
 /** Задержка сборщика мусора: не конкурировать с отрисовкой первой страницы. */
 const GC_DELAY_MS = 15000
@@ -40,9 +37,9 @@ const GC_DELAY_MS = 15000
 const DOM_POLL_MS = 16
 
 /**
- * Ждёт появления `document.body` (дефект A2): в десктопе бандл идёт
- * initialization_script'ом и выполняется ДО создания DOM. Опрос рядом с событием —
- * на случай, если DOMContentLoaded пройдёт до подписки.
+ * Ждёт появления `document.body` (дефект A2): менеджер вставляет скрипт раньше,
+ * чем браузер собрал дерево. Опрос рядом с событием — на случай, если
+ * DOMContentLoaded пройдёт до подписки.
  */
 function whenDomReady(): Promise<void> {
   if (document.body) return Promise.resolve()
@@ -100,9 +97,9 @@ function wireLifecycle(): void {
   registerRouteTask('media', refreshMediaPage)
   registerRouteTask('translator:retries', resetTranslatorRetries)
 
-  // Разбор идёт в обратном порядке. В браузере не вызывается никогда.
+  // Разбор идёт в обратном порядке, по выгрузке страницы.
   registerShutdownTask('vue:all', unmountAll)
-  // В юзерскрипте обе задачи попадают на заглушки: точка входа не знает о платформе.
+  // Обе задачи уходят в заглушки из '@adblock-impl': резать рекламу нам нечем.
   registerShutdownTask('adblock', destroyAdblock)
   registerShutdownTask('net-probe', destroyNetProbe)
 
@@ -115,14 +112,11 @@ function wireLifecycle(): void {
  * Всё, что читает settings, идёт строго после loadSettings(); каждый шаг в step().
  */
 async function bootstrap(): Promise<void> {
-  // Гейт DOM и чтение настроек независимы: в десктопе хранилище — это IPC и файл.
+  // Гейт DOM и чтение настроек независимы: ждать их по очереди незачем.
   await Promise.all([whenDomReady(), step('настройки', loadSettings)])
 
   // Читает settings.enableLogger, поэтому только после loadSettings().
   await step('перехватчики ошибок', installGlobalErrorHandlers)
-
-  // Перехват ссылок ставится до проверок домена: ссылки есть на любой странице.
-  await step('перехват ссылок', initLinks)
 
   // Токен лежит в асинхронном хранилище, а берётся синхронно при сборке заголовков.
   await step('токен AniList', loadAlToken)
@@ -137,13 +131,12 @@ async function bootstrap(): Promise<void> {
     Promise.all([loadCustomLinks(), loadUserDict()]),
   )
 
-  // Адблок — первым среди всего, что касается страницы: иначе баннер мигнёт.
-  // В задачи смены роута НЕ входит: его наблюдатель обязан переживать переходы.
-  // В браузере заглушка: рекламу режет расширение пользователя.
+  // Заглушка: рекламу в браузере режет расширение пользователя. Шаг оставлен
+  // потому, что точка входа не знает, что стоит за '@adblock-impl'.
   await step('адблок', initAdblock)
 
-  // Сводка о том, куда ходят вложенные фреймы: из неё пересобирается список
-  // адресов для adblock.rs. Ставится до любого UI: повторять сообщение некому.
+  // Вторая заглушка оттуда же: разведка вложенных фреймов собирала адреса
+  // для блокировщика, которого здесь нет.
   await step('сетевая разведка', initNetProbe)
 
   // Без этого вызова сохранённый пресет игнорируется.
@@ -159,9 +152,6 @@ async function bootstrap(): Promise<void> {
 
   // До всего, что ходит в сеть: подписка не знает о прошлых отказах.
   await step('предупреждение о сети', initNetToast)
-
-  // Замена тулбара в десктопе: назад, вперёд, обновить, F5 и Alt+стрелки.
-  await step('блок навигации', initNavPanel)
 
   // Отказ БД не фатален (дефект A3): потребители кэша работают без него.
   await step('IndexedDB', openDB)
@@ -209,27 +199,28 @@ async function bootstrap(): Promise<void> {
   window.setTimeout(() => void runGarbageCollector(), GC_DELAY_MS)
 }
 
-// Сторож страницы (5.3.7). Отметка ставится ВНЕ bootstrap(): упавший старт и ранний
-// выход на чужом домене не должны выглядеть как отказ прокси. Опрос корня, а не голая
-// отметка: бандл выполняется и на странице ошибки WebView2.
+// Сторож страницы. Проверка идёт ВНЕ bootstrap(): упавший старт не должен
+// выглядеть как незагрузившийся сайт. Молчание — норма; в журнал уходит только
+// случай, когда разметки AniList так и не появилось.
 const ANILIST_ROOT_SELECTOR = '#app'
 const ALIVE_POLL_MS = 250
-const ALIVE_ATTEMPTS = 32 // ~8 секунд, заведомо меньше 12 секунд сторожа
+const ALIVE_ATTEMPTS = 32 // около 8 секунд
 
 function reportPageAlive(): void {
   let left = ALIVE_ATTEMPTS
   const tick = (): void => {
-    if (document.querySelector(ANILIST_ROOT_SELECTOR)) {
-      void Bridge.proxyDiagnostics.markPageReady()
+    if (document.querySelector(ANILIST_ROOT_SELECTOR)) return
+    if (--left <= 0) {
+      Logger('WARN', 'Разметка AniList не появилась за 8 с: страница не загрузилась')
       return
     }
-    if (--left <= 0) return
     window.setTimeout(tick, ALIVE_POLL_MS)
   }
   tick()
 }
 
-reportPageAlive()
+// На чужом домене корня #app нет и быть не должно — сторожить там нечего.
+if (IS_ANILIST) reportPageAlive()
 
 // Последняя сетка (дефект A1): сбой самого каркаса старта обязан попасть в журнал.
 void bootstrap().catch((e) => {

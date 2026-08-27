@@ -1,6 +1,6 @@
 // Реактивное состояние панели настроек #am-panel без разметки.
-// Запись только через saveSetting() из core/settings (РИСК №1 в docs/DECISIONS.md).
-// Решения и подводные камни — docs/DECISIONS.md.
+// Запись только через saveSetting() из core/settings: иначе значение разъедется
+// с хранилищем менеджера, а панель об этом не узнает.
 
 import { computed, ref } from 'vue'
 import type { WritableComputedRef } from 'vue'
@@ -25,7 +25,6 @@ import {
 } from '../../core/dictionary'
 import { saveSetting, settings } from '../../core/settings'
 import type { AccentPreset, AniMoriSettings, TitleSource } from '../../core/settings'
-import { syncAdblock } from '@adblock-impl'
 import { amCopy } from '../../utils/dom'
 import { Logger } from '../../utils/logger'
 
@@ -119,29 +118,6 @@ export const enablePlayer = settingRef('enablePlayer', 'set_player')
 export const enableRatings = settingRef('enableRatings', 'set_ratings')
 export const enableFranchise = settingRef('enableFranchise', 'set_franchise')
 export const enableThemes = settingRef('enableThemes', 'set_themes')
-
-/**
- * Есть ли в этой сборке блокировщик рекламы: только десктоп.
- * Значение константно на всю сессию, поэтому не ref и не computed.
- */
-export const isAdblockAvailable = Bridge.platform === 'tauri'
-
-/**
- * Единственный тумблер блокировщика: пишет в два ключа и дёргает syncAdblock().
- * Второй ключ только в десктопе: в юзерскрипте блокировать попапы плеера нечем.
- */
-export const hideAds = computed<boolean>({
-  get: () => {
-    void settingsVersion.value
-    return settings.hideAds
-  },
-  set: (value) => {
-    saveSetting('hideAds', 'set_hide_ads', value)
-    if (isAdblockAvailable) saveSetting('blockPlayerPopups', 'set_block_popups', value)
-    settingsVersion.value++
-    syncAdblock()
-  },
-})
 
 export const enableExtLinks = settingRef('enableExtLinks', 'set_extlinks')
 export const enableLinkRutracker = settingRef('enableLinkRutracker', 'set_link_rutracker')
