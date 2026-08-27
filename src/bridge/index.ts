@@ -19,16 +19,12 @@ export {
   type IBridge,
   type IClipboard,
   type IHttp,
-  type IProxyDiagnostics,
   type IShell,
   type IStorage,
-  type ProxyOutcome,
-  type ProxyProbe,
-  type ProxyStatus,
 } from './IBridge'
 
 /**
- * Мост к платформе: хранилище, сеть, буфер обмена, окно и диагностика прокси.
+ * Мост к платформе: хранилище, сеть, буфер обмена и окно.
  * Реализацию подставляет сборка; ветвиться по Bridge.platform больше негде —
  * платформа в этой ветке одна.
  */

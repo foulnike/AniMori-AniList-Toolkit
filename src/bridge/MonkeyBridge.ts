@@ -8,16 +8,13 @@ import {
   type IBridge,
   type IClipboard,
   type IHttp,
-  type IProxyDiagnostics,
   type IShell,
   type IStorage,
-  type ProxyProbe,
-  type ProxyStatus,
 } from './IBridge'
 
 // ==== storage ====
 
-// GM_getValue синхронен, контракт асинхронен (риск 1). Проверка по arguments.length:
+// GM_getValue синхронен, а контракт асинхронен. Проверка по arguments.length:
 // вызов с явным undefined в дефолте отличается от вызова без дефолта.
 function storageGet<T>(key: string, defaultValue: T): Promise<T>
 function storageGet<T = unknown>(key: string): Promise<T | undefined>
@@ -36,8 +33,7 @@ const monkeyStorage: IStorage = {
   },
 
   flush(): Promise<void> {
-    // Ждать нечего по сути: GM_setValue завершает запись до возврата управления.
-    // Поэтому дефект 4.5 в браузерной сборке и не воспроизводился.
+    // Ждать нечего: GM_setValue завершает запись до возврата управления.
     return Promise.resolve()
   },
 }
@@ -46,8 +42,8 @@ const monkeyStorage: IStorage = {
 
 /**
  * Разбирает сырую строку responseHeaders в объект с ключами в нижнем регистре.
- * GM_xmlhttpRequest отдаёт их одной строкой, Tauri — объектом Headers; без общего вида
- * чтение retry-after различалось бы по платформам.
+ * GM_xmlhttpRequest отдаёт их одной строкой, а клиентам нужен объект: по имени
+ * читаются retry-after и остаток окна лимита.
  */
 export function parseRawHeaders(raw: string): Record<string, string> {
   const out: Record<string, string> = {}
@@ -162,46 +158,6 @@ const monkeyShell: IShell = {
     window.open(url, '_blank', 'noopener')
     return Promise.resolve()
   },
-
-  back(): Promise<void> {
-    // В браузере вызвать это некому: блок навигации там не монтируется. Реализация
-    // всё равно честная: заглушки в контракте разводят поведение платформ тихо.
-    history.back()
-    return Promise.resolve()
-  },
-
-  forward(): Promise<void> {
-    history.forward()
-    return Promise.resolve()
-  },
-
-  toggleFullscreen(): Promise<boolean> {
-    // Во вкладке полным экраном распоряжается сам браузер по F11, и перебивать его
-    // нельзя. requestFullscreen тоже не подмена: он растягивает элемент чужой страницы.
-    return Promise.resolve(false)
-  },
-}
-
-// ==== proxy diagnostics ====
-
-/**
- * В браузере диагностировать нечего, и это не недоделка: прокси задаёт браузер
- * или система, а у GM_xmlhttpRequest своего прокси нет вовсе. Ответ `off` — правда
- * об этой платформе, а не вежливый отказ.
- */
-const monkeyProxyDiagnostics: IProxyDiagnostics = {
-  status(): Promise<ProxyStatus> {
-    return Promise.resolve({ outcome: 'off', server: '', hasCredentials: false, auth: 'none' })
-  },
-
-  markPageReady(): Promise<void> {
-    // Сторожа страницы в браузере нет: вкладкой управляет пользователь.
-    return Promise.resolve()
-  },
-
-  probe(): Promise<ProxyProbe> {
-    return Promise.resolve({ outcome: 'off', server: '', reachable: false, latencyMs: 0 })
-  },
 }
 
 // ==== сборка ====
@@ -212,10 +168,8 @@ export const monkeyBridge: IBridge = {
   http: monkeyHttp,
   clipboard: monkeyClipboard,
   shell: monkeyShell,
-  proxyDiagnostics: monkeyProxyDiagnostics,
 }
 
-// Общее для обеих реализаций имя: index.ts берёт platformBridge из '@bridge-impl',
-// который alias разводит по mode сборки. Вторая реализация в граф не попадает,
-// а вместе с ней и пакеты @tauri-apps/*.
+// Имя platformBridge — шов для '@bridge-impl': под ним index.ts и берёт мост.
+// Реализация здесь одна, но шов оставлен сознательно: он ничего не стоит.
 export { monkeyBridge as platformBridge }
