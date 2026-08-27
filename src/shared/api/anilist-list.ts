@@ -20,6 +20,11 @@ export interface ViewerInfo {
  */
 export interface RawListEntry {
   mediaId: number
+  /**
+   * Номер MAL или null, если сервер связи не знает. По нему тайтл ищется
+   * в датасете названий и у русских источников без отдельной пачки соответствий.
+   */
+  malId: number | null
   status: string | null
   /** Шкала 0..10 с десятыми долями: запрошена явно, независимо от настроек сайта. */
   score: number
@@ -60,6 +65,9 @@ const VIEWER_QUERY = `query {
  * Названия и признак взрослого берутся здесь же: отдельный запрос за ними
  * означал бы второй обход всей коллекции пачками по пятьдесят тайтлов.
  *
+ * Номер MAL берётся здесь же: без него каждый незнакомый тайтл ждал бы
+ * пачки соответствий, прежде чем его имя нашлось бы в датасете.
+ *
  * Пересмотры, даты и комментарий стоят почти ничего в весе ответа, а без них
  * окно правки показывало бы пустоту вместо того, что человек уже вписал.
  */
@@ -85,6 +93,7 @@ const LIST_QUERY = `query ($userId: Int) {
         }
         updatedAt
         media {
+          idMal
           isAdult
           title {
             romaji
@@ -118,6 +127,17 @@ function num(value: unknown, fallback: number): number {
 function readAdult(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false
   return (value as Record<string, unknown>).isAdult === true
+}
+
+/**
+ * Номер MAL из вложенного тайтла. Сервер отвечает null, когда связи нет:
+ * такой тайтл ищется в датасете через карту соответствий, а не напрямую.
+ */
+function readMalId(value: unknown): number | null {
+  if (typeof value !== 'object' || value === null) return null
+
+  const id = (value as Record<string, unknown>).idMal
+  return typeof id === 'number' && Number.isFinite(id) && id > 0 ? id : null
 }
 
 /**
@@ -176,6 +196,7 @@ function toEntry(value: unknown): RawListEntry | null {
 
   return {
     mediaId,
+    malId: readMalId(raw.media),
     status: typeof raw.status === 'string' ? raw.status : null,
     score: num(raw.score, 0),
     progress: num(raw.progress, 0),
