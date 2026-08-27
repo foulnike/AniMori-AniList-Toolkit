@@ -351,12 +351,12 @@ const tauriShell: IShell = {
   },
 
   async openExternal(url: string): Promise<void> {
-    // Проверка схемы на стороне Rust: этот код исполняется в контексте чужого сайта.
+    // Проверка схемы на стороне Rust: разметка вправе позвать это с любым адресом.
     await invoke('animori_open_external', { url })
   },
 
   back(): Promise<void> {
-    // Через историю WebView: маршрутизатор AniList ждёт popstate.
+    // Через историю WebView: шаг по истории окна, а не по своему стеку экранов.
     history.back()
     return Promise.resolve()
   },
