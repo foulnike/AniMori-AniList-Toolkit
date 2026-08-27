@@ -258,6 +258,12 @@ BBcode из описаний вычищается здесь же, на вход
 Подробно — в `STORAGE-AND-SYNC.md`. Коротко: две записи в хранилище моста,
 `AM_SNAPSHOT` и `AM_EDIT_QUEUE`, плюс второй экземпляр снимка в файле.
 
+Код разведён по трём файлам: снимок — `core/snapshot.ts`, очередь —
+`core/edit-queue.ts`, общее звено записей — `core/store-chain.ts`. Звено
+общее не по недосмотру: у снимка и очереди один черёд на двоих, иначе две
+одновременные записи легли бы в том порядке, в каком хранилище успело
+ответить. Отказ одной записи черёд не рвёт, но виден вызывающему.
+
 Форма снимка — шестая версия: из записей ушли вид тайтла и тома, а номер
 MAL (`malId`) добавлен позже без поднятия версии — поле необязательное,
 и старый снимок от его отсутствия не ломается.
@@ -292,12 +298,13 @@ MAL (`malId`) добавлен позже без поднятия версии �
 экраны
   ├─ collection-view.ts  отборы и счётчики (только чтение)
   ├─ adult.ts            единый отбор 18+
-  ├─ edit-sender.ts      queueEdit → collection.ts → snapshot.ts
+  ├─ edit-sender.ts      queueEdit → collection.ts → edit-queue.ts
   ├─ media-title.ts      русские карточки → db.ts, api/titles.ts
   ├─ media-looks.ts      обложка, цвет, части → db.ts
   └─ media-search.ts     поиск по своему списку и по чужому каталогу
-collection.ts  ← api/anilist-list.ts
-edit-sender.ts → api/anilist-edit.ts
+collection.ts  ← api/anilist-list.ts;  → snapshot.ts, edit-queue.ts
+edit-sender.ts → api/anilist-edit.ts;  → edit-queue.ts
+snapshot.ts, edit-queue.ts → store-chain.ts   общее звено записей
 ```
 
 ### collection.ts
