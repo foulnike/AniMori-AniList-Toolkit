@@ -137,7 +137,11 @@ function findFile(index: DatasetIndex, name: string): DatasetFileRef | null {
 }
 
 /** Годны ли распакованные файлы: числа и дата сборки обязаны сойтись с описью. */
-function payloadOk(index: DatasetIndex, titles: DatasetTitlesPayload, map: DatasetMapPayload): boolean {
+function payloadOk(
+  index: DatasetIndex,
+  titles: DatasetTitlesPayload,
+  map: DatasetMapPayload,
+): boolean {
   return (
     Array.isArray(titles.titles) &&
     Array.isArray(map.pairs) &&

@@ -77,7 +77,11 @@ function parseIndex(raw: unknown): DatasetIndex | null {
     const row = item as Partial<DatasetFileRef>
     if (typeof row.name !== 'string' || row.name === '') return null
     if (typeof row.sha256 !== 'string' || row.sha256 === '') return null
-    files.push({ name: row.name, bytes: typeof row.bytes === 'number' ? row.bytes : 0, sha256: row.sha256 })
+    files.push({
+      name: row.name,
+      bytes: typeof row.bytes === 'number' ? row.bytes : 0,
+      sha256: row.sha256,
+    })
   }
 
   return {
