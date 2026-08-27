@@ -134,6 +134,9 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   /** Счётчик добора русских имён франшизы: заставляет пересчитать строки. */
   const franchiseStamp = ref(0)
 
+  /** Счётчик добора имени из датасета: заставляет пересчитать заголовок. */
+  const nameStamp = ref(0)
+
   /** Полка франшизы: к текущему тайтлу она прокручивается сама. */
   const franList = ref<HTMLElement | null>(null)
 
@@ -210,14 +213,18 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     return word ?? 'Добавить в список'
   })
 
-  /** Главное название: русское, латиница, английское, номер. */
-  const mainTitle = computed<string>(
-    () =>
+  /** Главное название: русское из карточки, имя из датасета, латиница, английское, номер. */
+  const mainTitle = computed<string>(() => {
+    // Счётчик в зависимостях: добор имени фоном сам по себе пересчёт не закажет.
+    void nameStamp.value
+    return (
       russian.value?.russian ??
+      peekRussianName(mediaId.value) ??
       card.value?.romaji ??
       card.value?.english ??
-      `Тайтл #${mediaId.value}`,
-  )
+      `Тайтл #${mediaId.value}`
+    )
+  })
 
   /** Подложка героя: баннер сервера, а без него тон обложки. */
   const heroStyle = computed<{ backgroundImage: string }>(() => {
@@ -441,6 +448,12 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     }
 
     busy.value = true
+
+    // Имя — сразу из памяти или датасета: ждать сетевую карточку ради
+    // заголовка не нужно. Полная русская карточка с описанием доедет ниже.
+    void prefetchRussianNames([id]).then(() => {
+      if (mine === run) nameStamp.value += 1
+    })
 
     try {
       const found = await fetchMediaCard(id)
