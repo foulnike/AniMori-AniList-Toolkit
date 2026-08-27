@@ -12,6 +12,7 @@ import {
   refreshFromServer,
   unlinkCollection,
 } from '@/core/collection'
+import { datasetStatus, initDatasetNames } from '@/core/dataset-names'
 import { clearCache, getDbStats } from '@/core/db'
 import { saveSetting, settings } from '@/core/settings'
 
@@ -83,6 +84,9 @@ const askingDrop = ref(false)
 const listCount = ref(0)
 const usedSize = ref('')
 
+/** Состояние датасета названий строкой: журнала нет, видно хотя бы здесь. */
+const datasetText = ref('')
+
 /**
  * Показ взрослого (пункт 3.8). Значение списывается с памяти настроек один раз:
  * общий объект настроек не реактивен, и v-model по его полю не дал бы ответа на клик.
@@ -119,6 +123,17 @@ async function readState(): Promise<void> {
 
   const got = await getDbStats()
   usedSize.value = 'error' in got ? '' : got.estimatedSize
+
+  // Датасет поднимается тем же общим обещанием, что и на старте:
+  // второй цены чтения здесь нет.
+  await initDatasetNames()
+  const ds = datasetStatus()
+  if (ds.loaded && ds.builtAt !== null) {
+    const date = new Date(ds.builtAt).toLocaleDateString('ru-RU')
+    datasetText.value = `${date} · ${ds.names.toLocaleString('ru-RU')} записей`
+  } else {
+    datasetText.value = 'не загружен'
+  }
 }
 
 function onLogin(): void {
@@ -463,6 +478,10 @@ onBeforeUnmount(() => {
           <li class="am-fact">
             <span class="am-fact__name">Система</span>
             <span class="am-fact__value">{{ system }}</span>
+          </li>
+          <li class="am-fact">
+            <span class="am-fact__name">Датасет названий</span>
+            <span class="am-fact__value">{{ datasetText }}</span>
           </li>
         </ul>
 
