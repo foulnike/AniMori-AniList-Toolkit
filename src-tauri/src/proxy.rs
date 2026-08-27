@@ -423,14 +423,6 @@ pub fn animori_proxy_status(state: State<'_, ProxyState>) -> ProxyStatus {
     status
 }
 
-/// Исход и адрес для сторожа страницы (proxy_guard.rs). None — состояние ещё не
-/// заведено; падать из-за перестановки вызовов в lib.rs сторож не вправе.
-pub fn current_status(app: &AppHandle) -> Option<(ProxyOutcome, String)> {
-    let state = app.try_state::<ProxyState>()?;
-    let guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    Some((guard.outcome, guard.server.clone()))
-}
-
 /// Учётные данные для обработчика авторизации окна. None — подставлять нечего:
 /// прокси выключен, задан негодно, молчит или логина у него нет.
 pub fn window_auth(app: &AppHandle) -> Option<WindowAuth> {
