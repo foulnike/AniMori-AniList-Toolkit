@@ -43,6 +43,15 @@ function systemName(): string {
 
 const system = systemName()
 
+/** Адрес датасета названий: атрибуция по ODbL обязана вести на источник. */
+const DATASET_URL = 'https://github.com/foulnike/animori-data'
+
+/// Внешние ссылки из окна открываются только оболочкой: target="_blank"
+/// в WebView2 отбрасывается молча, без окна и без ошибки.
+function onDatasetLink(): void {
+  void Bridge.shell.openExternal(DATASET_URL)
+}
+
 // Ошибки показываются рядом с кнопкой, а не глотаются: молчаливый catch
 // здесь означал бы кнопку, которая не делает ничего и не говорит почему.
 const error = ref('')
@@ -456,6 +465,15 @@ onBeforeUnmount(() => {
             <span class="am-fact__value">{{ system }}</span>
           </li>
         </ul>
+
+        <!-- Атрибуция по ODbL: имя источника, лицензия и ссылка. Обязательна
+             с первого имени, показанного из датасета. -->
+        <p class="am-meta">
+          Русские названия поставляет датасет
+          <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+          (лицензия ODbL-1.0): номера и связки — manami-project/anime-offline-database, сами
+          названия — из открытого API Шикимори.
+        </p>
       </div>
     </div>
   </section>
@@ -544,6 +562,18 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--am-dim);
+}
+
+/* Ссылка-кнопка в тексте: внешний адрес открывает оболочка, не разметка. */
+.am-link {
+  padding: 0;
+  font: inherit;
+  color: var(--am-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Состояние подключения точкой: видно без чтения. */
