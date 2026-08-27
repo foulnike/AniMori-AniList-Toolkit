@@ -131,6 +131,30 @@ export async function lookupDatasetName(mediaId: number): Promise<DatasetAnswer>
   return russian === '' ? { kind: 'none' } : { kind: 'name', name: russian }
 }
 
+/** Состояние датасета для карточки «О программе»: честный снимок без сети. */
+export interface DatasetStatus {
+  loaded: boolean
+  builtAt: string | null
+  names: number
+  pairs: number
+}
+
+/**
+ * Что поднято в память этим запуском. Обновление, приехавшее фоном, сюда
+ * не попадает сознательно: оно работает со следующего запуска, и показывать
+ * его раньше времени было бы враньём.
+ */
+export function datasetStatus(): DatasetStatus {
+  const loaded = titlesByMal !== null
+
+  return {
+    loaded,
+    builtAt: loaded ? installedBuiltAt : null,
+    names: titlesByMal?.size ?? 0,
+    pairs: byAnilist?.size ?? 0,
+  }
+}
+
 /** Строка описи по точному имени файла: маска ловит соседей, как в сборщике. */
 function findFile(index: DatasetIndex, name: string): DatasetFileRef | null {
   return index.files.find((file) => file.name === name) ?? null
