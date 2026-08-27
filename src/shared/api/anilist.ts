@@ -99,9 +99,8 @@ export function setAlToken(token: string): void {
 }
 
 /**
- * Токен AniList из настроек. Второго источника больше нет: сессию страницы
- * anilist.co читала надстройка из её же Vuex-хранилища, а у своего окна
- * чужого хранилища не существует.
+ * Токен AniList из настроек: его вписывают руками на экране настроек.
+ * Второго источника нет: чужой сессии у своего окна не бывает.
  */
 export function getAlToken(): string | null {
   return alTokenCache || null
