@@ -231,3 +231,15 @@ export const anilistLimiter = createRateLimiter({
   maxCeiling: ANILIST_MAX_PER_WINDOW,
   deriveInterval: true,
 })
+
+/**
+ * Опись и файлы датасета названий: до трёх запросов на запуск программы.
+ * Отдельный источник держится ради инварианта 1: слот берёт каждый сетевой
+ * вызов, даже редкий.
+ */
+export const githubLimiter = createRateLimiter({
+  name: 'GitHub',
+  minIntervalMs: API_MIN_INTERVAL_MS,
+  windowMs: API_WINDOW_MS,
+  maxPerWindow: API_MAX_PER_WINDOW,
+})
