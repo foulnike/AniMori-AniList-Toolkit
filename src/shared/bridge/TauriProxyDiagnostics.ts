@@ -40,18 +40,4 @@ export const tauriProxyDiagnostics: IProxyDiagnostics = {
       latencyMs: raw.latencyMs,
     }
   },
-
-  /**
-   * Сообщает оболочке, что страница ожила (5.3.7): на той стороне поднимается флаг,
-   * по которому сторож решает, вмешиваться ли.
-   */
-  async markPageReady(): Promise<void> {
-    try {
-      await invoke('animori_page_ready')
-    } catch (e) {
-      // Отклонение запрещено контрактом: отметка — страховка от редкого отказа,
-      // ронять из-за неё старт нельзя. Логгер недоступен: он сам читает мост.
-      console.warn('[AniMori] Не удалось отметить готовность страницы', e)
-    }
-  },
 }

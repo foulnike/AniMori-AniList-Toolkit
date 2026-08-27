@@ -246,11 +246,6 @@ export interface IProxyDiagnostics {
    * Недоступный прокси — не ошибка, а результат с reachable: false.
    */
   probe(): Promise<ProxyProbe>
-  /**
-   * Сообщает оболочке, что страница ожила. Нужен сторожу из proxy_guard.rs.
-   * Вызывать один раз, сразу как появился корень разметки. Не отклоняется.
-   */
-  markPageReady(): Promise<void>
 }
 
 // ==== корневой контракт ====
