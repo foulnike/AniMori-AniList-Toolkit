@@ -72,7 +72,7 @@ export interface RateLimiter {
   applyCeiling: (limit: number) => void
   /** Урезает потолок вдвое после 429 и закрывает его рост на время восстановления. */
   reduceCeiling: () => void
-  /** Снимок состояния для инспектора логгера (только чтение). */
+  /** Снимок состояния, только чтение. Читателя нет: инспектор журнала удалён. */
   stats: () => { inWindow: number; pauseRemaining: number; ceiling: number; intervalMs: number }
 }
 

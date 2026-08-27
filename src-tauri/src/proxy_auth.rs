@@ -39,7 +39,8 @@ pub fn was_rejected() -> bool {
     REJECTED.load(Ordering::Relaxed)
 }
 
-/// Хост без схемы, логина и порта. Свой разбор, как в adblock.rs.
+/// Хост без схемы, логина и порта. Разбор свой: тянуть разборщик адресов
+/// ради одного поля незачем, а строка сюда приходит уже в нижнем регистре.
 fn host_of(url: &str) -> &str {
     let rest = match url.find("://") {
         Some(i) => &url[i + 3..],
@@ -131,7 +132,7 @@ unsafe fn on_request(
     auth: &WindowAuth,
     args: &ICoreWebView2BasicAuthenticationRequestedEventArgs,
 ) -> windows::core::Result<()> {
-    // COM-память освобождает вызывающий, как и в adblock.rs.
+    // COM-память освобождает вызывающий: строку отдал движок, снимать её нам.
     let mut raw = PWSTR::null();
     args.Uri(&mut raw)?;
     let uri = raw.to_string().unwrap_or_default();

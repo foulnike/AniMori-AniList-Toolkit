@@ -72,12 +72,12 @@ export function isAnime365RateLimited(): boolean {
   return anime365Limiter.isPaused()
 }
 
-/** Текущая серия сбоев подряд (для инспектора). */
+/** Текущая серия сбоев подряд. Читателя нет: инспектор журнала удалён. */
 export function getAnime365FailStreak(): number {
   return anime365FailStreak
 }
 
-/** Отложенные сейчас зеркала — для инспектора логгера. */
+/** Отложенные сейчас зеркала. Читателя нет: инспектор журнала удалён. */
 export function getAnime365DeferredDomains(): string[] {
   const now = Date.now()
   const list: string[] = []

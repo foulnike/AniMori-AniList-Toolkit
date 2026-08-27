@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 
-/// То же имя, что у LazyStore в src/bridge/TauriBridge.ts: файл один на обе стороны.
+/// То же имя, что у LazyStore в src/shared/bridge/TauriBridge.ts: файл один на обе стороны.
 const STORE_FILE: &str = "animori-settings.json";
 
 /// Проверка идёт в setup() и задерживает появление окна; местному прокси хватает.
@@ -23,7 +23,7 @@ const PROBE_TIMEOUT_MANUAL_MS: u64 = 2000;
 /// десятки секунд без единого окна на экране.
 const RESOLVE_TIMEOUT_MS: u64 = 700;
 
-// Ключи повторяют PROXY_KEYS из src/core/proxy.ts: Rust к модулям TypeScript не ходит.
+// Ключи повторяют PROXY_KEYS из src/shared/core/proxy.ts: Rust к модулям TypeScript не ходит.
 const KEY_ENABLED: &str = "set_proxy_on";
 const KEY_KIND: &str = "set_proxy_kind";
 const KEY_HOST: &str = "set_proxy_host";
@@ -32,7 +32,7 @@ const KEY_LOGIN: &str = "set_proxy_login";
 const KEY_PASSWORD: &str = "set_proxy_pass";
 const KEY_BYPASS: &str = "set_proxy_bypass";
 
-/// Совпадает с DEFAULT_PROXY.bypass в src/core/proxy.ts и подставляется только при
+/// Совпадает с DEFAULT_PROXY.bypass в src/shared/core/proxy.ts и подставляется только при
 /// отсутствии ключа: пустая строка в файле — осознанный выбор человека.
 const DEFAULT_BYPASS: &str = "localhost, 127.0.0.1";
 
@@ -145,7 +145,7 @@ fn read_password(value: Option<serde_json::Value>) -> String {
     }
 }
 
-/// Ноль означает «значения нет», как и в normalizeProxyPort() из src/core/proxy.ts:
+/// Ноль означает «значения нет», как и в normalizeProxyPort() из src/shared/core/proxy.ts:
 /// трактовка обязана совпадать.
 fn read_port(value: Option<serde_json::Value>) -> u16 {
     let parsed = match value {
