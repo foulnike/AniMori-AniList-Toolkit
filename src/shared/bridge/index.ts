@@ -13,6 +13,7 @@
 
 export {
   BridgeHttpError,
+  type HttpBytesResponse,
   type HttpErrorKind,
   type HttpMethod,
   type HttpRequestOptions,

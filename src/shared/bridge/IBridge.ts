@@ -89,6 +89,24 @@ export interface HttpResponse {
   url: string
 }
 
+/**
+ * Ответ с бинарным телом: gzip датасета текстовый канал не переживает.
+ * Байты идут в base64 — единственный безпотерьный вид для строки IPC.
+ */
+export interface HttpBytesResponse {
+  /** HTTP-код ответа. */
+  status: number
+  statusText: string
+  /** true для 200-299. Ровно то же, что у fetch. */
+  ok: boolean
+  /** Заголовки ответа. Ключи приведены к нижнему регистру обеими реализациями. */
+  headers: Record<string, string>
+  /** Тело ответа байтами, записанными в base64. */
+  bytesBase64: string
+  /** Итоговый адрес после редиректов. */
+  url: string
+}
+
 /** Причина транспортного сбоя. Код ответа сюда не относится. */
 export type HttpErrorKind = 'network' | 'timeout' | 'abort'
 
@@ -112,6 +130,12 @@ export interface IHttp {
    * Невыполнимый режим credentials реализация обязана записать в журнал.
    */
   request(options: HttpRequestOptions): Promise<HttpResponse>
+  /**
+   * То же, что request, но тело читается байтами и возвращается в base64.
+   * Нужно загрузке датасета названий: сжатые файлы выпуска нельзя принять
+   * текстом — разбор порчи превратил бы обрезанный архив в загадку.
+   */
+  requestBytes(options: HttpRequestOptions): Promise<HttpBytesResponse>
 }
 
 // ==== anilist ====

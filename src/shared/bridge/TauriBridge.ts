@@ -18,6 +18,7 @@ import {
 
 import {
   BridgeHttpError,
+  type HttpBytesResponse,
   type HttpRequestOptions,
   type HttpResponse,
   type IBridge,
@@ -161,6 +162,9 @@ const tauriFiles: IFiles = {
 type TauriFetchOptions = NonNullable<Parameters<typeof tauriFetch>[1]>
 type TauriProxyOption = TauriFetchOptions['proxy']
 
+/** Ответ плагина: тип выведен, чтобы не гадать с именем экспорта. */
+type TauriResponse = Awaited<ReturnType<typeof tauriFetch>>
+
 /** Читается один раз за сеанс: смена адреса вступает в силу только с перезапуском. */
 let proxyOption: TauriProxyOption
 let proxyReady = false
@@ -230,63 +234,97 @@ async function loadProxyOption(): Promise<TauriProxyOption> {
 /** Без своего представления reqwest подписывается собой: 403 у AnimeThemes, 5.3.5. */
 const DEFAULT_USER_AGENT = `AniMori/${__ANIMORI_VERSION__} (+https://github.com/foulnike/AniMori-AniList-Toolkit)`
 
+/**
+ * Общая часть обоих запросов: прокси, таймаут на весь запрос и разбор
+ * транспортных сбоев. Коды вне 2xx не трогаем: их разбирает вызывающий.
+ */
+async function sendRequest(options: HttpRequestOptions): Promise<TauriResponse> {
+  const { url, method = 'GET', headers, body, timeoutMs, credentials = 'include' } = options
+
+  // До таймера: первое чтение идёт в оболочку и съело бы таймаут запроса.
+  const proxy = await loadProxyOption()
+
+  // connectTimeout покрывает только установку соединения, нужен таймаут на весь запрос.
+  const controller = new AbortController()
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  if (timeoutMs !== undefined) {
+    timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, timeoutMs)
+  }
+
+  try {
+    return await tauriFetch(url, {
+      method,
+      // Свой заголовок под заголовками вызывающего: клиент вправе его перебить.
+      headers: { 'User-Agent': DEFAULT_USER_AGENT, ...headers },
+      body,
+      credentials,
+      signal: controller.signal,
+      // Ключ только при настроенном прокси: пустой proxy путает разбор сбоев.
+      ...(proxy ? { proxy } : {}),
+    })
+  } catch (e) {
+    // Сюда приходят только транспортные сбои; мёртвый прокси от них неотличим.
+    if (timedOut) throw new BridgeHttpError('timeout', url)
+
+    const name = e instanceof Error ? e.name : ''
+    if (name === 'AbortError') throw new BridgeHttpError('abort', url)
+
+    throw new BridgeHttpError('network', url)
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** Заголовки ответа в словарь. Headers сам приводит имена к нижнему регистру. */
+function readHeaders(res: TauriResponse): Record<string, string> {
+  const responseHeaders: Record<string, string> = {}
+  res.headers.forEach((value, name) => {
+    responseHeaders[name.toLowerCase()] = value
+  })
+  return responseHeaders
+}
+
+/** Байты в base64 кусками: одним spread на всём массиве роняется стек. */
+function toBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000
+  let out = ''
+  for (let at = 0; at < bytes.length; at += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(at, at + CHUNK))
+  }
+  return btoa(out)
+}
+
 const tauriHttp: IHttp = {
   async request(options: HttpRequestOptions): Promise<HttpResponse> {
-    const { url, method = 'GET', headers, body, timeoutMs, credentials = 'include' } = options
+    const res = await sendRequest(options)
+    const text = await res.text()
 
-    // До таймера: первое чтение идёт в оболочку и съело бы таймаут запроса.
-    const proxy = await loadProxyOption()
-
-    // connectTimeout покрывает только установку соединения, нужен таймаут на весь запрос.
-    const controller = new AbortController()
-    let timedOut = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    if (timeoutMs !== undefined) {
-      timer = setTimeout(() => {
-        timedOut = true
-        controller.abort()
-      }, timeoutMs)
+    return {
+      status: res.status,
+      statusText: res.statusText,
+      ok: res.status >= 200 && res.status < 300,
+      headers: readHeaders(res),
+      text,
+      url: res.url || options.url,
     }
+  },
 
-    try {
-      const res = await tauriFetch(url, {
-        method,
-        // Свой заголовок под заголовками вызывающего: клиент вправе его перебить.
-        headers: { 'User-Agent': DEFAULT_USER_AGENT, ...headers },
-        body,
-        credentials,
-        signal: controller.signal,
-        // Ключ только при настроенном прокси: пустой proxy путает разбор сбоев.
-        ...(proxy ? { proxy } : {}),
-      })
+  async requestBytes(options: HttpRequestOptions): Promise<HttpBytesResponse> {
+    const res = await sendRequest(options)
+    const buffer = await res.arrayBuffer()
 
-      const text = await res.text()
-
-      // Headers сам приводит имена к нижнему регистру и склеивает повторы.
-      const responseHeaders: Record<string, string> = {}
-      res.headers.forEach((value, name) => {
-        responseHeaders[name.toLowerCase()] = value
-      })
-
-      return {
-        status: res.status,
-        statusText: res.statusText,
-        ok: res.status >= 200 && res.status < 300,
-        headers: responseHeaders,
-        text,
-        url: res.url || url,
-      }
-    } catch (e) {
-      // Сюда приходят только транспортные сбои; мёртвый прокси от них неотличим.
-      if (timedOut) throw new BridgeHttpError('timeout', url)
-
-      const name = e instanceof Error ? e.name : ''
-      if (name === 'AbortError') throw new BridgeHttpError('abort', url)
-
-      throw new BridgeHttpError('network', url)
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
+    return {
+      status: res.status,
+      statusText: res.statusText,
+      ok: res.status >= 200 && res.status < 300,
+      headers: readHeaders(res),
+      bytesBase64: toBase64(new Uint8Array(buffer)),
+      url: res.url || options.url,
     }
   },
 }
