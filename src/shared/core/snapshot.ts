@@ -28,6 +28,11 @@ const SNAPSHOT_FILE = 'animori-snapshot.json'
  * Поднятие с 5 на 6 и есть весь перенос данных: прежний снимок читается
  * с нуля, а список восстанавливается одним запросом к серверу. Записи
  * манги при этом уходят сами, и вычищать их поштучно не нужно.
+ *
+ * Поле malId добавлено без поднятия версии. Оно необязательное, и старый
+ * снимок от его отсутствия не ломается: номер добудет карта датасета или
+ * сеть. Поднятие же обесценило бы снимок целиком, и список пропал бы
+ * до первого ручного переноса — слишком дорого за одно добавочное поле.
  */
 export const SNAPSHOT_VERSION = 6
 
@@ -75,6 +80,13 @@ export interface PendingEdit {
 /** Запись списка в снимке. Картинки сюда не кладём: их даёт склад. */
 export interface SnapshotEntry {
   mediaId: number
+  /**
+   * Номер MAL или null. По нему тайтл ищется в датасете названий и у русских
+   * источников без отдельной пачки соответствий. Необязательное поле: снимки,
+   * записанные до его появления, его не имеют, и тогда номер добирается картой
+   * датасета или сетью.
+   */
+  malId?: number | null
   /**
    * Вид тайтла. Остаток от времён манги: снимок его больше не хранит и не
    * читает, но поле объявлено необязательным, потому что его пока заполняют
@@ -187,6 +199,10 @@ function dateText(value: unknown): string | null {
 function normalizeEntry(entry: SnapshotEntry): SnapshotEntry {
   return {
     mediaId: entry.mediaId,
+    malId:
+      typeof entry.malId === 'number' && Number.isFinite(entry.malId) && entry.malId > 0
+        ? entry.malId
+        : null,
     status: typeof entry.status === 'string' ? entry.status : null,
     score10: typeof entry.score10 === 'number' ? entry.score10 : 0,
     progress: typeof entry.progress === 'number' ? entry.progress : 0,

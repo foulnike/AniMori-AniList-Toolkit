@@ -55,6 +55,7 @@ function collectSnapshot(): UserSnapshot {
 function fromServer(raw: RawListEntry): SnapshotEntry {
   return {
     mediaId: raw.mediaId,
+    malId: raw.malId,
     status: raw.status,
     score10: raw.score,
     progress: raw.progress,
@@ -77,6 +78,7 @@ function fromServer(raw: RawListEntry): SnapshotEntry {
 function blankEntry(mediaId: number, when: number): SnapshotEntry {
   return {
     mediaId,
+    malId: null,
     status: null,
     score10: 0,
     progress: 0,
