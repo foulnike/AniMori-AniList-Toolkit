@@ -1,13 +1,13 @@
-// Снимок данных пользователя и очередь правок: вторая половина слоя хранения.
-// Склад ответов сети живёт в db.ts и расходен; здесь то, что потерять нельзя.
+// Снимок данных пользователя: то из слоя хранения, что потерять нельзя.
+// Склад ответов сети живёт в db.ts и расходен, очередь правок — в edit-queue.ts.
 // Базы приложения нет: источник правды — массив в памяти, на диске одна запись.
 
 import { Bridge } from '@/bridge'
 import { Logger } from '../utils/logger'
+import { serialWrite } from './store-chain'
 
-/** Ключи хранилища моста. Приставка AM_ занята только нашими записями. */
+/** Ключ хранилища моста. Приставка AM_ занята только нашими записями. */
 const SNAPSHOT_KEY = 'AM_SNAPSHOT'
-const QUEUE_KEY = 'AM_EDIT_QUEUE'
 
 /**
  * Имя файла дубля снимка (пункт 2.5.2). Путь выбирает оболочка:
@@ -41,41 +41,6 @@ export const SNAPSHOT_VERSION = 6
  * Запись на каждую правку на приставке съедает больше, чем сама отрисовка.
  */
 const SNAPSHOT_DELAY_MS = 2000
-
-/**
- * Потолок очереди правок. Без него сеть, лежащая сутки, накопит очередь
- * размером со всю коллекцию, а пишется она целиком на каждую правку.
- */
-const QUEUE_LIMIT = 500
-
-/**
- * Что именно правили в записи списка. Удаление — тоже правка, её нельзя терять.
- *
- * Поля пересчётом не сводятся в одну правку «всё сразу»: отказ сервера по одному
- * полю не должен уронить остальные, а порядок очередь и так соблюдает.
- *
- * Тома из видов ушли вместе с мангой. Залежавшаяся правка томов из прежних
- * версий очередь не запирает: отправщик не знает такого вида и выбрасывает
- * её с записью в журнал.
- */
-export type EditKind =
-  'status' | 'score' | 'progress' | 'repeat' | 'startedAt' | 'completedAt' | 'notes' | 'remove'
-
-/**
- * Неотправленная правка. `id` свой, а не серверный: отметить принятой
- * надо именно ту запись, которую отправляли, а не похожую по полям.
- */
-export interface PendingEdit {
-  id: string
-  /** AniList ID тайтла, а не записи списка: запись ещё может не существовать. */
-  mediaId: number
-  kind: EditKind
-  /** Значение правки; для 'remove' всегда null. */
-  value: string | number | null
-  createdAt: number
-  /** Сколько раз пытались отправить. Решает отправщик, хранится здесь. */
-  attempts: number
-}
 
 /** Запись списка в снимке. Картинки сюда не кладём: их даёт склад. */
 export interface SnapshotEntry {
@@ -156,9 +121,6 @@ let source: SnapshotSource | null = null
 
 /** Таймер отложенной записи снимка. */
 let saveTimer: number | undefined
-
-/** Идущая запись: вторая встаёт в очередь за первой, а не перегоняет её. */
-let writeChain: Promise<void> = Promise.resolve()
 
 /** Повешены ли точки сохранения. Повторные подписки дали бы двойную запись. */
 let hooksInstalled = false
@@ -378,7 +340,7 @@ export async function saveSnapshotNow(options?: { backup?: boolean }): Promise<v
     return
   }
 
-  writeChain = writeChain.then(async () => {
+  return serialWrite(async () => {
     try {
       await Bridge.storage.set(SNAPSHOT_KEY, payload)
       Logger('DB', `Снимок записан: записей ${payload.entries.length}`)
@@ -389,8 +351,6 @@ export async function saveSnapshotNow(options?: { backup?: boolean }): Promise<v
     // Дубль после основной записи и внутри того же звена: порядок версий важен.
     if (withBackup) await writeSnapshotFile(payload)
   })
-
-  return writeChain
 }
 
 /**
@@ -409,117 +369,4 @@ function installSaveHooks(): void {
   window.addEventListener('pagehide', () => {
     void saveSnapshotNow({ backup: true })
   })
-}
-
-/** Годна ли запись очереди. Битые правки отправлять нельзя и держать бессмысленно. */
-function isEdit(value: unknown): value is PendingEdit {
-  if (typeof value !== 'object' || value === null) return false
-
-  const edit = value as Partial<PendingEdit>
-  return typeof edit.id === 'string' && typeof edit.mediaId === 'number' && !!edit.kind
-}
-
-/** Читает очередь правок. Порядок соблюдается: две правки одного тайтла не коммутируют. */
-export async function readEditQueue(): Promise<PendingEdit[]> {
-  try {
-    const raw = await Bridge.storage.get<unknown>(QUEUE_KEY)
-    if (!Array.isArray(raw)) return []
-    return raw.filter(isEdit)
-  } catch (e) {
-    Logger('ERROR', 'Очередь правок: ошибка чтения', e)
-    return []
-  }
-}
-
-/**
- * Перезаписывает очередь целиком и дожидается диска.
- * Очередь крошечная, поэтому частичная запись не нужна и только мешала бы.
- */
-async function writeQueue(edits: PendingEdit[]): Promise<void> {
-  writeChain = writeChain.then(async () => {
-    try {
-      await Bridge.storage.set(QUEUE_KEY, edits)
-      await Bridge.storage.flush()
-    } catch (e) {
-      Logger('ERROR', 'Очередь правок: ошибка записи', e)
-    }
-  })
-
-  return writeChain
-}
-
-/**
- * Кладёт правку в очередь и возвращает её в готовом виде. Запись немедленная.
- * Задержек здесь нет сознательно: это единственные данные, которые негде взять заново.
- */
-export async function enqueueEdit(
-  mediaId: number,
-  kind: EditKind,
-  value: string | number | null,
-): Promise<PendingEdit> {
-  const edit: PendingEdit = {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    mediaId,
-    kind,
-    value: kind === 'remove' ? null : value,
-    createdAt: Date.now(),
-    attempts: 0,
-  }
-
-  const queue = await readEditQueue()
-
-  // Переполнение решается в пользу свежих правок: старые уже перекрыты новыми.
-  if (queue.length >= QUEUE_LIMIT) {
-    const dropped = queue.length - QUEUE_LIMIT + 1
-    queue.splice(0, dropped)
-    Logger('WARN', `Очередь правок переполнена: отброшено старых правок ${dropped}`)
-  }
-
-  queue.push(edit)
-  await writeQueue(queue)
-  Logger('DB', `Правка в очереди: ${kind} для ${mediaId}, всего ${queue.length}`)
-
-  return edit
-}
-
-/** Убирает принятую сервером правку. Неизвестный идентификатор ошибкой не считается. */
-export async function markEditAccepted(id: string): Promise<void> {
-  const queue = await readEditQueue()
-  const left = queue.filter((edit) => edit.id !== id)
-  if (left.length === queue.length) return
-
-  await writeQueue(left)
-}
-
-/**
- * Выбрасывает очередь целиком и возвращает число выброшенных правок.
- * Нужно при отвязке счёта: правки адресованы прежнему счёту, отправлять их
- * после отвязки некуда, а при следующем входе они улетели бы на сервер сами.
- *
- * Сами записи списка при этом остаются: правки уже накачены на память,
- * и человек теряет не свои данные, а только их доставку на сайт.
- */
-export async function clearEditQueue(): Promise<number> {
-  const queue = await readEditQueue()
-  if (queue.length === 0) return 0
-
-  await writeQueue([])
-  Logger('DB', `Очередь правок выброшена: правок ${queue.length}`)
-
-  return queue.length
-}
-
-/**
- * Считает неудачную попытку отправки и возвращает новое число попыток.
- * Сама правка остаётся в очереди: бросать её или нет, решает отправщик.
- */
-export async function bumpEditAttempt(id: string): Promise<number> {
-  const queue = await readEditQueue()
-  const edit = queue.find((item) => item.id === id)
-  if (!edit) return 0
-
-  edit.attempts++
-  await writeQueue(queue)
-
-  return edit.attempts
 }

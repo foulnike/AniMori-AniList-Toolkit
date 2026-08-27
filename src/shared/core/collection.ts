@@ -5,18 +5,16 @@
 import { fetchUserList, fetchViewer, type RawListEntry } from '../api/anilist-list'
 import { Logger } from '../utils/logger'
 import {
-  clearEditQueue,
   emptySnapshot,
   markSnapshotDirty,
   ownSnapshot,
-  readEditQueue,
   readSnapshot,
   saveSnapshotNow,
   SNAPSHOT_VERSION,
-  type PendingEdit,
   type SnapshotEntry,
   type UserSnapshot,
 } from './snapshot'
+import { clearEditQueue, readEditQueue, type PendingEdit } from './edit-queue'
 
 /**
  * Записи по номеру тайтла. Словарь, а не массив: карточка и каждая правка

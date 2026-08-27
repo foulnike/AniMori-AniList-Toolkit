@@ -6,6 +6,7 @@ import { anilistPauseRemaining, canSignAniList, isAniListRateLimited } from '../
 import { removeEntry, saveEntry, type EditOutcome } from '../api/anilist-edit'
 import { Logger } from '../utils/logger'
 import { dropEntry, getEntry, putEntry } from './collection'
+import { type SnapshotEntry } from './snapshot'
 import {
   bumpEditAttempt,
   enqueueEdit,
@@ -13,8 +14,7 @@ import {
   readEditQueue,
   type EditKind,
   type PendingEdit,
-  type SnapshotEntry,
-} from './snapshot'
+} from './edit-queue'
 
 /**
  * Потолок попыток. После него правка выкидывается: вечная правка
