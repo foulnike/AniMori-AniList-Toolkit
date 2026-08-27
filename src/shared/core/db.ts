@@ -395,7 +395,10 @@ export async function runGarbageCollector(): Promise<void> {
   }
 }
 
-/** Снимок БД для инспектора: количество записей по типам ключей и оценка размера. */
+/**
+ * Снимок БД: оценка размера и количество записей по типам ключей.
+ * Из всей сводки на экран настроек идёт одно число — занятый объём.
+ */
 export async function getDbStats(): Promise<DbStats | DbStatsError> {
   try {
     const db = await openDB()
@@ -490,7 +493,7 @@ const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
   ['STF3_', 'staff'],
   ['THEMES2_', 'themes'],
   ['RU3_', 'russianTitles'],
-  // Имя тайтла лежит отдельной записью от карточки, но для инспектора это один
+  // Имя тайтла лежит отдельной записью от карточки, но в сводке это один
   // и тот же вид кэша: два префикса намеренно ведут в одно поле.
   ['NAME1_', 'russianTitles'],
   ['LOOK2_', 'looks'],
