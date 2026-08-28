@@ -1,0 +1,161 @@
+# Сторож возраста датасета русских названий.
+#
+# ЗАЧЕМ. Сборка датасета живёт в foulnike/animori-data и идёт по расписанию.
+# Расписание у GitHub отключается после 60 дней без человеческой активности
+# в репозитории, и отключается молча: ни письма, ни ошибки, ни красного
+# крестика — выпуски просто перестают появляться. Личный токен лечит
+# ровно эту одну причину и сам протухает точно так же тихо.
+#
+# Поэтому смотрим не на причину, а на следствие: на возраст последнего
+# выпуска. Одна проверка ловит заодно упавшую сборку, не взятые пороги
+# приёмки, смену формата у манами и любую другую причину молчания.
+#
+# ПРО МЕСТО. Прогон лежит здесь, а не в animori-data, по двум причинам.
+# Первая: сторож в том же репозитории уснул бы вместе с тем, за чем следит.
+# Здесь коммиты идут руками постоянно, и его собственное расписание живёт.
+# Вторая: встроенный токен умеет читать выпуски чужого публичного репозитория
+# и заводить задачи в своём — задача в соседнем потребовала бы личного токена,
+# то есть того самого, от чего мы уходим.
+#
+# ПРО ВЕТКУ. Расписание работает только из ветки по умолчанию, а она тут main.
+# Файл обязан лежать именно в main, иначе проверки не будет вовсе.
+#
+# ЧТО ДЕЛАТЬ ПО ПИСЬМУ. Открыть animori-data, Actions -> build-names -> Run workflow.
+# Ручной запуск сам по себе считается человеческой активностью и заводит
+# отсчёт шестидесяти дней заново. Если расписание успело заснуть, GitHub
+# покажет там же кнопку включения — больше ничего не требуется.
+
+name: watch-dataset
+
+on:
+  # Раз в сутки. Частее незачем: выпуск и так недельный.
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+# Сторожу нужны только задачи. Код он даже не забирает.
+permissions:
+  issues: write
+
+concurrency:
+  group: watch-dataset
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Возраст выпуска
+        id: age
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Сколько дней молчания считаем нормой. Выпуск недельный,
+          # так что десять — это один пропущенный понедельник и три дня запаса
+          # на очередь задач и повторный прогон.
+          LIMIT_DAYS: '10'
+        run: |
+          set -euo pipefail
+
+          # Отказ чтения не роняет шаг: отсутствие выпуска — тоже повод
+          # для письма, а не причина молча упасть самому.
+          gh api repos/foulnike/animori-data/releases/latest > release.json 2>/dev/null || echo '{}' > release.json
+
+          published="$(jq -r '.published_at // empty' release.json)"
+          tag="$(jq -r '.tag_name // empty' release.json)"
+
+          if [ -z "$published" ]; then
+            echo 'Выпусков нет или выпуски не читаются'
+            echo 'stale=true' >> "$GITHUB_OUTPUT"
+            echo 'days=неизвестно' >> "$GITHUB_OUTPUT"
+            echo 'tag=ни одного выпуска не найдено' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          days=$(( ( $(date -u +%s) - $(date -u -d "$published" +%s) ) / 86400 ))
+          echo "Выпуск $tag от $published, возраст $days дн."
+
+          echo "days=$days" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+
+          if [ "$days" -gt "$LIMIT_DAYS" ]; then
+            echo 'stale=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'stale=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      # Задача заводится одна и потом только обновляется: ежедневная проверка,
+      # заводящая по задаче в сутки, превратилась бы в шум, а шум перестают читать.
+      - name: Завести или обновить задачу
+        if: ${{ steps.age.outputs.stale == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAYS: ${{ steps.age.outputs.days }}
+          TAG: ${{ steps.age.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          title="Датасет: выпусков нет $DAYS дн."
+
+          {
+            echo "Последний выпуск animori-data: **$TAG**, возраст **$DAYS дн.**"
+            echo ''
+            echo 'Сборка идёт по понедельникам, так что такой возраст значит,'
+            echo 'что минимум один выпуск не состоялся.'
+            echo ''
+            echo '## Что делать'
+            echo ''
+            echo 'Открыть [Actions -> build-names](https://github.com/foulnike/animori-data/actions/workflows/build-names.yml)'
+            echo 'и нажать **Run workflow**. Волны и публикация включены по умолчанию,'
+            echo 'менять ничего не надо. Прогон идёт до полутора часов.'
+            echo ''
+            echo 'Ручной запуск сам по себе считается человеческой активностью и заводит'
+            echo 'отсчёт шестидесяти дней заново. Если расписание успело заснуть,'
+            echo 'GitHub покажет там же кнопку включения.'
+            echo ''
+            echo '## Если прогон упал'
+            echo ''
+            echo 'Причина написана в итоге прогона словами, а не только в логе шага.'
+            echo 'Пороги приёмки: 20 000 названий и 90% узнанных номеров. Не взяты —'
+            echo 'выпуска нет намеренно: половина датасета хуже его отсутствия.'
+            echo ''
+            echo 'Клиенты в это время живут на предыдущем выпуске, а чего в нём нет —'
+            echo 'спрашивают в сети по ходу. Срочности нет, но и тянуть незачем.'
+            echo ''
+            echo '<!-- watch-dataset -->'
+          } > body.md
+
+          # Метка в теле, а не ярлык: ярлык надо сначала завести руками,
+          # и первый же прогон упал бы на его отсутствии.
+          number="$(gh issue list --state open --limit 100 --json number,body \
+            --jq 'map(select(.body | test("watch-dataset"))) | .[0].number // empty')"
+
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --title "$title" --body-file body.md
+            echo "Задача #$number обновлена"
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi
+
+      # Сам за собой убирает: выпуск вернулся — задача закрывается без человека.
+      # Иначе список задач копил бы мёртвые напоминания, а их перестают читать.
+      - name: Закрыть задачу, если выпуск свежий
+        if: ${{ steps.age.outputs.stale == 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAYS: ${{ steps.age.outputs.days }}
+          TAG: ${{ steps.age.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          number="$(gh issue list --state open --limit 100 --json number,body \
+            --jq 'map(select(.body | test("watch-dataset"))) | .[0].number // empty')"
+
+          if [ -z "$number" ]; then
+            echo "Выпуск $TAG свежий ($DAYS дн.), задач нет"
+            exit 0
+          fi
+
+          gh issue close "$number" --comment "Выпуск $TAG на месте, возраст $DAYS дн. Сторож закрывает сам."
