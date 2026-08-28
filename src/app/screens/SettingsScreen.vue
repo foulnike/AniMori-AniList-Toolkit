@@ -88,6 +88,22 @@ const usedSize = ref('')
 const datasetText = ref('')
 
 /**
+ * Датасет старше STALE_DAYS. Отдельный признак, а не слово внутри строки:
+ * число дней человек прочитает и не заметит, а подсветку — заметит.
+ */
+const datasetStale = ref(false)
+
+/**
+ * Порог, после которого возраст датасета подсвечивается. Тридцать дней —
+ * это три пропущенные недельные сборки: одна могла упасть случайно,
+ * три подряд означают, что расписание уснуло и его надо будить руками.
+ *
+ * Сторож в репозитории программы кричит раньше, на десятом дне, но письмо
+ * можно и пропустить, а этот экран человек открывает сам.
+ */
+const STALE_DAYS = 30
+
+/**
  * Показ взрослого (пункт 3.8). Значение списывается с памяти настроек один раз:
  * общий объект настроек не реактивен, и v-model по его полю не дал бы ответа на клик.
  */
@@ -130,9 +146,17 @@ async function readState(): Promise<void> {
   const ds = datasetStatus()
   if (ds.loaded && ds.builtAt !== null) {
     const date = new Date(ds.builtAt).toLocaleDateString('ru-RU')
-    datasetText.value = `${date} · ${ds.names.toLocaleString('ru-RU')} записей`
+    const count = ds.names.toLocaleString('ru-RU')
+    const days = daysSince(ds.builtAt)
+
+    // Возраст рядом с датой: дата отвечает «когда собран», а возраст —
+    // «пора ли дёргать репозиторий», и здесь важнее второй вопрос.
+    const age = days === null ? '' : ` · ${ageText(days)}`
+    datasetText.value = `${date} · ${count} записей${age}`
+    datasetStale.value = days !== null && days > STALE_DAYS
   } else {
     datasetText.value = 'не загружен'
+    datasetStale.value = false
   }
 }
 
@@ -265,6 +289,31 @@ function expiryText(seconds: number | null): string {
 /// Ожидание в минутах: секунды читать неудобно.
 function waitText(seconds: number): string {
   return `${Math.round(seconds / 60)} мин`
+}
+
+/// Возраст сборки в днях. null — когда дата не читается: «NaN дней назад»
+/// хуже, чем отсутствие возраста вовсе.
+function daysSince(iso: string): number | null {
+  const ms = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(ms)) return null
+  return Math.floor(ms / 86400000)
+}
+
+/// Возраст словами: «собран сегодня», «1 день назад», «6 дней назад».
+/// Развёрнуто, а не вложенными тернарниками: падежи русских числительных
+/// в одну строку не читаются.
+function ageText(days: number): string {
+  if (days <= 0) return 'собран сегодня'
+
+  const tail = days % 100
+  const last = days % 10
+  let word = 'дней'
+  if (tail < 11 || tail > 19) {
+    if (last === 1) word = 'день'
+    else if (last >= 2 && last <= 4) word = 'дня'
+  }
+
+  return `${days} ${word} назад`
 }
 
 onMounted(() => {
@@ -481,7 +530,9 @@ onBeforeUnmount(() => {
           </li>
           <li class="am-fact">
             <span class="am-fact__name">Датасет названий</span>
-            <span class="am-fact__value">{{ datasetText }}</span>
+            <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
+              {{ datasetText }}
+            </span>
           </li>
         </ul>
 
@@ -491,7 +542,16 @@ onBeforeUnmount(() => {
           Русские названия поставляет датасет
           <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
           (лицензия ODbL-1.0): номера и связки — manami-project/anime-offline-database, сами
-          названия — из открытого API Шикимори.
+          названия — из открытых API Шикимори и anime365.
+        </p>
+
+        <!-- Свежесть датасета — единственное, за чем человеку приходится следить
+             руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
+        <p v-if="datasetStale" class="am-warn">
+          Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет, программа
+          добирает из сети по одному — это медленно. Загляните в
+          <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+          и запустите сборку кнопкой.
         </p>
       </div>
     </div>
@@ -541,6 +601,19 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 13px;
   color: var(--am-dim);
+}
+
+/* Просрочка датасета: тот же тон, что у вопроса перед заменой списка.
+   Это подсказка, а не ошибка, и красным её показывать неправильно. */
+.am-warn {
+  margin: 0;
+  padding: 11px 13px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--am-dim);
+  background: rgba(255, 190, 90, 0.07);
+  border: 1px solid rgba(255, 190, 90, 0.35);
+  border-radius: var(--am-r-m);
 }
 
 /* Исход действия: виден сразу и не путается с пояснениями рядом. */
@@ -656,6 +729,13 @@ onBeforeUnmount(() => {
 .am-fact__value {
   font-weight: 550;
   text-align: right;
+}
+
+/* Возраст датасета сверх порога. Цвет литералом, а не переменной темы:
+   жёлтого предупреждения в наборе нет, а неизвестная переменная означает
+   цвет по умолчанию, то есть подсветку, которой не видно. */
+.am-fact__value--stale {
+  color: #f0b34e;
 }
 
 code {
