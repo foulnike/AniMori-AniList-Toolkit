@@ -159,8 +159,15 @@ export interface DbStats {
   characters: number
   staff: number
   themes: number
-  /** Русские названия и описания: префикс RU3_ (core/media-title.ts). */
+  /** Русские названия и описания: префиксы RU3_ и NAME1_ (core/media-title.ts). */
   russianTitles: number
+  /**
+   * Отказы «русского имени нет»: префикс NONAME1_ (core/media-title.ts).
+   * Отдельным полем, а не внутри russianTitles: сложи их вместе — и сводка
+   * покажет добытых имён больше, чем добыто. Своё число нужно и само по себе:
+   * это ровно те тайтлы, за которыми клиент больше никогда не пойдёт в сеть.
+   */
+  noRussianNames: number
   /** Обложки, цвета и счёт частей: префикс LOOK2_ (core/media-looks.ts). */
   looks: number
   /** Оценки площадок: префикс RATE1_ (core/ratings.ts). */
