@@ -5,6 +5,18 @@
 // Путей два, и они не равны. Имя нужно сеткам и полкам сотнями сразу,
 // описание — по одному и только при открытии карточки. Пока имя и описание
 // приезжали одной записью, сетка тянула описание, которого в ней не видно.
+//
+// ОТКАЗЫ ДЕРЖАТСЯ ОТДЕЛЬНО, и это главное правило файла. Знаний три,
+// и путать их нельзя: memory — что ответила сеть про карточку, names — голые
+// имена без карточек, noname — «русского имени нет» для сеток. Ответ датасета
+// «имени нет» раньше ложился в memory тем же null, что и отказ сети, — и одна
+// прокрутка списка глушила открытую карточку того же тайтла целиком.
+//
+// Датасет — первый источник, но не последняя инстанция. Он собран выпуском
+// и знает не всё: чего в нём нет, спрашивается в рантайме. Сетки тратят на это
+// ровно один заход на тайтл за всю жизнь установки — отрицательный ответ тоже
+// знание и тоже ложится на склад. Открытая карточка ходит в сеть всегда:
+// один запрос на осознанное нажатие — не та цена, чтобы её копить.
 
 import { CACHE_TIME } from './constants'
 import { lookupDatasetName } from './dataset-names'
@@ -25,6 +37,20 @@ const KEY_PREFIX = 'RU3_'
  */
 const NAME_PREFIX = 'NAME1_'
 
+/**
+ * Префикс отрицательных записей: «сеть спрашивали, русского имени нет».
+ *
+ * Отказ — тоже знание, и тоже добытое запросом. Без записи каждый запуск
+ * приложения снова бил бы в три источника за теми же четырьмя тысячами
+ * тайтлов, которые на русский никто не переводил и вряд ли когда-нибудь будет.
+ *
+ * Запись живёт столько же, сколько любая другая, то есть сегодня — вечно:
+ * CACHE_TIME бесконечен намеренно. Сброс — очистка склада из настроек:
+ * если у тайтла появилось русское имя, оно всё равно приедет с датасетом,
+ * а датасет спрашивается раньше отрицательных записей.
+ */
+const NONAME_PREFIX = 'NONAME1_'
+
 /** Готовая русская карточка тайтла. */
 export interface RussianTitle {
   russian: string
@@ -39,8 +65,12 @@ export interface RussianTitle {
 }
 
 /**
- * Знание этого запуска. `null` значит «спрашивали, перевода нет»:
- * без этого каждая прокрутка списка снова била бы в сеть за тем же отказом.
+ * Знание этого запуска про карточки. `null` значит «спрашивали источники,
+ * перевода нет»: без этого два виджета на одном экране спросили бы дважды.
+ *
+ * Здесь и только здесь ответ значит «сеть сказала нет». Ответ датасета
+ * в этот набор не попадает никогда: иначе обход списка решал бы за карточку,
+ * которую пользователь откроет через минуту.
  */
 const memory = new Map<number, RussianTitle | null>()
 
@@ -52,6 +82,16 @@ const memory = new Map<number, RussianTitle | null>()
 const names = new Map<number, string>()
 
 /**
+ * Кому русского имени нет вовсе: сеть спрашивали, и ответ был отрицательным.
+ * Поднимается со склада и переживает запуски.
+ *
+ * Смотрят сюда только пачечные пути — сетки, полки, прокрутка списка.
+ * Открытая карточка этот набор не спрашивает: один запрос на осознанное
+ * открытие дешевле, чем пустое место там, где имя и описание всё-таки есть.
+ */
+const noname = new Set<number>()
+
+/**
  * Чьи ключи уже искали на складе. Отдельно от памяти: отсутствие на складе
  * не значит «перевода нет», сеть спросить всё ещё стоит, а склад — уже нет.
  */
@@ -59,6 +99,9 @@ const asked = new Set<number>()
 
 /** Чьи имена уже искали на складе имён. Склады разные — и отметки разные. */
 const askedNames = new Set<number>()
+
+/** Чьи отказы уже искали на складе: чтение пустоты тоже стоит обращения. */
+const askedNoname = new Set<number>()
 
 /** Незавершённые добычи: два виджета часто просят один тайтл в один миг. */
 const pending = new Map<number, Promise<RussianTitle | null>>()
@@ -69,6 +112,10 @@ function cacheKey(mediaId: number): string {
 
 function nameKey(mediaId: number): string {
   return `${NAME_PREFIX}${mediaId}`
+}
+
+function nonameKey(mediaId: number): string {
+  return `${NONAME_PREFIX}${mediaId}`
 }
 
 /** Читает карточку со склада. Протухшая запись считается отсутствующей. */
@@ -83,7 +130,7 @@ async function readCache(mediaId: number): Promise<RussianTitle | null> {
   return data && typeof data.russian === 'string' && data.russian ? data : null
 }
 
-/** Кладёт карточку на склад. Отсутствие перевода на склад не пишется. */
+/** Кладёт карточку на склад. Отсутствие перевода на склад карточек не пишется. */
 async function writeCache(mediaId: number, data: RussianTitle): Promise<void> {
   await dbSet('shikiCache', { key: cacheKey(mediaId), data, ts: Date.now() })
 }
@@ -106,12 +153,47 @@ async function writeNameCache(mediaId: number, russian: string): Promise<void> {
   await dbSet('mediaCache', { key: nameKey(mediaId), data: russian, ts: Date.now() })
 }
 
+/**
+ * Спрашивали ли уже сеть об этом тайтле и получали ли отказ.
+ * Запись читается один раз за запуск: ответ склада от прокрутки не меняется.
+ */
+async function readNoname(mediaId: number): Promise<boolean> {
+  if (noname.has(mediaId)) return true
+  if (askedNoname.has(mediaId)) return false
+
+  askedNoname.add(mediaId)
+
+  const record = await dbGet<MediaCacheRecord<number>>('mediaCache', nonameKey(mediaId))
+  if (!record || typeof record.ts !== 'number') return false
+  if (Date.now() - record.ts > CACHE_TIME) return false
+
+  noname.add(mediaId)
+  return true
+}
+
+/**
+ * Запоминает отказ сети навсегда. Именно сети: ответ датасета сюда не пишется,
+ * иначе первая же прокрутка списка навечно закрыла бы тайтлу путь в рантайм.
+ */
+async function writeNoname(mediaId: number): Promise<void> {
+  noname.add(mediaId)
+  askedNoname.add(mediaId)
+
+  await dbSet('mediaCache', { key: nonameKey(mediaId), data: 1, ts: Date.now() })
+}
+
 /** Добывает карточку из сети по уже известному номеру MAL. */
 async function fetchByMal(mediaId: number, malId: number): Promise<RussianTitle | null> {
   const resolved = await resolveTitle(malId, 'ANIME')
 
   if (!resolved || !resolved.russian) {
+    // Сеть спрошена и ответила отказом — вот это в память класть можно:
+    // открытая карточка через секунду спросит тех же источников и услышит то же.
     memory.set(mediaId, null)
+
+    // А вот следующему запуску знание пригодится: сетки больше не пойдут
+    // за этим тайтлом вовсе, а открытая карточка по-прежнему попробует.
+    await writeNoname(mediaId)
     return null
   }
 
@@ -153,6 +235,10 @@ async function loadOne(mediaId: number): Promise<RussianTitle | null> {
  * Русская карточка тайтла или `null`, если перевода нет.
  * Повторные вызовы пока идёт добыча ждут тот же ответ, а не шлют свой запрос.
  *
+ * Путь открытой карточки, и потому единственный, кто вообще не спрашивает
+ * отрицательные записи: отсутствие имени в датасете и даже прошлый отказ
+ * сети не повод оставить открытую карточку без описания и ссылки.
+ *
  * Аргумент вида игнорируется: остаток от времён манги.
  */
 export async function getRussianTitle(
@@ -183,6 +269,10 @@ export async function getRussianTitle(
  * Русское имя тайтла или `null`, если перевода нет. Путь сеток и полок:
  * описание, ссылка и оценки строке не нужны и отдельным запросом не берутся.
  *
+ * Порядок тот же, что у пачечного пути: склад имён, датасет, отрицательная
+ * запись, сеть. Раньше датасет тут не спрашивался вовсе, и одиночный вызов
+ * из стороннего места шёл в сеть за тем, что лежит на диске целым выпуском.
+ *
  * Сеть остаётся последней ступенью и приносит полную карточку: источник
  * отдаёт имя и описание одним ответом, и выбрасывать полученное, чтобы
  * спросить его снова при открытии карточки, было бы расточительством.
@@ -196,6 +286,17 @@ export async function getRussianName(mediaId: number): Promise<string | null> {
     names.set(mediaId, stored)
     return stored
   }
+
+  // Датасет до сети: он шире склада и не стоит запроса.
+  const fromDataset = await lookupDatasetName(mediaId)
+  if (fromDataset.kind === 'name') {
+    names.set(mediaId, fromDataset.name)
+    return fromDataset.name
+  }
+
+  // За одним тайтлом сеть ходит ровно один раз за всю жизнь установки:
+  // дальше ответа всё равно нет, и повтор только тратит темп источников.
+  if (await readNoname(mediaId)) return null
 
   const card = await getRussianTitle(mediaId)
   if (card === null) return null
@@ -247,7 +348,10 @@ export async function warmRussianNames(mediaIds: number[]): Promise<number> {
         continue
       }
       if (fromDataset.kind === 'none') {
-        memory.set(mediaId, null)
+        // Память не трогаем: здесь решается только вопрос поиска по кириллице,
+        // а не судьба открытой карточки того же тайтла. Сети тут нет вовсе,
+        // так что и отрицательную запись спрашивать незачем.
+        noname.add(mediaId)
         continue
       }
 
@@ -279,6 +383,9 @@ export async function warmRussianNames(mediaIds: number[]): Promise<number> {
  * Готовит карточки для видимого куска списка. Соответствия MAL берутся пачкой,
  * а сами источники опрашиваются по очереди: веер запросов сразу упирается в темп.
  *
+ * Путь пачечный, а значит считается с отрицательными записями: тайтл, о котором
+ * сеть уже сказала своё, второй раз в очередь не попадает.
+ *
  * Аргумент вида игнорируется: остаток от времён манги.
  */
 export async function prefetchRussianTitles(mediaIds: number[], _type?: string): Promise<number> {
@@ -293,6 +400,8 @@ export async function prefetchRussianTitles(mediaIds: number[], _type?: string):
       continue
     }
 
+    if (await readNoname(mediaId)) continue
+
     unknown.push(mediaId)
   }
 
@@ -304,7 +413,9 @@ export async function prefetchRussianTitles(mediaIds: number[], _type?: string):
   for (const mediaId of unknown) {
     const malId = malIds.get(mediaId)
     if (!malId) {
-      memory.set(mediaId, null)
+      // Номера MAL нет — спрашивать источники не по чему. Знание на склад,
+      // но не в память: пачечный путь не решает за открытую карточку.
+      await writeNoname(mediaId)
       continue
     }
 
@@ -326,95 +437,9 @@ export async function prefetchRussianTitles(mediaIds: number[], _type?: string):
  * лежат только внутри карточек, и без третьего чтения сеть спросили бы
  * о том, что уже есть.
  *
- * Соответствия MAL берутся пачкой, а источники опрашиваются по очереди:
- * веер запросов сразу упирается в темп.
- */
-export async function prefetchRussianNames(mediaIds: number[]): Promise<number> {
-  const unknown: number[] = []
-
-  for (const mediaId of mediaIds) {
-    if (memory.has(mediaId) || names.has(mediaId)) continue
-
-    // Датасет — раньше складов: он свежее и полнее их обоих, а отвечает
-    // из памяти, не трогая ни диск, ни сеть.
-    const fromDataset = await lookupDatasetName(mediaId)
-    if (fromDataset.kind === 'name') {
-      names.set(mediaId, fromDataset.name)
-      continue
-    }
-    if (fromDataset.kind === 'none') {
-      // Выпуск отвечает «перевода нет»: это знание, а не пустота,
-      // и сеть за таким тайтлом не гоняем.
-      memory.set(mediaId, null)
-      continue
-    }
-
-    // Склад спрашивается один раз за запуск: прокрутка возвращается к тем же
-    // строкам, а от повторного чтения ответ склада не меняется.
-    const stored = askedNames.has(mediaId) ? null : await readNameCache(mediaId)
-    if (stored !== null) {
-      names.set(mediaId, stored)
-      continue
-    }
-
-    const cached = asked.has(mediaId) ? null : await readCache(mediaId)
-    if (cached) {
-      memory.set(mediaId, cached)
-
-      // Имя переносится в свою запись: следующий запуск возьмёт строку,
-      // не поднимая описание с оценками и голосами.
-      await writeNameCache(mediaId, cached.russian)
-      continue
-    }
-
-    unknown.push(mediaId)
-  }
-
-  if (unknown.length === 0) return 0
-
-  const malIds = await fetchMalIds(unknown)
-  let added = 0
-
-  for (const mediaId of unknown) {
-    const malId = malIds.get(mediaId)
-    if (!malId) {
-      memory.set(mediaId, null)
-      continue
-    }
-
-    try {
-      if (await fetchByMal(mediaId, malId)) added++
-    } catch (e) {
-      // Один упавший тайтл не повод бросать остальной экран без названий.
-      Logger('WARN', `Русское имя: тайтл ${mediaId} пропущен`, e)
-    }
-  }
-
-  Logger('INFO', `Русские имена: добыто ${added} из ${unknown.length}`)
-  return added
-}
-
-/**
- * Что уже известно прямо сейчас, без ожидания.
- * Для отрисовки строки списка: нет перевода — показываем латиницу.
- */
-export function peekRussianTitle(mediaId: number): RussianTitle | null {
-  return memory.get(mediaId) ?? null
-}
-
-/**
- * Русское название, известное прямо сейчас: из полной карточки или попутное.
- * Строкам списка и выдачи большего и не надо.
- */
-export function peekRussianName(mediaId: number): string | null {
-  return memory.get(mediaId)?.russian ?? names.get(mediaId) ?? null
-}
-
-/** Забывает знание запуска. Склад не трогается: его чистят из настроек. */
-export function forgetRussianTitles(): void {
-  memory.clear()
-  names.clear()
-  asked.clear()
-  askedNames.clear()
-  pending.clear()
-}
+ * Датасет отвечает «имени нет» — это не приговор, а повод спросить рантайм
+ * один раз и запомнить ответ навсегда. Выпуск собран из трёх источников,
+ * а в рантайме их те же три — но спрошенные в другой день и по-другому:
+ * один тайтл из десятка всё-таки находится.
+ *
+ * Соответствия MAL берутся пач
