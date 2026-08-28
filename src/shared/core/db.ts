@@ -305,7 +305,7 @@ export async function dbSet(store: CacheStoreName, data: CacheRecord): Promise<v
  * Очищает все сторы кэша. Вызывается из настроек по кнопке.
  *
  * Раньше промис разрешался только по tx.oncomplete, а отказ и прерывание
- * транзакции не обрабатывались вовсе — ожидание висело вечно, кнопка не давала
+ * транзакции не обрабатывались вовсе — ожидание висло вечно, кнопка не давала
  * отклика, в журнале пусто. Транзакцию легко потерять: параллельный сканер,
  * фоновый сборщик мусора или перезагрузка страницы в тот же момент.
  *
@@ -427,6 +427,7 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
         staff: 0,
         themes: 0,
         russianTitles: 0,
+        noRussianNames: 0,
         looks: 0,
         ratings: 0,
         malMappings: 0,
@@ -477,7 +478,14 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
  * а не вечным нулём на экране.
  */
 type PrefixField =
-  'media' | 'characters' | 'staff' | 'themes' | 'russianTitles' | 'looks' | 'ratings'
+  | 'media'
+  | 'characters'
+  | 'staff'
+  | 'themes'
+  | 'russianTitles'
+  | 'noRussianNames'
+  | 'looks'
+  | 'ratings'
 
 /**
  * Что за запись лежит под префиксом ключа. Таблица, а не череда else if:
@@ -496,6 +504,11 @@ const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
   // Имя тайтла лежит отдельной записью от карточки, но в сводке это один
   // и тот же вид кэша: два префикса намеренно ведут в одно поле.
   ['NAME1_', 'russianTitles'],
+  // Отказ «русского имени нет» — тоже знание и тоже запись на диске,
+  // но в russianTitles его складывать нельзя: сводка показывала бы добытых
+  // имён больше, чем добыто. С NAME1_ префикс не путается: ключ NONAME1_123
+  // на NAME1_ не начинается, так что порядок строк здесь ни на что не влияет.
+  ['NONAME1_', 'noRussianNames'],
   ['LOOK2_', 'looks'],
   ['RATE1_', 'ratings'],
 ]
