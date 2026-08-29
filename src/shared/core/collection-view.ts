@@ -7,15 +7,6 @@ import type { SnapshotEntry } from './snapshot'
 
 /** Условия отбора. Пустой набор пропускает все записи. */
 export interface EntryFilter {
-  /**
-   * Остаток от времён манги, объявленный ради уже записанных вызовов.
-   * На отбор не влияет и влиять не должен: записи не хранят вид тайтла
-   * со снимка шестой версии, а действующее условие по полю, которого
-   * нет ни у одной записи, отбраковывает их все — именно так экран
-   * списков однажды показал нули при полной памяти. Снимается вместе
-   * с вызовами, которые его ещё передают (пункт 1.4 плана).
-   */
-  type?: 'ANIME'
   status?: string[]
   minScore?: number
   maxScore?: number
@@ -61,9 +52,6 @@ function hasWord(title: string | null | undefined, word: string): boolean {
 /**
  * Проверяет одну запись. Отдельная функция: одно и то же условие
  * нужно и перебору, и подсчёту, и странице — расхождение видно как ошибка чисел.
- *
- * Условия по виду тайтла здесь нет нарочно: поле в EntryFilter объявлено
- * ради вызовов, которые его передают, но записи его не хранят.
  */
 export function matchesEntry(entry: SnapshotEntry, filter: EntryFilter = EMPTY_FILTER): boolean {
   if (filter.status && filter.status.length > 0) {
@@ -188,21 +176,6 @@ export function totalProgress(filter: EntryFilter = EMPTY_FILTER): number {
   let total = 0
   for (const entry of eachEntry()) {
     if (matchesEntry(entry, filter)) total += entry.progress
-  }
-  return total
-}
-
-/**
- * Сумма прочитанных томов по отбору.
- *
- * Остаток от времён манги: новые записи томов не знают вовсе, а старые
- * снимки ещё помнят. Поле читается через ноль нарочно: следующим шагом
- * оно станет необязательным в снимке, и сборка должна выжить оба раза.
- */
-export function totalVolumes(filter: EntryFilter = EMPTY_FILTER): number {
-  let total = 0
-  for (const entry of eachEntry()) {
-    if (matchesEntry(entry, filter)) total += entry.volumes ?? 0
   }
   return total
 }

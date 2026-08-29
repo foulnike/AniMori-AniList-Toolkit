@@ -91,17 +91,17 @@ function factsText(look: MediaLook | null): string {
 
 /** Свой счёт частей на постере. */
 function ownText(entry: SnapshotEntry, parts: number | null): string | null {
-  const short = partsShort(entry.type)
+  const short = partsShort()
   if (parts === null) return entry.progress > 0 ? `${entry.progress} ${short}` : null
   return `${entry.progress} / ${parts} ${short}`
 }
 
-/** Запись памяти в плитку своей полки. */
+/** Строчка ряда с полки своего списка. */
 function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
 
-  // У идущего сезона счёт идёт от вышедшего: объявленного итога ещё нет.
-  const parts = partsOut(look, entry.type)
+  // У идущего сезона итога может не быть вовсе: считаем по вышедшему.
+  const parts = partsOut(look)
   const done =
     parts !== null && parts > 0 && entry.progress > 0 ? Math.min(1, entry.progress / parts) : 0
 
@@ -176,7 +176,7 @@ async function fillTitles(): Promise<void> {
 /** Своя полка: продолжение просмотра и пересмотра. */
 function buildOwn(): void {
   ownEntries = selectEntries(
-    { type: 'ANIME', status: ['CURRENT', 'REPEATING'] },
+    { status: ['CURRENT', 'REPEATING'] },
     { key: 'updated' },
     { limit: SHELF_SIZE },
   )

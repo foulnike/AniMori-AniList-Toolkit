@@ -53,16 +53,12 @@ function cacheKey(mediaId: number): string {
  * У онгоинга объявленного итога часто нет вовсе, зато известен номер
  * ближайшей серии: вышло ровно на одну меньше. Без этого счёта
  * полоса у идущего сезона всегда стояла на нуле.
- *
- * Второй аргумент игнорируется: он остался от времён манги и уйдёт
- * вместе с последним вызовом, который его ещё передаёт.
  */
 export function partsOut(
   look: {
     episodes: number | null
     airingEpisode: number | null
   } | null,
-  _type?: string,
 ): number | null {
   if (look === null) return null
 

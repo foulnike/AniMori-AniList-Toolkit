@@ -41,10 +41,10 @@ const emit = defineEmits<{
 
 // Закладки и подпись счёта теперь одни и те же: выбора вида больше нет,
 // и пересчитывать их на каждую правку нечего.
-const statuses = statusList('ANIME')
-const partsName = partsWord('ANIME')
+const statuses = statusList()
+const partsName = partsWord()
 
-const nowStatus = computed(() => statusWord('ANIME', props.status === '' ? null : props.status))
+const nowStatus = computed(() => statusWord(props.status === '' ? null : props.status))
 
 /** Строка счёта вида «7 из 12». Неизвестный итог не выдумывается. */
 const partsText = computed(() =>

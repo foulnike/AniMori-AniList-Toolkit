@@ -89,7 +89,7 @@ const picked = ref(0)
 const tailMark = ref<HTMLElement | null>(null)
 
 /** Закладки статуса. Список теперь одного вида, и подписи у него одни. */
-const statusTabs = statusList('ANIME')
+const statusTabs = statusList()
 
 const searching = computed(() => word.value.trim() !== '')
 const shown = computed(() =>
@@ -127,12 +127,10 @@ function describe(e: unknown): string {
  * человек, поэтому потолок отрезается уже после сортировки всей закладки.
  */
 function redraw(): void {
-  counts.value = countByStatus({ type: 'ANIME' })
-  total.value = countEntries({ type: 'ANIME' })
+  counts.value = countByStatus()
+  total.value = countEntries()
 
-  const list = searching.value
-    ? foundEntries
-    : selectEntries({ type: 'ANIME', status: [activeStatus.value] })
+  const list = searching.value ? foundEntries : selectEntries({ status: [activeStatus.value] })
 
   picked.value = list.length
   rows.value = sortEntries(list, sortKey.value).slice(0, limit.value).map(toRow)

@@ -227,18 +227,13 @@ export function relationWord(relation: string | null): string | null {
   return lookup(RELATION_WORDS, relation)
 }
 
-/**
- * Закладки своего списка: порядок важен, поэтому массив, а не словарь.
- *
- * Аргумент вида тайтла игнорируется: вид в приложении остался один.
- * Он держится ради уже записанных вызовов и уйдёт вместе с последним из них.
- */
-export function statusList(_type?: string): ReadonlyArray<StatusItem> {
+/** Закладки своего списка: порядок важен, поэтому массив, а не словарь. */
+export function statusList(): ReadonlyArray<StatusItem> {
   return STATUS_ITEMS
 }
 
 /** Подпись одной закладки. Пустой ключ значит «тайтла нет в списке». */
-export function statusWord(_type: string | undefined, key: string | null): string | null {
+export function statusWord(key: string | null): string | null {
   if (key === null || key === '') return null
 
   const found = STATUS_ITEMS.find((item) => item.key === key)
@@ -246,11 +241,11 @@ export function statusWord(_type: string | undefined, key: string | null): strin
 }
 
 /** Подпись строки счёта частей для карточки. */
-export function partsWord(_type?: string): string {
+export function partsWord(): string {
   return 'Эпизоды'
 }
 
 /** Короткое слово для плитки: на постере места мало. */
-export function partsShort(_type?: string): string {
+export function partsShort(): string {
   return 'эп.'
 }

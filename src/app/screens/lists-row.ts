@@ -55,7 +55,7 @@ function factsText(look: MediaLook | null): string {
 
 /** Свой счёт частей на постере. Неизвестный итог не выдумывается. */
 function ownText(entry: SnapshotEntry, parts: number | null): string | null {
-  const short = partsShort(entry.type)
+  const short = partsShort()
   if (parts === null) return entry.progress > 0 ? `${entry.progress} ${short}` : null
   return `${entry.progress} / ${parts} ${short}`
 }
@@ -118,7 +118,7 @@ export function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
 
   // У идущего сезона знаменателем служат вышедшие серии.
-  const parts = partsOut(look, entry.type)
+  const parts = partsOut(look)
 
   return {
     mediaId: entry.mediaId,

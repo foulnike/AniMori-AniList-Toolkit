@@ -201,7 +201,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
    * У идущего сезона объявленного итога часто нет вовсе.
    */
   const partsTotal = computed<number | null>(() =>
-    card.value === null ? null : partsOut(card.value, 'ANIME'),
+    card.value === null ? null : partsOut(card.value),
   )
 
   /** Объявленный итог: сколько серий всего обещано. */
@@ -209,7 +209,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   /** Надпись главной кнопки: своя закладка, а без неё приглашение добавить. */
   const listLabel = computed<string>(() => {
-    const word = statusWord('ANIME', status.value === '' ? null : status.value)
+    const word = statusWord(status.value === '' ? null : status.value)
     return word ?? 'Добавить в список'
   })
 
@@ -525,7 +525,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   /** Своя закладка на части франшизы словом, когда она есть. */
   function franchiseStatus(work: FranchiseWork): string | null {
     if (work.mediaId === null) return null
-    return statusWord('ANIME', getEntry(work.mediaId)?.status ?? null)
+    return statusWord(getEntry(work.mediaId)?.status ?? null)
   }
 
   /** Подсказка части франшизы: полное имя и вид. */

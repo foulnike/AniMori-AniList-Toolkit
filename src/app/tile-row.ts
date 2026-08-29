@@ -50,9 +50,9 @@ function briefFacts(brief: MediaBrief): string {
  */
 function markText(brief: MediaBrief): string | null {
   const mine = getEntry(brief.mediaId)
-  if (mine) return statusWord('ANIME', mine.status)
+  if (mine) return statusWord(mine.status)
 
-  return statusWord('ANIME', brief.ownEntry?.status ?? null)
+  return statusWord(brief.ownEntry?.status ?? null)
 }
 
 /** Свой счёт частей по той же лестнице: память, ответ сервера, ноль. */
@@ -67,7 +67,7 @@ function ownSeen(brief: MediaBrief): number {
 function ownText(brief: MediaBrief): string | null {
   const parts = partsCount(brief)
   const seen = ownSeen(brief)
-  const short = partsShort('ANIME')
+  const short = partsShort()
 
   if (seen > 0) return parts === null ? `${seen} ${short}` : `${seen} / ${parts} ${short}`
   return parts === null ? null : `${parts} ${short}`
