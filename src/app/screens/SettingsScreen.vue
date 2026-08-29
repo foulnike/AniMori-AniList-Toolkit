@@ -26,6 +26,7 @@ import {
   watchAuth,
   type LoginStart,
 } from '../auth/session'
+import { navigate } from '../router'
 
 const version = __ANIMORI_VERSION__
 
@@ -273,6 +274,14 @@ function onClear(): void {
     await readState()
     note.value = 'Память очищена. Названия и описания загрузятся заново.'
   })
+}
+
+/**
+ * Переход в журнал. Кнопка живёт здесь, а не в меню: журнал нужен при разборе
+ * поломки, а не каждый день, и спрашивают о нём именно отсюда.
+ */
+function onLog(): void {
+  navigate('log')
 }
 
 function onReload(): void {
@@ -553,6 +562,13 @@ onBeforeUnmount(() => {
           <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
           и запустите сборку кнопкой.
         </p>
+
+        <!-- Вход в журнал. Отсюда, а не из меню: читают его, когда что-то
+             не работает, и спрашивают о нём ровно на этом экране. -->
+        <div class="am-log-open">
+          <button class="am-btn am-btn--soft" type="button" @click="onLog">Открыть журнал</button>
+          <span class="am-meta">Записи этого запуска: сеть, склад, очередь правок, ошибки.</span>
+        </div>
       </div>
     </div>
   </section>
@@ -614,6 +630,15 @@ onBeforeUnmount(() => {
   background: rgba(255, 190, 90, 0.07);
   border: 1px solid rgba(255, 190, 90, 0.35);
   border-radius: var(--am-r-m);
+}
+
+/* Вход в журнал: кнопка и пояснение рядом, а не строкой фактов выше —
+   это действие, а не число. */
+.am-log-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* Исход действия: виден сразу и не путается с пояснениями рядом. */

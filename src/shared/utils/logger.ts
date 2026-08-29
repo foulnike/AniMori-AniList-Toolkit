@@ -118,11 +118,30 @@ function restoreSessionLogs(): void {
   }
 }
 
-/** Подписчик UI: модалка получает записи, пока открыта. */
+/**
+ * Подписчик показа: получает каждую новую запись, пока открыт.
+ * Один на всех — читателей журнала больше одного не бывает.
+ */
 let logSink: ((entry: LogEntry) => void) | null = null
 
 export function registerLogSink(sink: ((entry: LogEntry) => void) | null): void {
   logSink = sink
+}
+
+/** Что уже накопилось: читателю нужен не только поток, но и предыстория. */
+export function readLogs(): ReadonlyArray<LogEntry> {
+  return scriptLogs
+}
+
+/** Забывает записи этого запуска вместе с их копией в памяти вкладки. */
+export function clearLogs(): void {
+  scriptLogs = []
+
+  try {
+    sessionStorage.removeItem('animori_logs')
+  } catch {
+    /* памяти вкладки может не быть — записи и так уже забыты */
+  }
 }
 
 export function Logger(type: LogType | string, message: string, details: unknown = null): void {
