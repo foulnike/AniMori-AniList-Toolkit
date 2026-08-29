@@ -170,11 +170,8 @@ export async function initCollection(): Promise<number> {
  *
  * Без входа переносить неоткуда, и это отказ, а не тихий ноль: кнопка,
  * которая ничего не делает и ничего не говорит, выглядит поломкой.
- *
- * Аргумент игнорируется: когда видов было два, им выбирали, что тянуть.
- * Остался один, и параметр держится ради уже записанных вызовов.
  */
-export async function refreshFromServer(_types?: readonly string[]): Promise<number> {
+export async function refreshFromServer(): Promise<number> {
   if (refreshInFlight) return refreshInFlight
 
   refreshInFlight = (async () => {
@@ -197,7 +194,7 @@ export async function refreshFromServer(_types?: readonly string[]): Promise<num
 
     // Сначала ответ, и только потом память: отказ сети иначе оставит
     // пустой список вместо прежнего целого.
-    const raw = await fetchUserList(viewer.id, 'ANIME')
+    const raw = await fetchUserList(viewer.id)
 
     // Ответ замещает содержимое целиком. Заодно из памяти уходят записи
     // манги из старых снимков: читать их некому, а в числах у закладок

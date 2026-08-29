@@ -136,10 +136,8 @@ export function rememberBrief(brief: MediaBrief): void {
 /**
  * Готовит облик для показанного куска списка: сначала склад, потом сеть.
  * Сотня строк стоит двух запросов, а второй заход в ту же закладку — ни одного.
- *
- * Второй аргумент игнорируется: остаток от времён манги.
  */
-export async function warmLooks(mediaIds: number[], _type?: string): Promise<number> {
+export async function warmLooks(mediaIds: number[]): Promise<number> {
   const unknown: number[] = []
 
   for (const mediaId of mediaIds) {
@@ -173,7 +171,7 @@ export async function warmLooks(mediaIds: number[], _type?: string): Promise<num
 
     let briefs: MediaBrief[]
     try {
-      briefs = await fetchBriefsByIds(chunk, 'ANIME')
+      briefs = await fetchBriefsByIds(chunk)
     } catch (e) {
       // Отказ сети не запоминаем: повторный заход на экран спросит снова.
       Logger('WARN', `Облик: пачка из ${chunk.length} не доехала`, e)

@@ -42,10 +42,9 @@ function textOrNull(value: string | null | undefined): string | null {
  * Взрослое из выдачи не вырезается: отбор по этому признаку — дело
  * пункта 3.8, и решать за пользователя здесь неуместно.
  *
- * Аргумент вида игнорируется: раздел всегда аниме, других приложение
- * не открывает. Параметр держится ради вызова из поиска ядра.
+ * Раздел всегда аниме: других приложение не открывает.
  */
-export async function searchShikimori(word: string, _type?: string): Promise<ShikiFound[]> {
+export async function searchShikimori(word: string): Promise<ShikiFound[]> {
   const asked = word.trim()
   if (asked === '') return []
 

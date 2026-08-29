@@ -390,10 +390,8 @@ export interface StudioPage {
 /**
  * Номера MAL для набора тайтлов AniList. Ключ соответствия — номер AniList.
  * Тайтлы без номера MAL в ответ не попадают: русского источника для них нет.
- *
- * Аргумент вида игнорируется: вид вписан в запрос словом.
  */
-export async function fetchMalIds(ids: number[], _type?: string): Promise<Map<number, number>> {
+export async function fetchMalIds(ids: number[]): Promise<Map<number, number>> {
   const found = new Map<number, number>()
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
 
@@ -564,15 +562,8 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
 /**
  * Поиск тайтлов по слову. Запрос с ключом, иначе в выдаче не будет видно,
  * что тайтл уже в списке. Пустое слово сеть не тревожит.
- *
- * Аргумент вида игнорируется: вид вписан в запрос словом. Параметр
- * стоит в середине, и убрать его можно только вместе с вызовами в ядре.
  */
-export async function searchMedia(
-  word: string,
-  _type: string | undefined,
-  page = 1,
-): Promise<SearchPage | null> {
+export async function searchMedia(word: string, page = 1): Promise<SearchPage | null> {
   const asked = word.trim()
   if (asked === '') return { items: [], hasNext: false, total: 0 }
 

@@ -189,10 +189,8 @@ async function lookupBriefs(field: LookupField, wanted: number[]): Promise<Media
 /**
  * Выписки тайтлов по номерам MAL. Порядок ответа — порядок спрошенных
  * номеров: сортировка поиска живёт у того, кто искал, а сервер о ней не знает.
- *
- * Аргумент вида игнорируется: в запросе стоит слово ANIME.
  */
-export async function fetchBriefsByMal(malIds: number[], _type?: string): Promise<MediaBrief[]> {
+export async function fetchBriefsByMal(malIds: number[]): Promise<MediaBrief[]> {
   const wanted = cleanIds(malIds)
   if (wanted.length === 0) return []
 
@@ -215,10 +213,8 @@ export async function fetchBriefsByMal(malIds: number[], _type?: string): Promis
 /**
  * Выписки тайтлов по своим номерам AniList. Нужно спискам: снимок держит
  * только состояние записей, а обложки и вид приходят сюда пачками.
- *
- * Аргумент вида игнорируется: в запросе стоит слово ANIME.
  */
-export async function fetchBriefsByIds(mediaIds: number[], _type?: string): Promise<MediaBrief[]> {
+export async function fetchBriefsByIds(mediaIds: number[]): Promise<MediaBrief[]> {
   const wanted = cleanIds(mediaIds)
   if (wanted.length === 0) return []
 

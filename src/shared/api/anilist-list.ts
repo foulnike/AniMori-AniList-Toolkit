@@ -241,11 +241,8 @@ export async function fetchViewer(): Promise<ViewerInfo | null> {
 /**
  * Вся коллекция одним запросом. Один тайтл может лежать в нескольких
  * своих подборках сразу, поэтому дубли схлопываются по номеру тайтла.
- *
- * Аргумент вида игнорируется: вид вписан в запрос словом. Параметр
- * держится ради вызова из коллекции и уйдёт вместе с ним.
  */
-export async function fetchUserList(userId: number, _type?: string): Promise<RawListEntry[]> {
+export async function fetchUserList(userId: number): Promise<RawListEntry[]> {
   const reply = await anilistQuery<ListReply>(LIST_QUERY, { userId }, true)
   const lists = reply.data?.MediaListCollection?.lists ?? []
 

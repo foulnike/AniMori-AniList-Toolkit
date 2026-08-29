@@ -84,13 +84,10 @@ async function load(mediaId: number, malId: number): Promise<TitleRatings | null
 /**
  * Оценки площадок одного тайтла или `null`. Ошибки глушатся: отсутствие
  * рейтинга — не поломка карточки.
- *
- * Аргумент вида игнорируется: его ещё передаёт карточка.
  */
 export async function getTitleRatings(
   mediaId: number,
   malId: number | null,
-  _type?: string,
 ): Promise<TitleRatings | null> {
   if (malId === null) return null
   if (memory.has(mediaId)) return memory.get(mediaId) ?? null

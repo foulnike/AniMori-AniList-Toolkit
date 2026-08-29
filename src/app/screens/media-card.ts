@@ -412,7 +412,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   /** Дерево франшизы: склад или сеть, затем русские имена частей фоном. */
   async function beginFranchise(mine: number, id: number, found: MediaCard): Promise<void> {
-    const works = await fetchFranchise(id, found.malId, 'ANIME')
+    const works = await fetchFranchise(id, found.malId)
     if (mine !== run || works === null) return
 
     franchise.value = works
@@ -474,7 +474,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
       }
 
       // Оценки площадок — своим доходом: карточка их не ждёт.
-      void getTitleRatings(id, found.malId, 'ANIME').then((marks) => {
+      void getTitleRatings(id, found.malId).then((marks) => {
         if (mine === run) platformRatings.value = marks
       })
 
@@ -489,7 +489,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     }
 
     try {
-      const found = await getRussianTitle(id, 'ANIME')
+      const found = await getRussianTitle(id)
       if (mine === run) russian.value = found
     } catch (e) {
       // Без русского названия карточка живая: останется латиница.

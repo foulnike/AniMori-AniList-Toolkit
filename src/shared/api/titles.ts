@@ -40,13 +40,9 @@ function stripBbcode(text: string | null): string | null {
 /**
  * Резолвит русское название и описание по цепочке источников.
  *
- * Адреса всегда анимешные: раздела манги у нас больше нет, а аргумент
- * вида игнорируется: его ещё передаёт склад русских названий.
+ * Адреса всегда анимешные: раздела манги у нас больше нет.
  */
-export async function resolveTitle(
-  malId: number | null,
-  _type?: string,
-): Promise<ResolvedTitle | null> {
+export async function resolveTitle(malId: number | null): Promise<ResolvedTitle | null> {
   const order = [...new Set([settings.titlePrimary, settings.titleFallback])].filter(
     (src) => src && src !== 'off' && src !== 'none',
   )
@@ -68,7 +64,7 @@ export async function resolveTitle(
         }
       }
     } else if (src === 'anime365') {
-      const a = await fetchAnime365ByMal(malId, 'ANIME')
+      const a = await fetchAnime365ByMal(malId)
       if (a?.russian) {
         return {
           russian: a.russian,

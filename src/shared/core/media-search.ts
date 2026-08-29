@@ -71,13 +71,8 @@ function sift(page: SearchPage, word: string): SearchPage {
  *
  * Отбора по виду больше нет: в коллекции только аниме, а лишнее условие
  * скрыло бы записи старых снимков до их первого обновления с сервера.
- * Аргумент вида игнорируется: его ещё передают экраны.
  */
-export async function searchOwnList(
-  word: string,
-  _type: string | undefined,
-  limit: number,
-): Promise<SnapshotEntry[]> {
+export async function searchOwnList(word: string, limit: number): Promise<SnapshotEntry[]> {
   const needle = fold(word)
   if (needle === '') return []
 
@@ -109,19 +104,13 @@ export async function searchOwnList(
  *
  * У русского пути второй страницы нет: Шикимори отдаёт двадцать лучших
  * совпадений, и дальше по списку идёт шум, а не ответ на вопрос.
- *
- * Вид тайтла везде один, так что аргумент вида игнорируется.
  */
-export async function searchCatalog(
-  word: string,
-  _type?: string,
-  page = 1,
-): Promise<SearchPage | null> {
+export async function searchCatalog(word: string, page = 1): Promise<SearchPage | null> {
   const asked = word.trim()
   if (asked === '') return { items: [], hasNext: false, total: 0 }
 
   if (!hasCyrillic(asked)) {
-    const found = await searchMedia(asked, 'ANIME', page)
+    const found = await searchMedia(asked, page)
     // Отказ сервера остаётся отказом: пустую страницу вместо него подсовывать нельзя.
     return found === null ? null : sift(found, asked)
   }
@@ -129,7 +118,7 @@ export async function searchCatalog(
   // Второй страницы у русского пути нет, поэтому добор возвращает пустоту.
   if (page > 1) return { items: [], hasNext: false, total: null }
 
-  const found = await searchShikimori(asked, 'ANIME')
+  const found = await searchShikimori(asked)
   if (found.length === 0) {
     Logger('API', `Поиск «${asked}»: Шикимори ничего не нашёл`)
     return { items: [], hasNext: false, total: 0 }
@@ -143,10 +132,7 @@ export async function searchCatalog(
     }
   }
 
-  const items = await fetchBriefsByMal(
-    found.map((row) => row.malId),
-    'ANIME',
-  )
+  const items = await fetchBriefsByMal(found.map((row) => row.malId))
 
   // Имя уже в руках — ходить за ним в сеть по второму кругу было бы глупо.
   // Запоминается имя и для спрятанного: настройку могут включить, а тайтл

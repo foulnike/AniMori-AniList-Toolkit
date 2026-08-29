@@ -157,12 +157,10 @@ export async function getRussianPerson(
  * добирается при открытии окошка. Возвращает несопоставленных: их добирает
  * обычный точечный поиск.
  *
- * Состав спрашивается всегда в разделе animes, а аргумент вида игнорируется:
- * его ещё передаёт блок людей, и стоять он обязан на своём месте.
+ * Состав спрашивается всегда в разделе animes: других приложение не открывает.
  */
 export async function prefetchRussianPeople(
   malId: number,
-  _type: string | undefined,
   entries: Array<{ kind: PersonKind; person: PersonRef }>,
 ): Promise<Array<{ kind: PersonKind; person: PersonRef }>> {
   // Сначала память и склад: знакомые люди сети не ждут вовсе, а добытые

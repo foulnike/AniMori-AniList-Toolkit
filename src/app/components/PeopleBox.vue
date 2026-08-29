@@ -139,13 +139,13 @@ async function beginRussian(mine: number): Promise<void> {
   // MAL id текущего тайтла: на нём висят и массовый проход, и гард тёзок.
   let malId: number | undefined
   try {
-    malId = (await fetchMalIds([props.mediaId], 'ANIME')).get(props.mediaId)
+    malId = (await fetchMalIds([props.mediaId])).get(props.mediaId)
   } catch (e) {
     Logger('WARN', `Русские имена: MAL id тайтла ${props.mediaId} не добыт`, e)
   }
 
   if (malId) {
-    const left = await prefetchRussianPeople(malId, 'ANIME', queue)
+    const left = await prefetchRussianPeople(malId, queue)
     if (mine !== run) return
 
     // Список ролей разрешил большинство разом: подметаем их в плитки.

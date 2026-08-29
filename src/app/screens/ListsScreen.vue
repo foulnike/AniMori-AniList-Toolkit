@@ -179,7 +179,7 @@ async function runSearch(): Promise<void> {
   searchBusy.value = true
 
   try {
-    const found = await searchOwnList(asked, 'ANIME', FOUND_LIMIT)
+    const found = await searchOwnList(asked, FOUND_LIMIT)
     if (mine !== searchRun) return
 
     foundEntries = found

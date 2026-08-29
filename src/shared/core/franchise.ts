@@ -176,13 +176,10 @@ async function load(mediaId: number, malId: number): Promise<FranchiseWork[] | n
 /**
  * Хронология франшизы тайтла или `null`, когда дерева нет.
  * Ошибки глушатся: отсутствие полки — не поломка карточки.
- *
- * Аргумент вида игнорируется: его ещё передаёт карточка.
  */
 export async function fetchFranchise(
   mediaId: number,
   malId: number | null,
-  _type?: string,
 ): Promise<FranchiseWork[] | null> {
   if (malId === null) return null
   if (memory.has(mediaId)) return memory.get(mediaId) ?? null

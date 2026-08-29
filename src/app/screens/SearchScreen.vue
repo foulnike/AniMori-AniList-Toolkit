@@ -108,7 +108,7 @@ async function search(add = false): Promise<void> {
   const wanted = add ? page.value + 1 : 1
 
   try {
-    const found = await searchCatalog(wordNow, 'ANIME', wanted)
+    const found = await searchCatalog(wordNow, wanted)
     if (mine !== run) return
 
     if (found === null) {

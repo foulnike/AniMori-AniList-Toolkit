@@ -138,7 +138,7 @@ async function fillLooks(): Promise<void> {
   if (wanted.length === 0) return
 
   try {
-    await warmLooks(wanted, 'ANIME')
+    await warmLooks(wanted)
     if (mine !== lookRun) return
 
     redrawOwn()
@@ -188,8 +188,8 @@ function buildOwn(): void {
 /** Состав витрины: свой подбор впереди; чип жанра замещает три полки каталога. */
 function shelfDefs(): ShelfDef[] {
   const defs: ShelfDef[] = [
-    { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf('ANIME') },
-    { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf('ANIME') },
+    { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf() },
+    { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf() },
   ]
 
   const genre = homeGenre.value
@@ -197,14 +197,14 @@ function shelfDefs(): ShelfDef[] {
     defs.push({
       key: 'genre',
       title: `Жанр: ${genreWord(genre) ?? genre}`,
-      load: () => recShelf('genre', 'ANIME', [genre]),
+      load: () => recShelf('genre', [genre]),
     })
     return defs
   }
 
-  defs.push({ key: 'airing', title: 'Сейчас выходит', load: () => recShelf('airing', 'ANIME') })
-  defs.push({ key: 'trending', title: 'В тренде', load: () => recShelf('trending', 'ANIME') })
-  defs.push({ key: 'top', title: 'Лучшее за всё время', load: () => recShelf('top', 'ANIME') })
+  defs.push({ key: 'airing', title: 'Сейчас выходит', load: () => recShelf('airing') })
+  defs.push({ key: 'trending', title: 'В тренде', load: () => recShelf('trending') })
+  defs.push({ key: 'top', title: 'Лучшее за всё время', load: () => recShelf('top') })
   return defs
 }
 

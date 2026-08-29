@@ -192,17 +192,8 @@ export function currentSeason(): { season: string; seasonYear: number } {
   return { season, seasonYear: now.getFullYear() }
 }
 
-/**
- * Полка каталога одним запросом. Отказ — пустой массив: полка просто не встанет.
- *
- * Аргумент вида игнорируется: вид вписан в запрос словом. Параметр стоит
- * в середине и уйдёт вместе с вызовами в ядре.
- */
-export async function fetchShelf(
-  kind: ShelfKind,
-  _type: string | undefined,
-  genres?: string[],
-): Promise<MediaBrief[]> {
+/** Полка каталога одним запросом. Отказ — пустой массив: полка просто не встанет. */
+export async function fetchShelf(kind: ShelfKind, genres?: string[]): Promise<MediaBrief[]> {
   if (kind === 'genre' && (genres === undefined || genres.length === 0)) return []
 
   const vars: Record<string, unknown> = { perPage: SHELF_SIZE }
@@ -230,7 +221,7 @@ export async function fetchShelf(
  * Советы сервера для семени «по мотивам». Мангу отсеивает разбор ответа,
  * поэтому отбор по виду здесь больше не нужен.
  */
-export async function fetchRecsFor(mediaId: number, _type?: string): Promise<ServerRec[]> {
+export async function fetchRecsFor(mediaId: number): Promise<ServerRec[]> {
   const reply = await anilistQuery<RecsReply>(RECS_QUERY, { id: mediaId, perPage: SEED_PAGE })
   const edges = reply.data?.Media?.recommendations?.edges
   if (!Array.isArray(edges)) {
@@ -250,11 +241,8 @@ export async function fetchRecsFor(mediaId: number, _type?: string): Promise<Ser
   return found
 }
 
-/**
- * Жанры тайтлов пачками: профиль вкуса считается по любимым записям.
- * Аргумент вида игнорируется: в запросе стоит слово ANIME.
- */
-export async function fetchGenreMap(ids: number[], _type?: string): Promise<Map<number, string[]>> {
+/** Жанры тайтлов пачками: профиль вкуса считается по любимым записям. */
+export async function fetchGenreMap(ids: number[]): Promise<Map<number, string[]>> {
   const found = new Map<number, string[]>()
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
 

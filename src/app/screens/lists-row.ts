@@ -163,7 +163,7 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
     looksBusy.value = true
 
     try {
-      await warmLooks(wanted, 'ANIME')
+      await warmLooks(wanted)
       if (mine !== lookRun) return
 
       redraw()

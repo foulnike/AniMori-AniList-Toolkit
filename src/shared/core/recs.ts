@@ -85,10 +85,7 @@ async function tasteGenres(): Promise<string[]> {
 
   if (loved.length > 0) {
     try {
-      const map = await fetchGenreMap(
-        loved.map((entry) => entry.mediaId),
-        'ANIME',
-      )
+      const map = await fetchGenreMap(loved.map((entry) => entry.mediaId))
       const weight = new Map<string, number>()
       for (const entry of loved) {
         for (const genre of map.get(entry.mediaId) ?? []) {
@@ -143,20 +140,11 @@ function cached(key: string, load: () => Promise<MediaBrief[]>): Promise<MediaBr
   return promise
 }
 
-/**
- * Полка каталога с применённым отбором. Отказ сети — пустая полка.
- *
- * Аргумент вида игнорируется и в ключ кэша не идёт: иначе одна и та же
- * полка считалась бы дважды, пока одни вызовы его передают, а другие нет.
- */
-export function recShelf(
-  kind: ShelfKind,
-  _type?: string,
-  genres?: string[],
-): Promise<MediaBrief[]> {
+/** Полка каталога с применённым отбором. Отказ сети — пустая полка. */
+export function recShelf(kind: ShelfKind, genres?: string[]): Promise<MediaBrief[]> {
   return cached(`${kind}:${(genres ?? []).join(',')}`, async () => {
     try {
-      return await visible(await fetchShelf(kind, 'ANIME', genres))
+      return await visible(await fetchShelf(kind, genres))
     } catch (e) {
       Logger('WARN', `Рекомендации: полка «${kind}» не доехала`, e)
       return []
@@ -165,16 +153,16 @@ export function recShelf(
 }
 
 /** Подбор «под ваш вкус» по любимым жанрам. Без оценок 8+ полки нет. */
-export function tasteShelf(_type?: string): Promise<MediaBrief[]> {
+export function tasteShelf(): Promise<MediaBrief[]> {
   return cached('taste', async () => {
     const genres = await tasteGenres()
     if (genres.length === 0) return []
-    return recShelf('genre', undefined, genres)
+    return recShelf('genre', genres)
   })
 }
 
 /** Советы «по мотивам»: повторы склеиваются суммой весов. */
-export function motifShelf(_type?: string): Promise<MediaBrief[]> {
+export function motifShelf(): Promise<MediaBrief[]> {
   return cached('motif', async () => {
     const seeds = pickSeeds()
     if (seeds.length === 0) return []
@@ -182,7 +170,7 @@ export function motifShelf(_type?: string): Promise<MediaBrief[]> {
     const weight = new Map<number, { brief: MediaBrief; rating: number }>()
     for (const seed of seeds) {
       try {
-        for (const rec of await fetchRecsFor(seed, 'ANIME')) {
+        for (const rec of await fetchRecsFor(seed)) {
           const known = weight.get(rec.brief.mediaId)
           if (known !== undefined) known.rating += rec.rating
           else weight.set(rec.brief.mediaId, { brief: rec.brief, rating: rec.rating })

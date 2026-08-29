@@ -159,18 +159,14 @@ interface Anime365Series {
 }
 
 /**
- * Грузит русский тайтл и описание с anime365 по MAL ID. Только аниме.
- *
- * Аргумент вида игнорируется: у источника аниме и так единственный раздел, а проверка
- * «манга — выходим» потеряла смысл вместе с мангой в приложении. Параметр стоит
- * в середине и уйдёт вместе с вызовами резолвера названий.
+ * Грузит русский тайтл и описание с anime365 по MAL ID. Только аниме:
+ * у источника это и так единственный раздел.
  *
  * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
  * @returns null при отсутствии данных, soft-block или сбое всех зеркал.
  */
 export async function fetchAnime365ByMal(
   malId: number | null,
-  _type?: string,
   attempt = 0,
 ): Promise<Anime365Title | null> {
   if (!malId) return null // без номера MAL спрашивать нечего
@@ -221,7 +217,7 @@ export async function fetchAnime365ByMal(
               `повтор ${attempt + 2}/${MAX_RATE_RETRIES} — malId=${malId}`,
           )
           // Повтор сам дождётся конца паузы в acquireSlot() — второго sleep не нужно.
-          return fetchAnime365ByMal(malId, _type, attempt + 1)
+          return fetchAnime365ByMal(malId, attempt + 1)
         }
 
         // 403/503 + Cloudflare (520-524) — soft-block, а не «нет данных».

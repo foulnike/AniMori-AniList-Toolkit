@@ -172,7 +172,7 @@ async function writeNoname(mediaId: number): Promise<void> {
 
 /** Добывает карточку из сети по уже известному номеру MAL. */
 async function fetchByMal(mediaId: number, malId: number): Promise<RussianTitle | null> {
-  const resolved = await resolveTitle(malId, 'ANIME')
+  const resolved = await resolveTitle(malId)
 
   if (!resolved || !resolved.russian) {
     // Сеть спрошена и ответила отказом — вот это в память класть можно:
@@ -210,7 +210,7 @@ async function loadOne(mediaId: number): Promise<RussianTitle | null> {
     return cached
   }
 
-  const malId = (await fetchMalIds([mediaId], 'ANIME')).get(mediaId)
+  const malId = (await fetchMalIds([mediaId])).get(mediaId)
   if (!malId) {
     memory.set(mediaId, null)
     return null
@@ -226,13 +226,8 @@ async function loadOne(mediaId: number): Promise<RussianTitle | null> {
  * Путь открытой карточки, и потому единственный, кто не спрашивает
  * отрицательные записи: ни отсутствие имени в датасете, ни прошлый отказ сети
  * не повод оставить открытую карточку без описания и ссылки.
- *
- * Аргумент вида игнорируется: остаток от времён манги.
  */
-export async function getRussianTitle(
-  mediaId: number,
-  _type?: string,
-): Promise<RussianTitle | null> {
+export async function getRussianTitle(mediaId: number): Promise<RussianTitle | null> {
   if (memory.has(mediaId)) return memory.get(mediaId) ?? null
 
   const inFlight = pending.get(mediaId)
