@@ -22,16 +22,8 @@ export interface AniMoriSettings {
   enableLinkRutracker: boolean
   enableLinkYummy: boolean
   enableLinkAnimego: boolean
-  /**
-   * Ссылка на MangaLib во внешних ссылках. Приложение манговых страниц
-   * не знает, так что оба манговых ключа ждут решения: снять вместе
-   * со ссылкой или оставить под мангу — пункт 1.4 в docs/ROADMAP.md.
-   */
-  enableLinkMangalib: boolean
   yummyDomain: string
   animegoDomain: string
-  /** Зеркало MangaLib для той же ссылки: адреса у них меняются часто. */
-  mangalibDomain: string
   enableLogger: boolean
   accentPreset: AccentPreset
   /**
@@ -101,10 +93,8 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   enableLinkRutracker: true,
   enableLinkYummy: true,
   enableLinkAnimego: true,
-  enableLinkMangalib: true,
   yummyDomain: 'yummyanime.tv',
   animegoDomain: 'animego.org',
-  mangalibDomain: 'mangalib.me',
   enableLogger: true,
   accentPreset: 'site',
   accentCustom: '',
@@ -136,10 +126,8 @@ async function readSettings(): Promise<AniMoriSettings> {
     enableLinkRutracker,
     enableLinkYummy,
     enableLinkAnimego,
-    enableLinkMangalib,
     yummyDomain,
     animegoDomain,
-    mangalibDomain,
     enableLogger,
     accentPreset,
     accentCustom,
@@ -163,10 +151,8 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('set_link_rutracker', DEFAULT_SETTINGS.enableLinkRutracker),
     storage.get('set_link_yummy', DEFAULT_SETTINGS.enableLinkYummy),
     storage.get('set_link_animego', DEFAULT_SETTINGS.enableLinkAnimego),
-    storage.get('set_link_mangalib', DEFAULT_SETTINGS.enableLinkMangalib),
     storage.get('set_yummy_domain', DEFAULT_SETTINGS.yummyDomain),
     storage.get('set_animego_domain', DEFAULT_SETTINGS.animegoDomain),
-    storage.get('set_mangalib_domain', DEFAULT_SETTINGS.mangalibDomain),
     storage.get('set_logger', DEFAULT_SETTINGS.enableLogger),
     storage.get<AccentPreset>('am_accent', DEFAULT_SETTINGS.accentPreset),
     storage.get('am_accent_custom', DEFAULT_SETTINGS.accentCustom),
@@ -196,10 +182,8 @@ async function readSettings(): Promise<AniMoriSettings> {
     enableLinkRutracker,
     enableLinkYummy,
     enableLinkAnimego,
-    enableLinkMangalib,
     yummyDomain,
     animegoDomain,
-    mangalibDomain,
     enableLogger,
     accentPreset,
     accentCustom,
