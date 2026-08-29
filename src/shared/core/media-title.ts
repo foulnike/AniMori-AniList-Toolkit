@@ -254,48 +254,6 @@ export async function getRussianTitle(
 }
 
 /**
- * Русское имя тайтла или `null`, если перевода нет. Путь сеток и полок:
- * описание, ссылка и оценки строке не нужны и отдельным запросом не берутся.
- *
- * Порядок: склад имён, датасет, отрицательная запись, сеть. Раньше датасет
- * тут не спрашивался вовсе, и одиночный вызов шёл в сеть за тем, что лежит
- * на диске целым выпуском.
- *
- * Сеть остаётся последней ступенью и приносит полную карточку: источник
- * отдаёт имя и описание одним ответом, и выбрасывать полученное, чтобы
- * спросить его снова при открытии карточки, было бы расточительством.
- */
-export async function getRussianName(mediaId: number): Promise<string | null> {
-  // Память отвечает и за отказ: `null` там значит «спрашивали, перевода нет».
-  if (memory.has(mediaId) || names.has(mediaId)) return peekRussianName(mediaId)
-
-  const stored = askedNames.has(mediaId) ? null : await readNameCache(mediaId)
-  if (stored !== null) {
-    names.set(mediaId, stored)
-    return stored
-  }
-
-  // Датасет до сети: он шире склада и не стоит запроса.
-  const fromDataset = await lookupDatasetName(mediaId)
-  if (fromDataset.kind === 'name') {
-    names.set(mediaId, fromDataset.name)
-    return fromDataset.name
-  }
-
-  // За одним тайтлом сеть ходит один раз за всю жизнь установки: дальше
-  // ответа всё равно нет, а темп источников тратится.
-  if (await readNoname(mediaId)) return null
-
-  const card = await getRussianTitle(mediaId)
-  if (card === null) return null
-
-  // Карточка могла прийти со склада карточек, где имя лежит внутри неё:
-  // своя запись переживёт её и достанется следующему запуску даром.
-  await writeNameCache(mediaId, card.russian)
-  return card.russian
-}
-
-/**
  * Запоминает русское название, доставшееся даром вместе с чужим ответом.
  * Сети это не стоит ничего, и выдача поиска выходит на русском сразу,
  * а не через двадцать запросов за тем, что уже было в руках.
@@ -364,58 +322,6 @@ export async function warmRussianNames(mediaIds: number[]): Promise<number> {
 
   if (warmed > 0) Logger('DB', `Русские имена: без сети поднято ${warmed}`)
   return warmed
-}
-
-/**
- * Готовит карточки для видимого куска списка. Соответствия MAL берутся пачкой,
- * а источники опрашиваются по очереди: веер запросов сразу упирается в темп.
- *
- * Путь пачечный, а значит считается с отрицательными записями: тайтл, о котором
- * сеть уже сказала своё, второй раз в очередь не попадает.
- *
- * Аргумент вида игнорируется: остаток от времён манги.
- */
-export async function prefetchRussianTitles(mediaIds: number[], _type?: string): Promise<number> {
-  const unknown: number[] = []
-
-  for (const mediaId of mediaIds) {
-    if (memory.has(mediaId)) continue
-
-    const cached = await readCache(mediaId)
-    if (cached) {
-      memory.set(mediaId, cached)
-      continue
-    }
-
-    if (await readNoname(mediaId)) continue
-
-    unknown.push(mediaId)
-  }
-
-  if (unknown.length === 0) return 0
-
-  const malIds = await fetchMalIds(unknown, 'ANIME')
-  let added = 0
-
-  for (const mediaId of unknown) {
-    const malId = malIds.get(mediaId)
-    if (!malId) {
-      // Номера MAL нет — спрашивать источники не по чему. Знание на склад,
-      // но не в память: пачечный путь не решает за открытую карточку.
-      await writeNoname(mediaId)
-      continue
-    }
-
-    try {
-      if (await fetchByMal(mediaId, malId)) added++
-    } catch (e) {
-      // Один упавший тайтл не повод бросать остальной экран без названий.
-      Logger('WARN', `Русское название: тайтл ${mediaId} пропущен`, e)
-    }
-  }
-
-  Logger('INFO', `Русские названия: добыто ${added} из ${unknown.length}`)
-  return added
 }
 
 /**
@@ -501,14 +407,6 @@ export async function prefetchRussianNames(mediaIds: number[]): Promise<number> 
   const tail = skipped > 0 ? `, пропущено ${skipped}` : ''
   Logger('INFO', `Русские имена: добыто ${added} из ${unknown.length}${tail}`)
   return added
-}
-
-/**
- * Что уже известно прямо сейчас, без ожидания.
- * Для отрисовки строки списка: нет перевода — показываем латиницу.
- */
-export function peekRussianTitle(mediaId: number): RussianTitle | null {
-  return memory.get(mediaId) ?? null
 }
 
 /**
