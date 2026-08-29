@@ -7,7 +7,7 @@ import { dbGet, dbSet } from './db'
 import { fetchBriefsByIds } from '../api/anilist-lookup'
 import type { MediaBrief } from '../api/anilist-media'
 import { Logger } from '../utils/logger'
-import type { ShikiCacheRecord } from './types'
+import type { MediaCacheRecord } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи, а не номер источника. */
 const KEY_PREFIX = 'LOOK2_'
@@ -80,7 +80,7 @@ function airedOut(look: MediaLook): boolean {
 async function readCache(mediaId: number): Promise<MediaLook | null> {
   asked.add(mediaId)
 
-  const record = await dbGet<ShikiCacheRecord<MediaLook>>('shikiCache', cacheKey(mediaId))
+  const record = await dbGet<MediaCacheRecord<MediaLook>>('mediaCache', cacheKey(mediaId))
   if (!record || typeof record.ts !== 'number') return null
   if (Date.now() - record.ts > CACHE_TIME) return null
 
@@ -95,7 +95,7 @@ async function readCache(mediaId: number): Promise<MediaLook | null> {
 
 /** Кладёт облик на склад. Сама картинка не хранится — только её адрес. */
 async function writeCache(mediaId: number, look: MediaLook): Promise<void> {
-  await dbSet('shikiCache', { key: cacheKey(mediaId), data: look, ts: Date.now() })
+  await dbSet('mediaCache', { key: cacheKey(mediaId), data: look, ts: Date.now() })
 }
 
 /** Выписка сервера в облик: из ответа берётся только видимое глазу. */

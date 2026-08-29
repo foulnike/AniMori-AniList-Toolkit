@@ -8,7 +8,7 @@
 import { dbGet, dbSet } from './db'
 import { fetchShiki } from '../api/shikimori'
 import { Logger } from '../utils/logger'
-import type { ShikiCacheRecord, ShikiMedia } from './types'
+import type { MediaCacheRecord, ShikiMedia } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи. */
 const KEY_PREFIX = 'RATE1_'
@@ -46,7 +46,7 @@ function shikiAverage(stats: Array<{ name: string; value: number }>): number | n
 
 async function readCache(mediaId: number): Promise<TitleRatings | null> {
   asked.add(mediaId)
-  const record = await dbGet<ShikiCacheRecord<TitleRatings>>('shikiCache', KEY_PREFIX + mediaId)
+  const record = await dbGet<MediaCacheRecord<TitleRatings>>('mediaCache', KEY_PREFIX + mediaId)
   const data = record?.data
   return data && typeof data === 'object' ? data : null
 }
@@ -77,7 +77,7 @@ async function load(mediaId: number, malId: number): Promise<TitleRatings | null
   }
 
   memory.set(mediaId, ratings)
-  await dbSet('shikiCache', { key: KEY_PREFIX + mediaId, data: ratings, ts: Date.now() })
+  await dbSet('mediaCache', { key: KEY_PREFIX + mediaId, data: ratings, ts: Date.now() })
   return ratings
 }
 

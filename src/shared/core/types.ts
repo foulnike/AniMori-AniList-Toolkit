@@ -107,9 +107,10 @@ export interface ShikiMedia {
  * `mediaCache` — настоящее имя склада карточек: там давно лежат не только
  * данные Shikimori, но и обложки с AniList, темы с AnimeThemes и оценки площадок.
  *
- * `shikiCache` — устаревший псевдоним того же стора. Оставлен сознательно:
- * вызовов dbGet/dbSet десятки, они разбросаны по всему приложению,
- * и переименовать их одним заходом — значит поломать то, что не проверить.
+ * `shikiCache` — устаревший псевдоним того же стора. Вызовов с ним в этой
+ * ветке больше нет: все переведены на настоящее имя. Псевдоним оставлен
+ * ради ветки `script`, где лежит то же ядро и где вызовы ещё старые:
+ * снятие имени здесь сделало бы перенос правки заплаткой невозможным.
  * db.ts переводит псевдоним в физическое имя сам.
  */
 export type CacheStoreName = 'mediaCache' | 'shikiCache' | 'malCache' | 'franchiseCache'
@@ -117,11 +118,8 @@ export type CacheStoreName = 'mediaCache' | 'shikiCache' | 'malCache' | 'franchi
 /**
  * Запись в `mediaCache` (keyPath 'key'): карточки тайтлов/персонажей/персонала/тем.
  * Форма одна, различаются префикс ключа и `data`.
- *
- * Имя типа осталось старым из-за числа импортов; для нового кода есть
- * псевдоним MediaCacheRecord ниже.
  */
-export interface ShikiCacheRecord<T = unknown> {
+export interface MediaCacheRecord<T = unknown> {
   /** Составной ключ вида "ПРЕФИКС_id", например "FULL_123". */
   key: string
   data: T
@@ -129,8 +127,12 @@ export interface ShikiCacheRecord<T = unknown> {
   ts: number
 }
 
-/** То же самое под верным именем: пишите в новом коде его. */
-export type MediaCacheRecord<T = unknown> = ShikiCacheRecord<T>
+/**
+ * Устаревшее имя того же типа. Держится ради ветки `script`: там лежит
+ * то же ядро и импорты ещё старые, а перенос правки заплаткой дешёв
+ * только пока файлы совпадают.
+ */
+export type ShikiCacheRecord<T = unknown> = MediaCacheRecord<T>
 
 /** Запись в `malCache` (keyPath 'id'): AniList ID -> AniListMedia. */
 export interface MalCacheRecord {
@@ -145,7 +147,7 @@ export interface FranchiseCacheRecord {
   ts?: number
 }
 
-export type CacheRecord = ShikiCacheRecord | MalCacheRecord | FranchiseCacheRecord
+export type CacheRecord = MediaCacheRecord | MalCacheRecord | FranchiseCacheRecord
 
 /**
  * Снимок БД для инспектора настроек.

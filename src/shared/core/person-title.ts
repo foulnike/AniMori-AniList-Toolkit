@@ -1,5 +1,5 @@
 // Русские имена и описания людей: память, склад, затем сеть.
-// Зеркало media-title.ts: тот же склад shikiCache и те же приёмы, только
+// Зеркало media-title.ts: тот же склад mediaCache и те же приёмы, только
 // ключи от людей, а не от тайтлов. Очередь опроса ведёт компонент: ему
 // виднее, когда тайтл сменился и спрашивать дальше бессмысленно.
 
@@ -14,7 +14,7 @@ import {
 } from '../api/shikimori-people'
 import { Logger } from '../utils/logger'
 import { scoreNameMatch, type NameTarget } from '../utils/name-match'
-import type { ShikiCacheRecord } from './types'
+import type { MediaCacheRecord } from './types'
 
 /** Чем человек является в карточке тайтла: героем или автором. */
 export type PersonKind = 'character' | 'staff'
@@ -54,8 +54,8 @@ async function readCache(kind: PersonKind, personId: number): Promise<RussianPer
   const key = memoryKey(kind, personId)
   asked.add(key)
 
-  const record = await dbGet<ShikiCacheRecord<RussianPerson>>(
-    'shikiCache',
+  const record = await dbGet<MediaCacheRecord<RussianPerson>>(
+    'mediaCache',
     cacheKey(kind, personId),
   )
   if (!record || typeof record.ts !== 'number') return null
@@ -67,7 +67,7 @@ async function readCache(kind: PersonKind, personId: number): Promise<RussianPer
 
 /** Кладёт карточку на склад. Отсутствие перевода на склад не пишется. */
 async function writeCache(kind: PersonKind, personId: number, data: RussianPerson): Promise<void> {
-  await dbSet('shikiCache', { key: cacheKey(kind, personId), data, ts: Date.now() })
+  await dbSet('mediaCache', { key: cacheKey(kind, personId), data, ts: Date.now() })
 }
 
 /** Описание с Шикимори приходит с BBcode: теги выкидываются, текст остаётся. */

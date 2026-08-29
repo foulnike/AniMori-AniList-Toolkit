@@ -23,7 +23,7 @@ import { dbGet, dbSet } from './db'
 import { fetchMalIds } from '../api/anilist-media'
 import { resolveTitle } from '../api/titles'
 import { Logger } from '../utils/logger'
-import type { MediaCacheRecord, ShikiCacheRecord } from './types'
+import type { MediaCacheRecord } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи: RU3 — с оценками площадок. */
 const KEY_PREFIX = 'RU3_'
@@ -110,7 +110,7 @@ function nonameKey(mediaId: number): string {
 async function readCache(mediaId: number): Promise<RussianTitle | null> {
   asked.add(mediaId)
 
-  const record = await dbGet<ShikiCacheRecord<RussianTitle>>('shikiCache', cacheKey(mediaId))
+  const record = await dbGet<MediaCacheRecord<RussianTitle>>('mediaCache', cacheKey(mediaId))
   if (!record || typeof record.ts !== 'number') return null
   if (Date.now() - record.ts > CACHE_TIME) return null
 
@@ -120,7 +120,7 @@ async function readCache(mediaId: number): Promise<RussianTitle | null> {
 
 /** Кладёт карточку на склад. Отсутствие перевода на склад карточек не пишется. */
 async function writeCache(mediaId: number, data: RussianTitle): Promise<void> {
-  await dbSet('shikiCache', { key: cacheKey(mediaId), data, ts: Date.now() })
+  await dbSet('mediaCache', { key: cacheKey(mediaId), data, ts: Date.now() })
 }
 
 /** Читает имя со склада имён. Протухшая запись считается отсутствующей. */

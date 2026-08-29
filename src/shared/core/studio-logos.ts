@@ -5,7 +5,7 @@
 import { dbGet, dbSet } from './db'
 import { fetchShiki } from '../api/shikimori'
 import { Logger } from '../utils/logger'
-import type { ShikiCacheRecord } from './types'
+import type { MediaCacheRecord } from './types'
 
 /** Ключ единственной записи на складе. Цифра — версия формы записи. */
 const CACHE_KEY = 'STUDIOS1'
@@ -24,7 +24,7 @@ interface ShikiStudio {
 }
 
 async function load(): Promise<Map<string, string> | null> {
-  const cached = await dbGet<ShikiCacheRecord<Record<string, string>>>('shikiCache', CACHE_KEY)
+  const cached = await dbGet<MediaCacheRecord<Record<string, string>>>('mediaCache', CACHE_KEY)
   if (cached?.data && typeof cached.data === 'object') {
     const map = new Map(Object.entries(cached.data))
     if (map.size > 0) return map
@@ -46,7 +46,7 @@ async function load(): Promise<Map<string, string> | null> {
 
   if (map.size === 0) return null
 
-  await dbSet('shikiCache', { key: CACHE_KEY, data: Object.fromEntries(map), ts: Date.now() })
+  await dbSet('mediaCache', { key: CACHE_KEY, data: Object.fromEntries(map), ts: Date.now() })
   Logger('DB', `Литографии студий: на складе ${map.size}`)
   return map
 }

@@ -1,5 +1,5 @@
 // Клиент AnimeThemes.moe: опенинги и эндинги по MAL ID.
-// Единственный API без ключа и без зеркал, зато с обязательным кэшем shikiCache.
+// Единственный API без ключа и без зеркал, зато с обязательным кэшем mediaCache.
 // Пустой результат тоже кэшируется: иначе тайтлы без тем дёргали бы API каждый раз.
 
 import { Bridge, type HttpResponse } from '@/bridge'
@@ -7,7 +7,7 @@ import { CACHE_TIME } from '../core/constants'
 import { dbGet, dbSet } from '../core/db'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
-import type { ShikiCacheRecord } from '../core/types'
+import type { MediaCacheRecord } from '../core/types'
 import { MAX_RATE_RETRIES, animeThemesLimiter } from './rate-limit'
 
 /** Базовый адрес собран конкатенацией: литерал схемы в шаблонной строке ломался при отправке. */
@@ -72,7 +72,7 @@ function formatThemes(themes: AnimeThemesEntry[]): MalThemes {
 }
 
 /**
- * Грузит темы по MAL ID; кэш — shikiCache, ключ THEMES2_<malId>.
+ * Грузит темы по MAL ID; кэш — mediaCache, ключ THEMES2_<malId>.
  * Никогда не отклоняется: любая неудача — null, иначе сбой всплывёт в mount() виджета.
  * @param malId Идентификатор MyAnimeList или null, если его не удалось разрешить.
  * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
@@ -81,7 +81,7 @@ export async function fetchMalThemes(malId: number | null, attempt = 0): Promise
   if (!malId) return null
 
   const cacheKey = `THEMES2_${malId}`
-  const cached = await dbGet<ShikiCacheRecord<MalThemes>>('shikiCache', cacheKey)
+  const cached = await dbGet<MediaCacheRecord<MalThemes>>('mediaCache', cacheKey)
   if (cached && Date.now() - cached.ts < CACHE_TIME) return cached.data
 
   Logger('API', `Запрос AnimeThemes.moe для MAL ID: ${malId}`)
@@ -144,12 +144,12 @@ export async function fetchMalThemes(malId: number | null, attempt = 0): Promise
     // Не найдено — кэшируем пустой результат.
     if (animeList.length === 0) {
       const emptyData: MalThemes = { openings: [], endings: [] }
-      void dbSet('shikiCache', { key: cacheKey, data: emptyData, ts: Date.now() })
+      void dbSet('mediaCache', { key: cacheKey, data: emptyData, ts: Date.now() })
       return emptyData
     }
 
     const formattedData = formatThemes(animeList[0]?.animethemes ?? [])
-    void dbSet('shikiCache', { key: cacheKey, data: formattedData, ts: Date.now() })
+    void dbSet('mediaCache', { key: cacheKey, data: formattedData, ts: Date.now() })
     return formattedData
   } catch (e) {
     Logger('ERROR', 'Ошибка парсинга AnimeThemes', e)
