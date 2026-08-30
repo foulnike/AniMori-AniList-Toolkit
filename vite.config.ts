@@ -86,7 +86,7 @@ export default defineConfig({
     // emptyOutDir: !isTauri — тауринная сборка не имела права снести уже собранный
     // рядом animori.user.js, и порядок шагов в CI был обязателен.
     emptyOutDir: true,
-    minify: false,
-    target: 'esnext',
+    minify: 'esbuild',
+    target: 'es2022',
   },
 })
