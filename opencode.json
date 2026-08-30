@@ -1,0 +1,47 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "small_model": "anymodel/am/free",
+  "plugin": ["opencode-caveman@0.1.4"],
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["C:/Users/Nike/AppData/Local/github-mcp-server/github-mcp-server.exe", "stdio"],
+      "enabled": true,
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "GITHUB_TOOLSETS": "context,repos,issues,pull_requests,actions"
+      },
+      "timeout": 15000
+    },
+    "codebase-memory": {
+      "type": "local",
+      "command": ["codebase-memory-mcp", "--tool-profile=analysis", "--ui=false"],
+      "cwd": "D:/Renforge/Animori Desktop/animori desktop",
+      "enabled": true,
+      "timeout": 30000
+    }
+  },
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      "dist/**",
+      "src-tauri/target/**",
+      ".git/**",
+      ".idea/**"
+    ]
+  },
+  "tool_output": {
+    "max_lines": 300,
+    "max_bytes": 16384
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "tail_turns": 10,
+    "preserve_recent_tokens": 12000
+  },
+  "experimental": {
+    "batch_tool": true,
+    "mcp_timeout": 30000
+  }
+}
