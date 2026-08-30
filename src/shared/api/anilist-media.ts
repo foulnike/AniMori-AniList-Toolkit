@@ -12,6 +12,10 @@ const PAGE_SIZE = 50
 /** Сколько находок на странице поиска. Больше одного экрана всё равно не читают. */
 export const SEARCH_PAGE_SIZE = 20
 
+/** MAL-соответствия живут весь запуск: один тайтл нужен нескольким виджетам. */
+const malMemory = new Map<number, number | null>()
+let malInFlight: Promise<void> | null = null
+
 // Вид вписан словом, а не вынесен в переменную: переменная была единственным
 // местом, где ошибка вызова привела бы мангу обратно в ответ.
 const MAL_QUERY = `query ($ids: [Int], $perPage: Int) {
@@ -392,27 +396,51 @@ export interface StudioPage {
  * Тайтлы без номера MAL в ответ не попадают: русского источника для них нет.
  */
 export async function fetchMalIds(ids: number[]): Promise<Map<number, number>> {
-  const found = new Map<number, number>()
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
+  const found = new Map<number, number>()
+  const unknown = unique.filter((id) => !malMemory.has(id))
 
-  for (let from = 0; from < unique.length; from += PAGE_SIZE) {
-    const chunk = unique.slice(from, from + PAGE_SIZE)
-    const reply = await anilistQuery<MalReply>(MAL_QUERY, {
-      ids: chunk,
-      perPage: PAGE_SIZE,
-    })
+  if (unknown.length > 0) {
+    if (malInFlight) await malInFlight
 
-    const media = reply.data?.Page?.media
-    if (!Array.isArray(media)) {
-      // Пачка потеряна, но соседние могут дойти: обрывать обход смысла нет.
-      Logger('WARN', `Соответствия MAL: пустой ответ на пачку из ${chunk.length}`)
-      continue
+    const remaining = unique.filter((id) => !malMemory.has(id))
+    if (remaining.length > 0) {
+      malInFlight = (async () => {
+        for (let from = 0; from < remaining.length; from += PAGE_SIZE) {
+          const chunk = remaining.slice(from, from + PAGE_SIZE)
+          const reply = await anilistQuery<MalReply>(MAL_QUERY, {
+            ids: chunk,
+            perPage: PAGE_SIZE,
+          })
+
+          const media = reply.data?.Page?.media
+          if (!Array.isArray(media)) {
+            Logger('WARN', `Соответствия MAL: пустой ответ на пачку из ${chunk.length}`)
+            continue
+          }
+
+          const seen = new Set<number>()
+          for (const item of media) {
+            if (!item || typeof item.id !== 'number') continue
+            seen.add(item.id)
+            malMemory.set(item.id, typeof item.idMal === 'number' && item.idMal > 0 ? item.idMal : null)
+          }
+          for (const id of chunk) {
+            if (!seen.has(id)) malMemory.set(id, null)
+          }
+        }
+      })()
+      try {
+        await malInFlight
+      } finally {
+        malInFlight = null
+      }
     }
+  }
 
-    for (const item of media) {
-      if (!item || typeof item.id !== 'number') continue
-      if (typeof item.idMal === 'number' && item.idMal > 0) found.set(item.id, item.idMal)
-    }
+  for (const id of unique) {
+    const malId = malMemory.get(id)
+    if (malId !== null && malId !== undefined) found.set(id, malId)
   }
 
   if (unique.length > 0) {
@@ -420,6 +448,11 @@ export async function fetchMalIds(ids: number[]): Promise<Map<number, number>> {
   }
 
   return found
+}
+
+/** Запоминает уже полученную пару из подробной карточки. */
+function rememberMalId(mediaId: number, malId: number | null): void {
+  if (mediaId > 0) malMemory.set(mediaId, malId)
 }
 
 /** Целое неотрицательное или `null`: чужие пустоты в числа превращать нельзя. */
@@ -525,6 +558,8 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     Logger('WARN', `Карточка ${mediaId}: сервер тайтл не назвал`, reply.errors)
     return null
   }
+
+  rememberMalId(media.id, countOrNull(media.idMal))
 
   return {
     mediaId: media.id,

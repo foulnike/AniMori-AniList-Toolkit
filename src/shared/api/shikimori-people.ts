@@ -20,6 +20,7 @@ export type PersonEndpoint = 'characters' | 'people'
 
 /** Штрафная пауза, когда 429 пришёл именно на поиске персон. */
 const PERSON_RATE_PAUSE_MS = 6000
+const PERSON_TIMEOUT_MS = 7000
 
 export interface ShikiPerson {
   id: number
@@ -75,6 +76,7 @@ async function request(opts: {
       url: opts.url,
       headers: opts.headers,
       body: opts.data,
+      timeoutMs: PERSON_TIMEOUT_MS,
       credentials: 'omit',
     })
 

@@ -22,6 +22,9 @@ export const NET_LABEL_ANIMETHEMES = 'AnimeThemes'
 
 /** Пауза перед повтором после 429. Джиттер разводит одновременные повторы. */
 const RETRY_DELAY_MS = 1500
+const REQUEST_TIMEOUT_MS = 10000
+
+const pendingThemes = new Map<number, Promise<MalThemes | null>>()
 
 export interface ThemeItem {
   seq: string
@@ -77,8 +80,22 @@ function formatThemes(themes: AnimeThemesEntry[]): MalThemes {
  * @param malId Идентификатор MyAnimeList или null, если его не удалось разрешить.
  * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
  */
-export async function fetchMalThemes(malId: number | null, attempt = 0): Promise<MalThemes | null> {
+export async function fetchMalThemes(malId: number | null): Promise<MalThemes | null> {
   if (!malId) return null
+
+  const pending = pendingThemes.get(malId)
+  if (pending) return pending
+
+  const task = fetchMalThemesAttempt(malId)
+  pendingThemes.set(malId, task)
+  try {
+    return await task
+  } finally {
+    pendingThemes.delete(malId)
+  }
+}
+
+async function fetchMalThemesAttempt(malId: number, attempt = 0): Promise<MalThemes | null> {
 
   const cacheKey = `THEMES2_${malId}`
   const cached = await dbGet<MediaCacheRecord<MalThemes>>('mediaCache', cacheKey)
@@ -96,9 +113,10 @@ export async function fetchMalThemes(malId: number | null, attempt = 0): Promise
     res = await Bridge.http.request({
       method: 'GET',
       url:
-        API_BASE +
+         API_BASE +
         '?filter[has]=resources&filter[site]=MyAnimeList' +
-        `&filter[external_id]=${malId}&include=animethemes.song.artists`,
+         `&filter[external_id]=${malId}&include=animethemes.song.artists`,
+      timeoutMs: REQUEST_TIMEOUT_MS,
     })
   } catch (e) {
     // Сюда приходит только транспортный сбой, таймаут или отмена.
@@ -129,7 +147,7 @@ export async function fetchMalThemes(malId: number | null, attempt = 0): Promise
       `AnimeThemes 429: пауза ${waitMs}мс, повтор ${attempt + 2}/${MAX_RATE_RETRIES} — MAL ${malId}`,
     )
     // Повтор пойдёт через шлюз и сам дождётся конца паузы.
-    return fetchMalThemes(malId, attempt + 1)
+    return fetchMalThemesAttempt(malId, attempt + 1)
   }
 
   if (res.status !== 200) {
