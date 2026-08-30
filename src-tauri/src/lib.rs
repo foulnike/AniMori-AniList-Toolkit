@@ -12,6 +12,7 @@
 // Окно создаётся здесь, а не в tauri.conf.json, чтобы способ создания был один
 // и виден в одном месте.
 
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
@@ -96,6 +97,7 @@ fn animori_open_external(app: AppHandle, url: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(anilist::AniListClientState::default())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         // Плагин открывает адреса в системных приложениях и нужен только со стороны Rust:
@@ -136,13 +138,21 @@ pub fn run() {
             proxy::animori_proxy_probe
         ])
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            let log_level = if cfg!(debug_assertions) {
+                log::LevelFilter::Info
+            } else {
+                log::LevelFilter::Warn
+            };
+
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log_level)
+                    .rotation_strategy(RotationStrategy::KeepOne)
+                    .timezone_strategy(TimezoneStrategy::UseLocal)
+                    .max_file_size(2_000_000)
+                    .targets([Target::new(TargetKind::LogDir { file_name: None })])
+                    .build(),
+            )?;
 
             // Прокси — СТРОГО до создания первого окна: движок читает аргументы один раз,
             // на первом окне. Первым идёт своё окно, окно входа открывается позже и

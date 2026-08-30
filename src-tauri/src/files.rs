@@ -43,29 +43,37 @@ fn resolve(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String> {
 /// Пишет текст в файл целиком. Сначала во временный соседний файл, потом
 /// переименованием: иначе гибель процесса оставит обрезанный снимок.
 #[tauri::command]
-pub fn animori_file_write(app: AppHandle, name: String, text: String) -> Result<(), String> {
+pub async fn animori_file_write(app: AppHandle, name: String, text: String) -> Result<(), String> {
     if text.len() > MAX_BYTES {
         return Err(format!("Файл слишком большой: {} байт", text.len()));
     }
 
-    let path = resolve(&app, &name)?;
-    let temp = path.with_extension("tmp");
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = resolve(&app, &name)?;
+        let temp = path.with_extension("tmp");
 
-    fs::write(&temp, text.as_bytes()).map_err(|e| format!("Не записать файл: {e}"))?;
-    fs::rename(&temp, &path).map_err(|e| format!("Не заменить файл: {e}"))?;
+        fs::write(&temp, text.as_bytes()).map_err(|e| format!("Не записать файл: {e}"))?;
+        fs::rename(&temp, &path).map_err(|e| format!("Не заменить файл: {e}"))?;
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Запись файла не завершилась: {e}"))?
 }
 
 /// Читает файл целиком. Отсутствие файла — не ошибка, а None: первый
 /// запуск выглядит ровно так же, как запуск без дубля.
 #[tauri::command]
-pub fn animori_file_read(app: AppHandle, name: String) -> Result<Option<String>, String> {
-    let path = resolve(&app, &name)?;
+pub async fn animori_file_read(app: AppHandle, name: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = resolve(&app, &name)?;
 
-    match fs::read_to_string(&path) {
-        Ok(text) => Ok(Some(text)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("Не прочитать файл: {e}")),
-    }
+        match fs::read_to_string(&path) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Не прочитать файл: {e}")),
+        }
+    })
+    .await
+    .map_err(|e| format!("Чтение файла не завершилось: {e}"))?
 }

@@ -3,6 +3,7 @@
 // а заголовок авторизации подставляет сама, читая настройки.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -29,6 +30,20 @@ const KEY_PROXY_PASSWORD: &str = "set_proxy_pass";
 
 /// Потолок ожидания ответа. AniList отвечает за секунды, всё дольше — авария.
 const TIMEOUT_SECS: u64 = 30;
+
+struct CachedClient {
+    key: String,
+    client: reqwest::Client,
+}
+
+/** Переиспользует TLS-сессии и соединения до смены настроек прокси. */
+pub struct AniListClientState(Mutex<Option<CachedClient>>);
+
+impl Default for AniListClientState {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
 
 /// Ответ в том же виде, что HttpResponse у моста, кроме адреса: он всегда один.
 /// Заголовки идут наверх целиком: по ним ограничитель узнаёт остаток лимита.
@@ -152,6 +167,40 @@ fn build_client(app: &AppHandle) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("network: клиент не собрался: {e}"))
 }
 
+fn client_key(proxy: &Option<(String, String, String)>) -> String {
+    match proxy {
+        Some((url, login, password)) => format!("{url}\u{0}{login}\u{0}{password}"),
+        None => String::new(),
+    }
+}
+
+fn cached_client(app: &AppHandle, state: &AniListClientState) -> Result<reqwest::Client, String> {
+    let proxy = read_proxy(app);
+    let key = client_key(&proxy);
+
+    {
+        let guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = guard.as_ref() {
+            if cached.key == key {
+                return Ok(cached.client.clone());
+            }
+        }
+    }
+
+    let client = build_client(app)?;
+    let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = guard.as_ref() {
+        if cached.key == key {
+            return Ok(cached.client.clone());
+        }
+    }
+    *guard = Some(CachedClient {
+        key,
+        client: client.clone(),
+    });
+    Ok(client)
+}
+
 /// Вид сбоя префиксом в тексте ошибки: кода ответа тут нет, а мосту нужно
 /// поднять свой класс сбоя. Второе место разбора — TauriAniList.ts.
 fn classify(error: reqwest::Error) -> String {
@@ -172,6 +221,7 @@ fn classify(error: reqwest::Error) -> String {
 #[tauri::command]
 pub async fn animori_anilist_query(
     app: AppHandle,
+    state: tauri::State<'_, AniListClientState>,
     body: String,
     use_auth: bool,
 ) -> Result<AniListReply, String> {
@@ -181,7 +231,7 @@ pub async fn animori_anilist_query(
         return Err("Вход в AniList не выполнен".to_string());
     }
 
-    let client = build_client(&app)?;
+    let client = cached_client(&app, &state)?;
 
     let mut request = client
         .post(GRAPHQL_URL)
