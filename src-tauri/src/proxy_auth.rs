@@ -6,10 +6,10 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use tauri::{AppHandle, WebviewWindow};
+use webview2_com::BasicAuthenticationRequestedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Controller, ICoreWebView2_10,
 };
-use webview2_com::BasicAuthenticationRequestedEventHandler;
 use windows::core::{Interface, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::System::Com::CoTaskMemFree;
 

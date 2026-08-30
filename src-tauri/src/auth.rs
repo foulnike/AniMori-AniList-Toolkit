@@ -415,7 +415,12 @@ fn serve(app: &AppHandle, stream: TcpStream) -> bool {
         }
         Err(e) => {
             log::warn!("Пропуск из адреса возврата не принят: {e}");
-            page(stream, "Не вышло", "Пропуск не принят. Попробуй ещё раз.", "");
+            page(
+                stream,
+                "Не вышло",
+                "Пропуск не принят. Попробуй ещё раз.",
+                "",
+            );
             false
         }
     }
@@ -470,7 +475,10 @@ fn start_receiver(app: &AppHandle) -> Result<(), String> {
     });
 
     // Адрес возврата в журнал: сверить его с консолью клиента больше негде.
-    log::info!("Приёмник входа слушает свой порт, адрес возврата: {}", relay_url());
+    log::info!(
+        "Приёмник входа слушает свой порт, адрес возврата: {}",
+        relay_url()
+    );
     Ok(())
 }
 
@@ -499,15 +507,14 @@ fn open_login_window(app: &AppHandle, url: &str) -> Result<(), String> {
     // «зависло внутри создания».
     log::info!("Создаю окно входа AniList");
 
-    let window =
-        WebviewWindowBuilder::new(app, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
-            .title("Вход в AniList")
-            .inner_size(520.0, 720.0)
-            .min_inner_size(420.0, 560.0)
-            .resizable(true)
-            .center()
-            .build()
-            .map_err(|e| ["Окно входа не открылось: ", &e.to_string()].concat())?;
+    let window = WebviewWindowBuilder::new(app, LOGIN_WINDOW_LABEL, WebviewUrl::External(address))
+        .title("Вход в AniList")
+        .inner_size(520.0, 720.0)
+        .min_inner_size(420.0, 560.0)
+        .resizable(true)
+        .center()
+        .build()
+        .map_err(|e| ["Окно входа не открылось: ", &e.to_string()].concat())?;
 
     // Прокси с паролем спрашивает учётные данные на первом же соединении,
     // а подписка действует только вперёд — потому сразу после создания окна.

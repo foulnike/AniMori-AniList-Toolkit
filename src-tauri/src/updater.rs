@@ -99,7 +99,10 @@ async fn check(app: AppHandle) {
     // загрузки, второй — один раз по её окончании. Прогресс намеренно не показывается:
     // проверка живёт в Rust и в разметку не ходит вовсе, а полосу покажет сам
     // установщик — installMode = passive в tauri.conf.json.
-    if let Err(err) = update.download_and_install(|_chunk, _total| {}, || {}).await {
+    if let Err(err) = update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+    {
         log::error!("Установка обновления {version} не удалась: {err}");
         app.dialog()
             .message(format!(
