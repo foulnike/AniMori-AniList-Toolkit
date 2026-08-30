@@ -73,7 +73,7 @@ function parseIndex(raw: unknown): DatasetIndex | null {
 
   const files: DatasetFileRef[] = []
   for (const item of candidate.files) {
-    if (typeof item !== 'object' || item === null) return null
+    if (!item || typeof item !== 'object') return null
     const row = item as Partial<DatasetFileRef>
     if (typeof row.name !== 'string' || row.name === '') return null
     if (typeof row.sha256 !== 'string' || row.sha256 === '') return null
@@ -136,7 +136,9 @@ export async function fetchDatasetIndex(): Promise<DatasetIndex | null> {
     }
 
     const index = parseIndex(JSON.parse(res.text))
-    if (!index) Logger('WARN', 'Датасет: опись не разобрана')
+    if (!index) {
+      Logger('WARN', 'Датасет: опись не разобрана', res.text.slice(0, 200))
+    }
     return index
   } catch (e) {
     Logger('WARN', 'Датасет: опись не загрузилась', e)

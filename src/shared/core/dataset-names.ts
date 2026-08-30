@@ -59,7 +59,14 @@ function parseDataset(raw: string): boolean {
     return false
   }
 
-  if (data.v !== 1 || !Array.isArray(data.titles) || !Array.isArray(data.pairs)) return false
+  if (data.v !== 1) {
+    Logger('WARN', `Датасет: не та версия файла (${data.v})`)
+    return false
+  }
+  if (!Array.isArray(data.titles) || !Array.isArray(data.pairs)) {
+    Logger('WARN', 'Датасет: в файле нет массивов имен или пар')
+    return false
+  }
 
   const titles = new Map<number, string>()
   for (const row of data.titles) {
@@ -94,8 +101,9 @@ export function initDatasetNames(): Promise<boolean> {
     const raw = await Bridge.files.read(DATASET_FILE)
     if (raw === null) return false
 
-    if (!parseDataset(raw)) {
-      Logger('WARN', 'Датасет: файл на диске не разобран, работаем без него')
+    const parsed = parseDataset(raw)
+    if (!parsed) {
+      Logger('WARN', `Датасет: файл на диске не разобран (${raw.length} байт), работаем без него`)
       return false
     }
 
@@ -182,8 +190,17 @@ function payloadOk(
  * не попадает: менять имена под рукой у человека нехорошо, новый выпуск
  * работает со следующего запуска.
  */
-export function updateDatasetNamesInBackground(): void {
-  if (!Bridge.files.available || updating) return
+/** Сброс состояния для изолированных тестов запуска. На проде не используется. */
+export function resetDatasetNames(): void {
+  titlesByMal = null
+  byAnilist = null
+  installedBuiltAt = ''
+  loading = null
+  updating = null
+}
+
+export function updateDatasetNamesInBackground(): Promise<void> | undefined {
+  if (!Bridge.files.available || updating) return undefined
 
   updating = (async () => {
     // Сначала диск: сравнивать даты есть с чем только после подъёма.
@@ -224,17 +241,20 @@ export function updateDatasetNamesInBackground(): void {
 
     const ok = await Bridge.files.write(DATASET_FILE, JSON.stringify(file))
     if (ok) {
+      loading = null
+      await initDatasetNames()
       Logger('DB', `Датасет обновлён до сборки ${index.builtAt}: имён ${titles.count}`)
     } else {
       Logger('WARN', 'Датасет: новый выпуск не записался на диск')
     }
   })()
 
-  void updating
+  updating
     .catch((e) => {
       Logger('WARN', 'Датасет: фоновое обновление не удалось', e)
     })
     .finally(() => {
       updating = null
     })
+  return updating
 }
