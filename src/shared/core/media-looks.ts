@@ -42,6 +42,8 @@ const memory = new Map<number, MediaLook | null>()
  * сеть спросить всё ещё стоит, а склад второй раз — уже нет.
  */
 const asked = new Set<number>()
+const cacheReads = new Map<number, Promise<MediaLook | null>>()
+let warmInFlight: Promise<number> | null = null
 
 function cacheKey(mediaId: number): string {
   return `${KEY_PREFIX}${mediaId}`
@@ -78,19 +80,31 @@ function airedOut(look: MediaLook): boolean {
 
 /** Читает облик со склада. Протухшая запись считается отсутствующей. */
 async function readCache(mediaId: number): Promise<MediaLook | null> {
+  const pending = cacheReads.get(mediaId)
+  if (pending) return pending
+  if (asked.has(mediaId)) return null
+
   asked.add(mediaId)
 
-  const record = await dbGet<MediaCacheRecord<MediaLook>>('mediaCache', cacheKey(mediaId))
-  if (!record || typeof record.ts !== 'number') return null
-  if (Date.now() - record.ts > CACHE_TIME) return null
+  const task = (async () => {
+    const record = await dbGet<MediaCacheRecord<MediaLook>>('mediaCache', cacheKey(mediaId))
+    if (!record || typeof record.ts !== 'number') return null
+    if (Date.now() - record.ts > CACHE_TIME) return null
 
-  const data = record.data
-  if (!data || typeof data !== 'object') return null
+    const data = record.data
+    if (!data || typeof data !== 'object') return null
 
-  // Серия уже вышла: счёт в записи отстал, облик берётся из сети заново.
-  if (airedOut(data)) return null
+    // Серия уже вышла: счёт в записи отстал, облик берётся из сети заново.
+    if (airedOut(data)) return null
 
-  return data
+    return data
+  })()
+  cacheReads.set(mediaId, task)
+  void task.then(
+    () => cacheReads.delete(mediaId),
+    () => cacheReads.delete(mediaId),
+  )
+  return task
 }
 
 /** Кладёт облик на склад. Сама картинка не хранится — только её адрес. */
@@ -137,29 +151,45 @@ export function rememberBrief(brief: MediaBrief): void {
  * Готовит облик для показанного куска списка: сначала склад, потом сеть.
  * Сотня строк стоит двух запросов, а второй заход в ту же закладку — ни одного.
  */
-export async function warmLooks(mediaIds: number[]): Promise<number> {
+export function warmLooks(mediaIds: number[]): Promise<number> {
+  return (async () => {
+    if (warmInFlight) await warmInFlight
+
+    const task = warmLooksImpl(mediaIds)
+    warmInFlight = task
+    try {
+      return await task
+    } finally {
+      if (warmInFlight === task) warmInFlight = null
+    }
+  })()
+}
+
+async function warmLooksImpl(mediaIds: number[]): Promise<number> {
   const unknown: number[] = []
 
-  for (const mediaId of mediaIds) {
-    const known = memory.get(mediaId)
+  await Promise.all(
+    mediaIds.map(async (mediaId) => {
+      const known = memory.get(mediaId)
 
-    // У онгоинга знание запуска тоже устаревает: окно живёт днями.
-    if (known !== undefined && !(known !== null && airedOut(known))) continue
+      // У онгоинга знание запуска тоже устаревает: окно живёт днями.
+      if (known !== undefined && !(known !== null && airedOut(known))) return
 
-    if (!asked.has(mediaId)) {
       try {
         const cached = await readCache(mediaId)
-        if (cached) {
-          memory.set(mediaId, cached)
-          continue
-        }
+        if (cached) memory.set(mediaId, cached)
       } catch (e) {
         // Склад мог не открыться: без него облик возьмём из сети.
         Logger('WARN', `Облик: склад не ответил по тайтлу ${mediaId}`, e)
       }
-    }
+    }),
+  )
 
-    unknown.push(mediaId)
+  for (const mediaId of mediaIds) {
+    const known = memory.get(mediaId)
+    if (!memory.has(mediaId) || (known !== undefined && known !== null && airedOut(known))) {
+      unknown.push(mediaId)
+    }
   }
 
   if (unknown.length === 0) return 0
@@ -185,7 +215,9 @@ export async function warmLooks(mediaIds: number[]): Promise<number> {
       memory.set(brief.mediaId, look)
       seen.add(brief.mediaId)
       added++
-      await writeCache(brief.mediaId, look)
+      void writeCache(brief.mediaId, look).catch((e) => {
+        Logger('WARN', `Облик: тайтл ${brief.mediaId} на склад не лёг`, e)
+      })
     }
 
     // Чего сервер не назвал в ответе на свою же пачку — того он не знает.
@@ -202,4 +234,5 @@ export async function warmLooks(mediaIds: number[]): Promise<number> {
 export function forgetLooks(): void {
   memory.clear()
   asked.clear()
+  cacheReads.clear()
 }

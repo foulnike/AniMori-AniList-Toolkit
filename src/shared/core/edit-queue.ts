@@ -4,7 +4,7 @@
 
 import { Bridge } from '@/bridge'
 import { Logger } from '../utils/logger'
-import { serialWrite } from './store-chain'
+import { serial } from './store-chain'
 
 /** Ключ хранилища моста. Приставка AM_ занята только нашими записями. */
 const QUEUE_KEY = 'AM_EDIT_QUEUE'
@@ -52,8 +52,8 @@ function isEdit(value: unknown): value is PendingEdit {
   return typeof edit.id === 'string' && typeof edit.mediaId === 'number' && !!edit.kind
 }
 
-/** Читает очередь правок. Порядок соблюдается: две правки одного тайтла не коммутируют. */
-export async function readEditQueue(): Promise<PendingEdit[]> {
+/** Читает очередь без постановки отдельного чтения в цепь. */
+async function readQueueRaw(): Promise<PendingEdit[]> {
   try {
     const raw = await Bridge.storage.get<unknown>(QUEUE_KEY)
     if (!Array.isArray(raw)) return []
@@ -64,19 +64,20 @@ export async function readEditQueue(): Promise<PendingEdit[]> {
   }
 }
 
-/**
- * Перезаписывает очередь целиком и дожидается диска.
- * Очередь крошечная, поэтому частичная запись не нужна и только мешала бы.
- */
-async function writeQueue(edits: PendingEdit[]): Promise<void> {
-  return serialWrite(async () => {
-    try {
-      await Bridge.storage.set(QUEUE_KEY, edits)
-      await Bridge.storage.flush()
-    } catch (e) {
-      Logger('ERROR', 'Очередь правок: ошибка записи', e)
-    }
+/** Выполняет чтение-изменение-запись одной неделимой операцией. */
+async function mutateQueue<T>(mutate: (queue: PendingEdit[]) => T): Promise<T> {
+  return serial(async () => {
+    const queue = await readQueueRaw()
+    const result = mutate(queue)
+    await Bridge.storage.set(QUEUE_KEY, queue)
+    await Bridge.storage.flush()
+    return result
   })
+}
+
+/** Читает очередь правок. Порядок соблюдается: две правки одного тайтла не коммутируют. */
+export async function readEditQueue(): Promise<PendingEdit[]> {
+  return serial(readQueueRaw)
 }
 
 /**
@@ -97,29 +98,28 @@ export async function enqueueEdit(
     attempts: 0,
   }
 
-  const queue = await readEditQueue()
+  const queueLength = await mutateQueue((queue) => {
+    // Переполнение решается в пользу свежих правок: старые уже перекрыты новыми.
+    if (queue.length >= QUEUE_LIMIT) {
+      const dropped = queue.length - QUEUE_LIMIT + 1
+      queue.splice(0, dropped)
+      Logger('WARN', `Очередь правок переполнена: отброшено старых правок ${dropped}`)
+    }
 
-  // Переполнение решается в пользу свежих правок: старые уже перекрыты новыми.
-  if (queue.length >= QUEUE_LIMIT) {
-    const dropped = queue.length - QUEUE_LIMIT + 1
-    queue.splice(0, dropped)
-    Logger('WARN', `Очередь правок переполнена: отброшено старых правок ${dropped}`)
-  }
-
-  queue.push(edit)
-  await writeQueue(queue)
-  Logger('DB', `Правка в очереди: ${kind} для ${mediaId}, всего ${queue.length}`)
+    queue.push(edit)
+    return queue.length
+  })
+  Logger('DB', `Правка в очереди: ${kind} для ${mediaId}, всего ${queueLength}`)
 
   return edit
 }
 
 /** Убирает принятую сервером правку. Неизвестный идентификатор ошибкой не считается. */
 export async function markEditAccepted(id: string): Promise<void> {
-  const queue = await readEditQueue()
-  const left = queue.filter((edit) => edit.id !== id)
-  if (left.length === queue.length) return
-
-  await writeQueue(left)
+  await mutateQueue((queue) => {
+    const index = queue.findIndex((edit) => edit.id === id)
+    if (index >= 0) queue.splice(index, 1)
+  })
 }
 
 /**
@@ -131,13 +131,16 @@ export async function markEditAccepted(id: string): Promise<void> {
  * и человек теряет не свои данные, а только их доставку на сайт.
  */
 export async function clearEditQueue(): Promise<number> {
-  const queue = await readEditQueue()
-  if (queue.length === 0) return 0
+  const count = await mutateQueue((queue) => {
+    const count = queue.length
+    queue.length = 0
+    return count
+  })
+  if (count === 0) return 0
 
-  await writeQueue([])
-  Logger('DB', `Очередь правок выброшена: правок ${queue.length}`)
+  Logger('DB', `Очередь правок выброшена: правок ${count}`)
 
-  return queue.length
+  return count
 }
 
 /**
@@ -145,12 +148,11 @@ export async function clearEditQueue(): Promise<number> {
  * Сама правка остаётся в очереди: бросать её или нет, решает отправщик.
  */
 export async function bumpEditAttempt(id: string): Promise<number> {
-  const queue = await readEditQueue()
-  const edit = queue.find((item) => item.id === id)
-  if (!edit) return 0
+  return mutateQueue((queue) => {
+    const edit = queue.find((item) => item.id === id)
+    if (!edit) return 0
 
-  edit.attempts++
-  await writeQueue(queue)
-
-  return edit.attempts
+    edit.attempts++
+    return edit.attempts
+  })
 }

@@ -10,6 +10,16 @@
  */
 let chain: Promise<void> = Promise.resolve()
 
+/** Ставит любую операцию чтения или записи в общий порядок хранилища. */
+export function serial<T>(task: () => Promise<T>): Promise<T> {
+  const done = chain.then(task)
+  chain = done.then(
+    () => undefined,
+    () => undefined,
+  )
+  return done
+}
+
 /**
  * Ставит запись в общий черёд и отдаёт обещание её окончания.
  *
@@ -18,7 +28,5 @@ let chain: Promise<void> = Promise.resolve()
  * вызывающему отказ виден: наружу отдаётся обещание задачи, а не цепочки.
  */
 export function serialWrite(task: () => Promise<void>): Promise<void> {
-  const done = chain.then(task)
-  chain = done.catch(() => {})
-  return done
+  return serial(task)
 }

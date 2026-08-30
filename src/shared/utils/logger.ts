@@ -145,6 +145,9 @@ export function clearLogs(): void {
 }
 
 export function Logger(type: LogType | string, message: string, details: unknown = null): void {
+  if ((globalThis as { __ANIMORI_LOGGER_ENABLED__?: boolean }).__ANIMORI_LOGGER_ENABLED__ === false) {
+    return
+  }
   if (!settings.enableLogger) return
 
   let parsedDetails = details
@@ -157,7 +160,7 @@ export function Logger(type: LogType | string, message: string, details: unknown
     d.getMilliseconds(),
   ).padStart(3, '0')}`
   const path = window.location.pathname
-  const stackLines = (new Error().stack ?? '').split('\n')
+  const stackLines = type === 'ERROR' || type === 'WARN' ? (new Error().stack ?? '').split('\n') : []
   const stack = stackLines.length > 2 ? stackLines.slice(2).join('\n') : ''
 
   const entry: LogEntry = {

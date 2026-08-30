@@ -295,6 +295,10 @@ export async function dbSet(store: CacheStoreName, data: CacheRecord): Promise<v
         Logger('ERROR', `Ошибка записи DB (${name})`, e)
         resolve()
       }
+      tx.onabort = () => {
+        Logger('ERROR', `Транзакция записи DB прервана (${name})`, tx.error)
+        resolve()
+      }
     })
   } catch (e) {
     Logger('ERROR', `Сбой dbSet (${name})`, e)
@@ -465,6 +469,7 @@ export async function getDbStats(): Promise<DbStats | DbStatsError> {
 
       tx.oncomplete = () => resolve(stats)
       tx.onerror = () => resolve({ error: 'Ошибка чтения метрик БД' })
+      tx.onabort = () => resolve({ error: 'Транзакция чтения метрик БД прервана' })
     })
   } catch (e) {
     Logger('ERROR', 'Сбой getDbStats', e)

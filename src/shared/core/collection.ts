@@ -31,6 +31,9 @@ let ownerUserId: number | null = null
 /** Поднят ли снимок с диска. Повторный подъём затёр бы свежие правки. */
 let loaded = false
 
+/** Общее ожидание первого подъёма: экраны не получают временно пустую карту. */
+let initInFlight: Promise<number> | null = null
+
 /** Идущее обновление с сервера: второй вызов ждёт первый, а не шлёт свой запрос. */
 let refreshInFlight: Promise<number> | null = null
 
@@ -147,17 +150,27 @@ async function applyPendingEdits(): Promise<number> {
  */
 export async function initCollection(): Promise<number> {
   if (loaded) return entries.size
-  loaded = true
+  if (initInFlight) return initInFlight
 
-  const snapshot = await readSnapshot()
-  ownerUserId = snapshot.userId
-  for (const entry of snapshot.entries) entries.set(entry.mediaId, entry)
+  initInFlight = (async () => {
+    const snapshot = await readSnapshot()
+    entries.clear()
+    ownerUserId = snapshot.userId
+    for (const entry of snapshot.entries) entries.set(entry.mediaId, entry)
 
-  await applyPendingEdits()
-  ownSnapshot(collectSnapshot)
-  Logger('DB', `Коллекция поднята из снимка: записей ${entries.size}`)
+    await applyPendingEdits()
+    ownSnapshot(collectSnapshot)
+    loaded = true
+    Logger('DB', `Коллекция поднята из снимка: записей ${entries.size}`)
 
-  return entries.size
+    return entries.size
+  })()
+
+  try {
+    return await initInFlight
+  } finally {
+    initInFlight = null
+  }
 }
 
 /**
@@ -190,11 +203,11 @@ export async function refreshFromServer(): Promise<number> {
     if (ownerUserId !== null && ownerUserId !== viewer.id) {
       Logger('WARN', `Коллекция: вход сменился (${ownerUserId} → ${viewer.id}), память замещена`)
     }
-    ownerUserId = viewer.id
-
     // Сначала ответ, и только потом память: отказ сети иначе оставит
     // пустой список вместо прежнего целого.
     const raw = await fetchUserList(viewer.id)
+
+    ownerUserId = viewer.id
 
     // Ответ замещает содержимое целиком. Заодно из памяти уходят записи
     // манги из старых снимков: читать их некому, а в числах у закладок

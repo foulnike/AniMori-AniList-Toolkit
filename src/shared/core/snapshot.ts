@@ -183,8 +183,12 @@ function normalizeEntry(entry: SnapshotEntry): SnapshotEntry {
  * Разбирает прочитанное в снимок. Стороннее и битое отбрасывается в пустой:
  * коллекция восстановима одним запросом, а половинчатый список вводит в заблуждение.
  */
-function parseSnapshot(raw: unknown): UserSnapshot {
-  if (typeof raw !== 'object' || raw === null) return emptySnapshot()
+type ParsedSnapshot = { valid: boolean; snapshot: UserSnapshot }
+
+function parseSnapshot(raw: unknown): ParsedSnapshot {
+  if (typeof raw !== 'object' || raw === null) {
+    return { valid: false, snapshot: emptySnapshot() }
+  }
 
   const candidate = raw as Partial<UserSnapshot>
   if (candidate.version !== SNAPSHOT_VERSION) {
@@ -194,10 +198,12 @@ function parseSnapshot(raw: unknown): UserSnapshot {
         `Снимок версии ${candidate.version} не подходит к ${SNAPSHOT_VERSION} — читаем с нуля`,
       )
     }
-    return emptySnapshot()
+    return { valid: false, snapshot: emptySnapshot() }
   }
 
-  if (!Array.isArray(candidate.entries)) return emptySnapshot()
+  if (!Array.isArray(candidate.entries)) {
+    return { valid: false, snapshot: emptySnapshot() }
+  }
 
   const entries = candidate.entries.filter(isEntry).map(normalizeEntry)
   if (entries.length !== candidate.entries.length) {
@@ -205,10 +211,13 @@ function parseSnapshot(raw: unknown): UserSnapshot {
   }
 
   return {
-    version: SNAPSHOT_VERSION,
-    userId: typeof candidate.userId === 'number' ? candidate.userId : null,
-    savedAt: typeof candidate.savedAt === 'number' ? candidate.savedAt : 0,
-    entries,
+    valid: true,
+    snapshot: {
+      version: SNAPSHOT_VERSION,
+      userId: typeof candidate.userId === 'number' ? candidate.userId : null,
+      savedAt: typeof candidate.savedAt === 'number' ? candidate.savedAt : 0,
+      entries,
+    },
   }
 }
 
@@ -223,9 +232,8 @@ async function readSnapshotFile(): Promise<UserSnapshot | null> {
   if (!raw) return null
 
   try {
-    const snapshot = parseSnapshot(JSON.parse(raw))
-    if (snapshot.entries.length === 0) return null
-    return snapshot
+    const parsed = parseSnapshot(JSON.parse(raw))
+    return parsed.valid ? parsed.snapshot : null
   } catch (e) {
     Logger('WARN', 'Снимок: дубль в файле не разобран', e)
     return null
@@ -250,10 +258,11 @@ async function writeSnapshotFile(payload: UserSnapshot): Promise<void> {
 export async function readSnapshot(): Promise<UserSnapshot> {
   try {
     const raw = await Bridge.storage.get<unknown>(SNAPSHOT_KEY)
-    const snapshot = parseSnapshot(raw)
+    const parsed = parseSnapshot(raw)
 
-    // Пустое хранилище при живом дубле — почистили данные окна со стороны.
-    if (snapshot.entries.length === 0) {
+    // Резерв используется только для отсутствующей или повреждённой записи.
+    // Валидный пустой снимок означает осознанное удаление списка.
+    if (!parsed.valid) {
       const backup = await readSnapshotFile()
       if (backup) {
         Logger('DB', `Снимок поднят из файла: записей ${backup.entries.length}`)
@@ -267,10 +276,15 @@ export async function readSnapshot(): Promise<UserSnapshot> {
       }
     }
 
-    Logger('DB', `Снимок прочитан: записей ${snapshot.entries.length}`)
-    return snapshot
+    Logger('DB', `Снимок прочитан: записей ${parsed.snapshot.entries.length}`)
+    return parsed.snapshot
   } catch (e) {
     Logger('ERROR', 'Снимок: ошибка чтения', e)
+    const backup = await readSnapshotFile()
+    if (backup) {
+      Logger('DB', `Снимок поднят из файла после ошибки чтения: записей ${backup.entries.length}`)
+      return backup
+    }
     return emptySnapshot()
   }
 }
