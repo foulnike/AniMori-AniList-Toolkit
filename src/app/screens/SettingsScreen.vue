@@ -2,7 +2,7 @@
 // Настройки: вход в AniList и распоряжение своими данными.
 // На экране только то, что человеку решать: как всё устроено внутри —
 // дело документации, а не карточки настроек.
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
 import {
@@ -23,7 +23,6 @@ import {
   refreshAuth,
   startLogin,
   submitToken,
-  watchAuth,
   type LoginStart,
 } from '../auth/session'
 import { navigate } from '../router'
@@ -109,8 +108,6 @@ const STALE_DAYS = 30
  * общий объект настроек не реактивен, и v-model по его полю не дал бы ответа на клик.
  */
 const adult = ref(settings.showAdult)
-
-let stopWatch: (() => void) | null = null
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -328,14 +325,6 @@ function ageText(days: number): string {
 onMounted(() => {
   void guard(refreshAuth)
   void readState()
-  void watchAuth().then((stop) => {
-    stopWatch = stop
-  })
-})
-
-onBeforeUnmount(() => {
-  stopWatch?.()
-  stopWatch = null
 })
 </script>
 

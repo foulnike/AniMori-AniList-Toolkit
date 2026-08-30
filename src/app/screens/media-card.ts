@@ -451,9 +451,13 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
     // Имя — сразу из памяти или датасета: ждать сетевую карточку ради
     // заголовка не нужно. Полная русская карточка с описанием доедет ниже.
-    void prefetchRussianNames([id]).then(() => {
-      if (mine === run) nameStamp.value += 1
-    })
+    void prefetchRussianNames([id])
+      .then(() => {
+        if (mine === run) nameStamp.value += 1
+      })
+      .catch((e) => {
+        Logger('WARN', `Карточка ${id}: фоновое имя не добралось`, e)
+      })
 
     try {
       const found = await fetchMediaCard(id)
@@ -468,18 +472,28 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
       // Литографии подгружаются фоном: чипы студий их не ждут.
       if (found.studios.length > 0) {
-        void studioLogos().then((map) => {
-          if (mine === run) logos.value = map
-        })
+        void studioLogos()
+          .then((map) => {
+            if (mine === run) logos.value = map
+          })
+          .catch((e) => {
+            Logger('WARN', `Карточка ${id}: логотипы студий не загрузились`, e)
+          })
       }
 
       // Оценки площадок — своим доходом: карточка их не ждёт.
-      void getTitleRatings(id, found.malId).then((marks) => {
-        if (mine === run) platformRatings.value = marks
-      })
+      void getTitleRatings(id, found.malId)
+        .then((marks) => {
+          if (mine === run) platformRatings.value = marks
+        })
+        .catch((e) => {
+          Logger('WARN', `Карточка ${id}: рейтинги не загрузились`, e)
+        })
 
       // Дерево франшизы — фоном: полка его не ждёт.
-      void beginFranchise(mine, id, found)
+      void beginFranchise(mine, id, found).catch((e) => {
+        Logger('WARN', `Карточка ${id}: франшиза не загрузилась`, e)
+      })
     } catch (e) {
       if (mine !== run) return
       trouble.value = describe(e)

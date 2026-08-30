@@ -27,8 +27,13 @@ export function parseHash(hash: string): Route {
 
   const params: Record<string, string> = {}
   const tail = parts[1]
-  if ((head === 'media' || head === 'studio') && tail !== undefined)
-    params.id = decodeURIComponent(tail)
+  if ((head === 'media' || head === 'studio') && tail !== undefined) {
+    try {
+      params.id = decodeURIComponent(tail)
+    } catch {
+      return DEFAULT_ROUTE
+    }
+  }
   return { name: head, params }
 }
 

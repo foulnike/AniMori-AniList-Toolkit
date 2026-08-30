@@ -19,6 +19,7 @@ import {
   type RussianPerson,
 } from '@/core/person-title'
 import { settings } from '@/core/settings'
+import { Logger } from '@/utils/logger'
 
 import { genderWord, langWord, occupationWord } from '../labels'
 
@@ -288,7 +289,9 @@ function goBackPerson(): void {
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  void load(props.start)
+  void load(props.start).catch((e) => {
+    Logger('WARN', 'Карточка персоны: загрузка не удалась', e)
+  })
 })
 
 onBeforeUnmount(() => {

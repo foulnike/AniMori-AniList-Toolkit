@@ -2,7 +2,7 @@
 // Плитка тайтла: постер, название и метки поверх картинки.
 // Одна на списки, поиск и полки главной: вид тайтла везде один.
 // Своих данных не добывает: сотня плиток ушла бы в сеть сотню раз.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface Props {
   title: string
@@ -47,6 +47,15 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ (e: 'open'): void; (e: 'hide'): void }>()
 
+const imageFailed = ref(false)
+
+watch(
+  () => props.cover,
+  () => {
+    imageFailed.value = false
+  },
+)
+
 /** Подложка в тон обложки: серый прямоугольник на месте картинки выглядит брошенным. */
 const artStyle = computed(() => ({
   background: props.color ?? 'linear-gradient(160deg, #1b2534, #0f151e)',
@@ -72,12 +81,13 @@ const hasTags = computed(
     <button class="am-tile__hit" type="button" :title="title" @click="emit('open')">
       <span class="am-tile__art" :style="artStyle">
         <img
-          v-if="cover"
+          v-if="cover && !imageFailed"
           class="am-tile__img"
           :src="cover"
           alt=""
           loading="lazy"
           decoding="async"
+          @error="imageFailed = true"
         />
         <span v-else class="am-tile__letter" aria-hidden="true">{{ letter }}</span>
 

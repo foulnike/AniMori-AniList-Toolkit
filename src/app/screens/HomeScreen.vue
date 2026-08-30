@@ -321,7 +321,6 @@ onMounted(() => {
 // Страж busy не пускает пересборку до подъёма снимка: иначе витрина встанет на пустом списке.
 watch(homeGenre, () => {
   if (busy.value) return
-  buildOwn()
   loadRecs()
 })
 </script>

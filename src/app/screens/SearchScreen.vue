@@ -2,7 +2,7 @@
 // Пункт 3.5: поиск по чужому каталогу. Поиск по своему списку живёт
 // во вкладке списков: там он идёт по памяти и сети не требует вовсе.
 // Куда идти за русским словом, решает core/media-search: экран только показывает.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
 import { initCollection } from '@/core/collection'
@@ -105,6 +105,14 @@ async function search(add = false): Promise<void> {
   busy.value = true
   trouble.value = ''
 
+  if (!add) {
+    briefs = []
+    rows.value = []
+    page.value = 1
+    hasNext.value = false
+    total.value = null
+  }
+
   const wanted = add ? page.value + 1 : 1
 
   try {
@@ -165,6 +173,13 @@ onMounted(() => {
       Logger('WARN', 'Поиск: свой список поднять не вышло', e)
     }
   })()
+})
+
+onBeforeUnmount(() => {
+  if (timer !== null) clearTimeout(timer)
+  timer = null
+  run++
+  titleRun++
 })
 </script>
 

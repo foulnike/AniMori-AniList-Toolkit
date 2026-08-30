@@ -306,6 +306,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (timer !== null) clearTimeout(timer)
+  timer = null
+  searchRun++
 
   watcher?.disconnect()
   watcher = null

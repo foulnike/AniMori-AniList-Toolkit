@@ -65,6 +65,7 @@ const donePart = computed(() => {
  * это правка в очередь и запрос к серверу, поэтому отдаём по уходу из поля.
  */
 const draft = ref(props.notes ?? '')
+let lastSent = props.notes ?? ''
 
 // Значение сверху могло измениться обновлением списка: подхватываем, но не
 // затираем то, что человек уже набрал в поле.
@@ -72,7 +73,8 @@ watch(
   () => props.notes,
   (fresh) => {
     const known = fresh ?? ''
-    if (known !== draft.value.trim()) draft.value = known
+    if (draft.value.trim() === lastSent) draft.value = known
+    lastSent = known
   },
 )
 
@@ -137,7 +139,9 @@ function onCompleted(event: Event): void {
 
 function sendNotes(): void {
   const asked = draft.value.trim()
-  if (asked !== (props.notes ?? '')) emit('notes', asked)
+  if (asked === lastSent) return
+  lastSent = asked
+  emit('notes', asked)
 }
 
 /**

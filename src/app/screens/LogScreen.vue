@@ -84,7 +84,10 @@ function detailsText(entry: LogEntry): string {
 }
 
 function hasMore(entry: LogEntry): boolean {
-  return detailsText(entry) !== '' || entry.stack !== ''
+  return (
+    (entry.details !== null && entry.details !== undefined && entry.details !== '') ||
+    entry.stack !== ''
+  )
 }
 
 /**

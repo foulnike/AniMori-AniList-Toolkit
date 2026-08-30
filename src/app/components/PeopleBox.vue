@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Пункт 3.9: люди тайтла под двумя колонками карточки. Добыча своя:
 // ответ тяжелее карточки, и ждать его сверху экрана незачем.
-import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 
 import { fetchMalIds } from '@/api/anilist-media'
 import {
@@ -180,6 +180,10 @@ function onShow(kind: PersonTarget['kind'], person: PersonRef): void {
 
 onMounted(() => {
   void load()
+})
+
+onBeforeUnmount(() => {
+  run++
 })
 
 watch(
