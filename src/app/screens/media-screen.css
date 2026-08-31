@@ -655,6 +655,15 @@
    краем на две строки (люди подтягиваются под описание, пустоты нет),
    короткая занимает только свой ряд, и люди идут во всю ширину. */
 @media (min-width: 1700px) {
+  /* Франшизы у тайтла нет вовсе (блока в разметке нет, класса --fran-*
+     тоже): правый край доски отдаётся людям, иначе на широком окне
+     справа от записи оставалась пустота в полэкрана. */
+  .am-board:not(.am-board--fran-long):not(.am-board--fran-short) {
+    grid-template-areas: "about mine folk";
+    grid-template-columns: minmax(0, 84ch) 380px minmax(320px, 1fr);
+    justify-content: stretch;
+  }
+
   .am-board--fran-long,
   .am-board--fran-short {
     grid-template-columns: minmax(0, 84ch) 380px minmax(280px, 1fr);
