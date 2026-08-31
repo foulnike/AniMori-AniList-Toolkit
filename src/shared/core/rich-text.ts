@@ -31,7 +31,13 @@ export type RichAim =
   | { kind: 'media'; malId: number; url: string }
   | { kind: 'person'; who: 'character' | 'staff'; shikiId: number; url: string }
 
-/** Кусок строки: текст или ссылка. */
+/**
+ * Кусок строки: текст или ссылка.
+ *
+ * Пустая подпись у ссылки значит «имя в описании не написано»: такой тег
+ * на Самом Шикимори раскрывается в название сам сайт. Подпись добирает
+ * слой показа: ему доступны склад имён и сеть, ядру — нет.
+ */
 export type RichPart =
   | { kind: 'text'; text: string; face: RichFace }
   | { kind: 'link'; text: string; face: RichFace; aim: RichAim }
@@ -98,6 +104,13 @@ const SHIKI_HOST_RE = /^https?:\/\/(?:www\.)?shikimori\.[a-z]+\//i
 /** Человек в адресе: /characters/293411-… и /people/9-…. */
 const PERSON_URL_RE = /\/(characters|people)\/[a-z]?(\d+)/i
 
+/**
+ * Далеко ли искать закрывающий тег сущности. Подпись такой ссылки —
+ * имя или название, а не абзац: без потолка парой считался тег из совсем
+ * другого места описания.
+ */
+const PAIR_REACH = 200
+
 /** Рамка вложенности: спойлер, цитата и список собирают блоки в себя. */
 interface Frame {
   kind: 'root' | 'spoiler' | 'quote' | 'list'
@@ -112,7 +125,7 @@ interface Frame {
  * зависит от живого зеркала. Склейка одна на весь файл.
  */
 function shikiOrigin(): string {
-  return 'https://' + (SHIKI_DOMAINS[0] ?? 'shikimori.one')
+  return 'https://' + (SHIKI_DOMAINS[0] ?? 'shikimori.io')
 }
 
 /** Строка или `null`: пустое значение тега равносильно отсутствию. */
@@ -232,6 +245,11 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
   if (typeof raw !== 'string' || raw.trim() === '') return []
 
   const text = toBbcode(raw)
+
+  // Копия в нижнем регистре нужна только для поиска пары тега:
+  // в описаниях попадаются и [Character=1], и [character=1].
+  const lower = text.toLowerCase()
+
   const stack: Frame[] = [newFrame('root')]
   const faces: Array<keyof RichFace> = []
 
@@ -271,6 +289,20 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
     parts.push({ kind: 'text', text: chunk, face: face() })
   }
 
+  /**
+   * Есть ли у тега закрывающая пара рядом. Без пары тег самозакрыт: Сам
+   * Шикимори раскрывает такой тег в имя сам, а у нас подписью
+   * становился следующий символ описания.
+   */
+  function hasPair(name: string, from: number): boolean {
+    const close = lower.indexOf('[/' + name + ']', from)
+    if (close < 0 || close - from > PAIR_REACH) return false
+
+    // Следующий такой же открывающий тег раньше закрытия: пара не его.
+    const again = lower.indexOf('[' + name + '=', from)
+    return again < 0 || close < again
+  }
+
   function closeLink(): void {
     const open = aim
     if (open === null) return
@@ -295,6 +327,23 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
 
     aim = next
     aimText = ''
+  }
+
+  /**
+   * Ссылка без подписи: тег закрывается тут же, текст за ним остаётся
+   * текстом. Название тайтла и имя человека добирает слой показа;
+   * чужой адрес больше некому раскрывать, и он становится подписью сам.
+   */
+  function bareLink(next: RichAim | null): void {
+    closeLink()
+    if (next === null) return
+
+    parts.push({
+      kind: 'link',
+      text: next.kind === 'web' ? next.url : '',
+      face: face(),
+      aim: next,
+    })
   }
 
   /** Закрывает набранную строку: в списке она становится пунктом. */
@@ -360,7 +409,11 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
     top().blocks.push({ kind: 'image', url })
   }
 
-  function apply(tag: Tag): void {
+  /**
+   * Применяет тег. Позиция за тегом нужна только тегам сущностей:
+   * по ней видно, есть ли впереди закрывающая пара.
+   */
+  function apply(tag: Tag, after: number): void {
     const faceName = FACE_TAGS[tag.name]
     if (faceName !== undefined) {
       if (!tag.close) faces.push(faceName)
@@ -416,6 +469,7 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
 
     if (tag.name === 'url') {
       if (tag.close) closeLink()
+      else if (tag.arg !== null && !hasPair('url', after)) bareLink(webAim(tag.arg))
       else openLink(tag.arg === null ? { kind: 'web', url: '' } : webAim(tag.arg))
       return
     }
@@ -423,7 +477,8 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
     const path = SHIKI_PATHS[tag.name]
     if (path !== undefined) {
       if (tag.close) closeLink()
-      else openLink(entityAim(path, tag.arg))
+      else if (hasPair(tag.name, after)) openLink(entityAim(path, tag.arg))
+      else bareLink(entityAim(path, tag.arg))
       return
     }
 
@@ -439,11 +494,14 @@ export function parseRich(raw: string | null | undefined): RichBlock[] {
     if (found.index > at) addText(text.slice(at, found.index))
     at = found.index + found[0].length
 
-    apply({
-      name: (found[2] ?? '').toLowerCase(),
-      arg: found[3] ?? null,
-      close: found[1] === '/',
-    })
+    apply(
+      {
+        name: (found[2] ?? '').toLowerCase(),
+        arg: found[3] ?? null,
+        close: found[1] === '/',
+      },
+      at,
+    )
   }
 
   if (at < text.length) addText(text.slice(at))
