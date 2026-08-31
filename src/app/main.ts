@@ -4,11 +4,16 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import { startAppearance } from './appearance'
+import { tip } from './tip'
 import { initCollection } from '@/core/collection'
 import { initDatasetNames, updateDatasetNamesInBackground } from '@/core/dataset-names'
 import { startEditSender } from '@/core/edit-sender'
 import { loadSettings } from '@/core/settings'
 import { installGlobalErrorHandlers } from '@/utils/logger'
+
+// Стиль всплывающих подписей: плашка живёт в body, и scoped-правила
+// компонентов до неё не достают.
+import './styles/tip.css'
 
 // Корень обязан существовать: он лежит в нашем же index.html.
 // Если его нет, разметка разошлась с кодом — молчать об этом вредно.
@@ -45,7 +50,9 @@ async function start(): Promise<void> {
   // событие для журнала. Раньше настроек нельзя: тумблер журнала не прочтён.
   installGlobalErrorHandlers()
 
-  createApp(App).mount(root as HTMLElement)
+  // Подпись v-tip регистрируется на всё приложение: её просят метки плиток,
+  // кнопки шапок и полки карточек — импорт в каждый файл был бы шумом.
+  createApp(App).directive('tip', tip).mount(root as HTMLElement)
 
   // Отправщику нужна поднятая коллекция: до неё в памяти править нечего.
   // Ошибка подъёма окно не роняет — список просто останется пустым до
