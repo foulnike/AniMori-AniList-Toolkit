@@ -4,11 +4,12 @@
 //
 // Компонент зовёт себя сам: внутри спойлера и цитаты лежат такие же блоки,
 // и второй способ их нарисовать разошёлся бы с первым на первой же правке.
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { parseRich, type RichAim, type RichBlock, type RichPart } from '@/core/rich-text'
 
 import { followRichAim } from '../rich-open'
+import { richLinkLabel, warmRichLink } from '../rich-names'
 
 const props = defineProps<{
   /** Сырое описание: разбирается здесь. */
@@ -35,6 +36,16 @@ function faceClass(part: RichPart): Record<string, boolean> {
   }
 }
 
+/**
+ * Подпись куска. У ссылки без подписи имя берётся из склада подписей:
+ * Шикимори часто ставит тег сущности голым, и разбору негде взять имя.
+ */
+function label(part: RichPart): string {
+  if (part.kind !== 'link' || part.text !== '') return part.text
+
+  return richLinkLabel(part.aim)
+}
+
 function shown(at: number): boolean {
   return open.value.has(at)
 }
@@ -46,6 +57,27 @@ function toggle(at: number): void {
   else next.add(at)
   open.value = next
 }
+
+/** Заказ имён для ссылок без подписи в одной строке. */
+function askParts(parts: RichPart[]): void {
+  for (const part of parts) {
+    if (part.kind === 'link' && part.text === '') warmRichLink(part.aim)
+  }
+}
+
+/**
+ * Заказ имён по всему описанию. Сторожем, а не из разметки: вызов
+ * с побочным действием прямо в рисовании заводит слежение по кругу.
+ */
+function askNames(list: RichBlock[]): void {
+  for (const block of list) {
+    if (block.kind === 'para') askParts(block.parts)
+    else if (block.kind === 'list') for (const item of block.items) askParts(item)
+    else if (block.kind === 'spoiler' || block.kind === 'quote') askNames(block.blocks)
+  }
+}
+
+watch(blocks, (list) => askNames(list), { immediate: true })
 
 /**
  * Идёт по ссылке из описания. Окошко человека закрывается только на переходе
@@ -68,7 +100,7 @@ async function follow(aim: RichAim): Promise<void> {
             :class="faceClass(part)"
             href="#"
             @click.prevent="void follow(part.aim)"
-            >{{ part.text }}</a
+            >{{ label(part) }}</a
           >
           <span v-else :class="faceClass(part)">{{ part.text }}</span>
         </template>
@@ -102,7 +134,7 @@ async function follow(aim: RichAim): Promise<void> {
               :class="faceClass(part)"
               href="#"
               @click.prevent="void follow(part.aim)"
-              >{{ part.text }}</a
+              >{{ label(part) }}</a
             >
             <span v-else :class="faceClass(part)">{{ part.text }}</span>
           </template>
