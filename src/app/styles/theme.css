@@ -242,12 +242,30 @@ body::before {
   }
 }
 
+/* Полосы прокрутки. Хромиум, встретив на элементе scrollbar-width или
+   scrollbar-color, целиком выбрасывает наши ::-webkit-scrollbar на нём:
+   поэтому полки и окна с локальным scrollbar-width: thin получали
+   системную полосу и выпадали из темы. Стандартные свойства теперь
+   объявлены сразу на всё окно, а псевдоэлементы оставлены запасом для
+   старого WebKit. scrollbar-color наследуется, scrollbar-width нет —
+   отсюда две записи вместо одной. */
+html {
+  scrollbar-color: var(--am-scroll) transparent;
+}
+
+*,
+*::before,
+*::after {
+  scrollbar-width: thin;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -555,8 +573,10 @@ body::before {
   box-shadow: var(--am-sh-1), inset 0 1px 0 var(--am-edge);
 }
 
-/* Нативный выбор: appearance не сбрасываем: без стрелки список
-   перестаёт читаться списком. */
+/* Нативный выбор: appearance не сбрасываем — без стрелки список
+   перестаёт читаться списком. Фон обязан быть плотным: полупрозрачную
+   заливку система переносит в выпадающее меню, и оно белеет вместе
+   с белым текстом на тёмных темах. */
 .am-pick {
   min-height: var(--am-ctl);
   padding: 0 12px;
@@ -564,7 +584,7 @@ body::before {
   font-size: 13.5px;
   color: var(--am-text);
   cursor: pointer;
-  background: var(--am-fill-1);
+  background: var(--am-panel-2);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-cap);
 }
@@ -573,6 +593,14 @@ body::before {
 .am-pick:focus {
   border-color: var(--am-accent);
   outline: none;
+}
+
+/* Пункты красим отдельно: выпадающее меню рисует система, и наш фон
+   она не наследует. */
+.am-pick option,
+.am-pick optgroup {
+  color: var(--am-text);
+  background: var(--am-panel);
 }
 
 /* Сетка плиток: ширина плитки тянется за окном, а не заколочена в 168px:
@@ -586,17 +614,18 @@ body::before {
   list-style: none;
 }
 
-/* Полка в один ряд с горизонтальной прокруткой. */
+/* Полка в один ряд с горизонтальной прокруткой. Отступы сверху и по
+   бокам — не украшение: плитка под курсором приподнимается и растёт,
+   а горизонтальная прокрутка режет всё, что вышло за край. */
 .am-rail {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: var(--am-tile);
   gap: 14px;
   margin: 0;
-  padding: 2px 2px 10px;
+  padding: 14px 6px 16px;
   overflow-x: auto;
   list-style: none;
-  scrollbar-width: thin;
   overscroll-behavior-x: contain;
 }
 
