@@ -409,7 +409,8 @@ onBeforeUnmount(() => {
 }
 
 /* Цель нажатия в 44 пикселя: мелкое на телевизоре просто не поймать.
-   Форма плывёт к окружности под курсором. */
+   В покое круг, под курсором лепесток: форма отвечает на наведение,
+   а не тянет взгляд в покое больше содержимого окна. */
 .am-sheet__close {
   display: grid;
   flex: none;
@@ -425,17 +426,30 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: var(--am-fill-1);
   border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-drop);
+  border-radius: var(--am-r-cap);
   transition:
     color var(--am-fast) var(--am-ease),
     background-color var(--am-fast) var(--am-ease),
     border-radius var(--am-mid) var(--am-ease);
 }
 
-.am-sheet__close:hover {
+.am-sheet__close:hover,
+.am-sheet__close:focus-visible {
   color: var(--am-text);
   background: var(--am-fill-2);
-  border-radius: var(--am-r-cap);
+  border-radius: var(--am-r-drop);
+}
+
+/* Символ поднимается вместе с формой, но своим слоем: центровку держит
+   place-items родителя, и сдвиг её не сбивает. */
+.am-sheet__close > span {
+  display: block;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-sheet__close:hover > span,
+.am-sheet__close:focus-visible > span {
+  transform: translateY(-1px);
 }
 
 /* Сетка полей: на широком окне два столбца, на узком один. */
@@ -674,6 +688,11 @@ html[data-am-skin='amoled'] .am-date::-webkit-calendar-picker-indicator {
   .am-sheet,
   .am-sheet__box {
     animation: none;
+  }
+
+  .am-sheet__close:hover > span,
+  .am-sheet__close:focus-visible > span {
+    transform: none;
   }
 }
 </style>
