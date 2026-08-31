@@ -1,0 +1,57 @@
+/* Всплывающие подписи. Плашка одна на всё окно, ставит её app/tip.ts:
+   свои подписи знают тему и скругления, а появляются быстрее системных.
+   Стиль лежит здесь, а не в компоненте: узел живёт в body, и scoped-правила
+   до него не достают. Цвета, радиусы и тени — токенами из theme.css. */
+
+.am-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  max-width: 280px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.42;
+  color: var(--am-text);
+  text-align: center;
+  /* Подпись бывает в две строки: перенос ставит вызывающий код. */
+  white-space: pre-line;
+  pointer-events: none;
+  background: linear-gradient(165deg, var(--am-glass-2), var(--am-glass));
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-m);
+  box-shadow:
+    var(--am-sh-2),
+    inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
+  animation: am-tip-in var(--am-fast) var(--am-ease) both;
+}
+
+/* Спрятанная плашка не занимает места и не ловит курсор. */
+.am-tip[hidden] {
+  display: none;
+}
+
+/* Подпись над целью всплывает снизу вверх, под целью — сверху вниз:
+   движение всегда идёт от того, что подписано. */
+.am-tip--up {
+  --am-tip-from: 5px;
+}
+
+.am-tip--down {
+  --am-tip-from: -5px;
+}
+
+@keyframes am-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--am-tip-from, 0));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-tip {
+    animation: none;
+  }
+}
