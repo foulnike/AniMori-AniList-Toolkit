@@ -312,14 +312,14 @@ onBeforeUnmount(() => {
           placeholder="Поиск по своему списку"
           @input="onType"
         />
-        <span v-if="searching" class="am-find__num" title="Найдено в своём списке">{{
+        <span v-if="searching" v-tip="'Найдено в своём списке'" class="am-find__num">{{
           picked
         }}</span>
         <button
           v-if="searching"
+          v-tip="'Сбросить поиск'"
           class="am-find__wipe"
           type="button"
-          title="Сбросить поиск"
           @click="onClear"
         >
           ×
@@ -341,10 +341,10 @@ onBeforeUnmount(() => {
         <button
           v-for="tab in VIEW_TABS"
           :key="tab.key"
+          v-tip="tab.title"
           class="am-seg__btn am-look__btn"
           :class="{ 'am-seg__btn--on': tab.key === view }"
           type="button"
-          :title="tab.title"
           :aria-label="tab.title"
           :aria-pressed="tab.key === view"
           @click="pickView(tab.key)"
@@ -420,6 +420,7 @@ onBeforeUnmount(() => {
         :repeat="row.repeat"
         :note="row.note"
         :ongoing="row.ongoing"
+        :soon="row.soon"
         :own="row.own"
         :done="row.done"
         :adult="row.adult"
@@ -438,6 +439,7 @@ onBeforeUnmount(() => {
         :mark="row.mark"
         :repeat="row.repeat"
         :ongoing="row.ongoing"
+        :soon="row.soon"
         :own="row.own"
         :done="row.done"
         :adult="row.adult"
