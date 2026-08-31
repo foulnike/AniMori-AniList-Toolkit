@@ -7,7 +7,7 @@ import { onMounted, ref, watch } from 'vue'
 import type { MediaBrief } from '@/api/anilist-media'
 import { initCollection } from '@/core/collection'
 import { selectEntries } from '@/core/collection-view'
-import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
+import { notOutYet, partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import { hideRec, motifShelf, recShelf, tasteShelf } from '@/core/recs'
 import type { SnapshotEntry } from '@/core/snapshot'
@@ -41,6 +41,7 @@ interface Row {
   mark: string | null
   own: string | null
   done: number
+  soon: boolean
   cover: string | null
   color: string | null
   adult: boolean
@@ -121,6 +122,7 @@ function toRow(entry: SnapshotEntry): Row {
     mark: entry.score10 > 0 ? `★ ${entry.score10.toFixed(1)}` : null,
     own: ownText(entry, parts),
     done,
+    soon: notOutYet(look),
     cover: look?.cover ?? null,
     color: look?.color ?? null,
     adult: entry.isAdult,
@@ -406,6 +408,7 @@ watch(homeGenre, () => {
             :mark="row.mark"
             :own="row.own"
             :done="row.done"
+            :soon="row.soon"
             :adult="row.adult"
             @open="open(row.mediaId)"
           />
@@ -431,6 +434,7 @@ watch(homeGenre, () => {
             :note="row.note"
             :own="row.own"
             :done="row.done"
+            :soon="row.soon"
             :adult="row.adult"
             hidable
             @open="open(row.mediaId)"
