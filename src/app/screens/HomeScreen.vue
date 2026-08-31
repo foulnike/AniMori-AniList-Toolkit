@@ -328,12 +328,14 @@ watch(homeGenre, () => {
 <template>
   <section class="am-page">
     <div class="am-hey">
+      <span class="am-hey__blob am-hey__blob--a" aria-hidden="true" />
+      <span class="am-hey__blob am-hey__blob--b" aria-hidden="true" />
+
       <div class="am-hey__text">
         <h2 class="am-hey__title">С возвращением</h2>
-        <p class="am-hey__sub">Продолжайте с того места, где остановились, или найдите новое.</p>
 
         <div class="am-hey__acts">
-          <button class="am-btn" type="button" @click="toLists">Мои списки</button>
+          <button class="am-btn am-btn--soft" type="button" @click="toLists">Мои списки</button>
           <button class="am-btn am-btn--ghost" type="button" @click="toSearch">Найти тайтл</button>
         </div>
       </div>
@@ -364,7 +366,7 @@ watch(homeGenre, () => {
     </div>
 
     <template v-else>
-      <section v-if="ownRows.length > 0" class="am-shelf">
+      <section v-if="ownRows.length > 0" class="am-shelf am-shelf--mine">
         <div class="am-bar">
           <h2 class="am-h2">Продолжаю смотреть</h2>
           <span class="am-bar__gap" />
@@ -432,50 +434,96 @@ watch(homeGenre, () => {
 </template>
 
 <style scoped>
-/* Приветственная полоса: первое, что видно при запуске. */
+/* Приветствие: первое, что видно при запуске. Форма — лист, а не карточка:
+   один угол срезан и полоса перестаёт быть прямоугольником среди прямоугольников. */
 .am-hey {
   position: relative;
+  isolation: isolate;
   overflow: hidden;
-  padding: 30px 32px;
-  background:
-    radial-gradient(700px 320px at 88% -30%, rgba(164, 134, 255, 0.22), transparent 65%),
-    linear-gradient(120deg, #16223a, #0d131d 62%);
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-xl);
-  box-shadow: var(--am-sh-2);
+  padding: clamp(24px, 3.4vw, 40px) clamp(24px, 3.6vw, 44px);
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-leaf);
+  box-shadow: var(--am-sh-2), inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.5);
+}
+
+/* Две капли под стеклом: без них размывать нечего и панель выглядит
+   грязным серым прямоугольником. Форма текучая и медленно ездит. */
+.am-hey__blob {
+  position: absolute;
+  z-index: -1;
+  border-radius: var(--am-r-blob);
+  filter: blur(42px);
+  pointer-events: none;
+}
+
+.am-hey__blob--a {
+  top: -40%;
+  right: -6%;
+  width: 46%;
+  height: 210%;
+  background: rgb(var(--am-accent-2-rgb) / 0.34);
+  animation: am-hey-float var(--am-drift) var(--am-ease-soft) infinite alternate;
+}
+
+.am-hey__blob--b {
+  bottom: -80%;
+  left: 12%;
+  width: 34%;
+  height: 170%;
+  background: rgb(var(--am-accent-rgb) / 0.3);
+  animation: am-hey-float calc(var(--am-drift) * 1.4) var(--am-ease-soft) infinite alternate-reverse;
+}
+
+@keyframes am-hey-float {
+  from {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(7%, 5%, 0) scale(1.14);
+  }
 }
 
 .am-hey__text {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
   max-width: 74ch;
 }
 
 .am-hey__title {
   margin: 0;
-  font-size: 26px;
+  font-size: clamp(24px, 2.6vw, 34px);
   font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.am-hey__sub {
-  margin: 0;
-  color: var(--am-dim);
+  letter-spacing: -0.025em;
 }
 
 .am-hey__acts {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 6px;
 }
 
-/* Восемнадцать чипов в один ряд не встанут: перенос разрешён. */
+/* Жанры одной лентой: восемнадцать чипов переносом занимали три строки
+   и уводили первую полку за сгиб. Края растворяются маской: обрезанный
+   по краю чип честно говорит, что ряд прокручивается. */
 .am-choose {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+  padding: 2px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 28px), transparent);
+  overscroll-behavior-x: contain;
+}
+
+.am-choose::-webkit-scrollbar {
+  height: 0;
+}
+
+.am-choose .am-chip {
+  flex: 0 0 auto;
 }
 
 /* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
@@ -491,12 +539,48 @@ watch(homeGenre, () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  animation: am-shelf-in var(--am-slow) var(--am-ease) both;
 }
 
-/* Постер на полке всегда одного размера: две записи
-   не должны раздуваться на всю ширину окна. */
+@keyframes am-shelf-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Своя полка важнее советов каталога, поэтому лежит на стекле:
+   раньше все полки были одного веса и глаз не знал, где своё. */
+.am-shelf--mine {
+  padding: 16px 18px 8px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-drop);
+  box-shadow: inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
+}
+
+/* Заголовок полки с акцентной засечкой: шесть одинаковых заголовков
+   подряд читались сплошным текстом. */
+.am-shelf .am-h2 {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.am-shelf .am-h2::before {
+  width: 3px;
+  height: 15px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
+}
+
 .am-rail {
-  grid-auto-columns: 152px;
   justify-content: start;
 }
 
