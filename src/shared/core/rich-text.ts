@@ -92,9 +92,12 @@ interface Frame {
 
 const TAG_RE = /\[(\/)?([a-z*][a-z0-9_-]*)(?:=([^\]\n]*))?\]/gi
 
-/** Зеркало для относительных адресов: домена в BBcode Шикимори нет. */
-function shikiHost(): string {
-  return SHIKI_DOMAINS[0] ?? 'shikimori.one'
+/**
+ * Начало адресов зеркала: в BBcode Шикимори ссылки без домена, а домен
+ * зависит от живого зеркала. Склейка одна на весь файл.
+ */
+function shikiOrigin(): string {
+  return 'https://' + (SHIKI_DOMAINS[0] ?? 'shikimori.one')
 }
 
 /** Строка или `null`: пустое значение тега равносильно отсутствию. */
@@ -124,8 +127,7 @@ function webAim(raw: string | null): RichAim | null {
   const asked = (raw ?? '').trim()
   if (asked === '') return null
 
-  // Относительный адрес: в BBcode Шикимори домена в ссылках нет.
-  const url = asked.startsWith('/') ? `https://${shikiHost()}${asked}` : asked
+  const url = asked.startsWith('/') ? shikiOrigin() + asked : asked
   if (!isWeb(url)) return null
 
   const malId = malFromUrl(url)
@@ -139,7 +141,7 @@ function entityAim(path: string, arg: string | null): RichAim | null {
   const id = digits === null ? 0 : Number(digits[0])
   if (!Number.isFinite(id) || id <= 0) return null
 
-  const url = `https://${shikiHost()}/${path}/${id}`
+  const url = shikiOrigin() + '/' + path + '/' + String(id)
   // Номер аниме у Шикимори — номер MyAnimeList: карточка найдётся внутри.
   return path === 'animes' ? { kind: 'media', malId: id, url } : { kind: 'web', url }
 }
