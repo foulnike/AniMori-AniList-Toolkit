@@ -12,6 +12,7 @@ import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
+import PickBox from '../components/PickBox.vue'
 import { statusList } from '../labels'
 import { navigate } from '../router'
 
@@ -224,8 +225,15 @@ function pickStatus(status: string): void {
   refill()
 }
 
-/** Смена порядка: пересобираем показ, новым строкам нужны обложки и названия. */
-function pickSort(): void {
+/**
+ * Смена порядка со своего ролл-аута. Ключ приходит строкой, поэтому
+ * сверяем с известными: чужое значение в память порядка попасть не должно.
+ */
+function pickSort(key: string): void {
+  const found = SORT_TABS.find((item) => item.key === key)
+  if (!found || found.key === sortKey.value) return
+
+  sortKey.value = found.key
   resetLimit()
   refill()
 }
@@ -340,14 +348,16 @@ onBeforeUnmount(() => {
         </button>
       </label>
 
-      <label class="am-sort">
-        <span class="am-sort__mark" aria-hidden="true">⇅</span>
-        <select v-model="sortKey" class="am-pick am-sort__pick" @change="pickSort">
-          <option v-for="item in SORT_TABS" :key="item.key" :value="item.key">
-            {{ item.title }}
-          </option>
-        </select>
-      </label>
+      <!-- Порядок показа на своём ролл-ауте: системный список выпадал
+           белым на тёмных темах: его рисует оболочка, а не наши стили. -->
+      <PickBox
+        class="am-sort"
+        :model-value="sortKey"
+        :items="SORT_TABS"
+        mark="⇅"
+        label="Порядок показа"
+        @update:model-value="pickSort"
+      />
 
       <button
         class="am-pull"
@@ -541,26 +551,11 @@ onBeforeUnmount(() => {
   color: var(--am-text);
 }
 
-/* Выбор порядка выглядит такой же пилюлей, как поле рядом. */
+/* Выбор порядка — свой ролл-аут: вся отделка живёт в самом компоненте,
+   здесь только место в ряду и потолок ширины на узком окне. */
 .am-sort {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-}
-
-.am-sort__mark {
-  position: absolute;
-  left: 13px;
-  font-size: 13px;
-  color: var(--am-faint);
-  pointer-events: none;
-}
-
-/* Общий вид выбора живёт в .am-pick, здесь только место под значок. */
-.am-sort__pick {
-  padding-left: 32px;
-  border-radius: var(--am-r-cap);
+  flex: 0 1 220px;
+  max-width: 100%;
 }
 
 /* Перенос с AniList — значок: действие редкое, а четыре слова в кнопке
