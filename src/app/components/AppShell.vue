@@ -1,9 +1,13 @@
 <script setup lang="ts">
-// Пункт 3.2: постоянная рамка окна — меню слева, шапка сверху,
+// Пункт 3.2: постоянная рамка окна — рельс меню слева, шапка сверху,
 // сменный экран внутри. Сама рамка о экранах не знает ничего,
 // кроме имён и подписей из routes.ts.
+//
+// Рельс и шапка — плавающее стекло: подложка окна из theme.css должна
+// просвечивать, иначе она читается картинкой за глухими панелями.
 import { computed } from 'vue'
 
+import { APPEARANCES, appearance, setAppearance } from '../appearance'
 import { currentRoute, goBack, navigate } from '../router'
 import { MENU, SCREEN_TITLES } from '../router/routes'
 
@@ -35,14 +39,14 @@ function onReload(): void {
         <svg class="am-side__logo" viewBox="0 0 32 32" role="img" aria-label="AniMori">
           <defs>
             <linearGradient id="am-logo-grad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#58a6ff" />
-              <stop offset="1" stop-color="#a486ff" />
+              <stop class="am-side__stop-a" offset="0" />
+              <stop class="am-side__stop-b" offset="1" />
             </linearGradient>
           </defs>
 
-          <rect width="32" height="32" rx="9" fill="url(#am-logo-grad)" />
-          <path d="M16 5.5 22 15.5 10 15.5Z" fill="#08111c" />
-          <path d="M16 11.5 25.5 25 6.5 25Z" fill="#08111c" />
+          <rect width="32" height="32" rx="11" fill="url(#am-logo-grad)" />
+          <path class="am-side__cut" d="M16 5.5 22 15.5 10 15.5Z" />
+          <path class="am-side__cut" d="M16 11.5 25.5 25 6.5 25Z" />
         </svg>
 
         <span class="am-side__name">AniMori</span>
@@ -70,11 +74,26 @@ function onReload(): void {
       <header class="am-top">
         <button v-if="canGoBack" class="am-top__back" type="button" @click="goBack">
           <span aria-hidden="true">←</span>
-          <span>Назад</span>
+          <span class="am-top__word">Назад</span>
         </button>
         <h1 class="am-top__title">{{ title }}</h1>
 
         <span class="am-top__gap" />
+
+        <div class="am-skin" role="group" aria-label="Тема оформления">
+          <button
+            v-for="item in APPEARANCES"
+            :key="item.name"
+            class="am-skin__btn"
+            :class="{ 'am-skin__btn--on': item.name === appearance }"
+            type="button"
+            :title="item.title"
+            :aria-pressed="item.name === appearance"
+            @click="setAppearance(item.name)"
+          >
+            <span aria-hidden="true">{{ item.mark }}</span>
+          </button>
+        </div>
 
         <button class="am-top__icon" type="button" title="Обновить окно" @click="onReload">
           <span aria-hidden="true">⟳</span>
@@ -82,7 +101,7 @@ function onReload(): void {
       </header>
 
       <main class="am-view">
-        <div class="am-view__hold">
+        <div :key="active" class="am-view__hold">
           <slot />
         </div>
       </main>
@@ -93,41 +112,61 @@ function onReload(): void {
 <style scoped>
 .am-shell {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: var(--am-side) minmax(0, 1fr);
   min-height: 100vh;
 }
 
+/* Рельс меню оторван от краёв окна: стекло видно только там, где есть что
+   размывать вокруг. Прижатый к краю он оставался бы просто тёмной полосой. */
 .am-side {
   position: sticky;
-  top: 0;
+  top: 14px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  height: 100vh;
-  padding: 20px 14px;
-  background: linear-gradient(180deg, rgba(21, 29, 41, 0.92), rgba(11, 16, 24, 0.92));
-  border-right: 1px solid var(--am-line);
+  gap: 16px;
+  height: calc(100vh - 28px);
+  margin: 14px 0 14px 14px;
+  padding: 18px 12px 16px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-xl);
+  box-shadow: var(--am-sh-1), inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.3);
 }
 
 .am-side__brand {
   display: flex;
-  gap: 10px;
+  gap: 11px;
   align-items: center;
-  padding: 0 6px;
+  padding: 2px 8px 6px;
 }
 
 .am-side__logo {
   flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  box-shadow: 0 6px 16px rgba(88, 166, 255, 0.35);
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgb(var(--am-accent-rgb) / 0.35);
+}
+
+.am-side__stop-a {
+  stop-color: var(--am-accent);
+}
+
+.am-side__stop-b {
+  stop-color: var(--am-accent-2);
+}
+
+/* Вырез знака красится завесой, а не фоном окна: на светлой теме
+   фон совпал бы с градиентом и знак исчез. */
+.am-side__cut {
+  fill: var(--am-veil);
 }
 
 .am-side__name {
   font-size: 16px;
   font-weight: 650;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .am-side__menu {
@@ -137,10 +176,12 @@ function onReload(): void {
 }
 
 .am-side__item {
+  position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
-  padding: 10px 12px;
+  min-height: var(--am-touch);
+  padding: 0 14px;
   font: inherit;
   font-weight: 550;
   color: var(--am-dim);
@@ -148,21 +189,51 @@ function onReload(): void {
   cursor: pointer;
   background: none;
   border: 0;
-  border-radius: var(--am-r-m);
+  border-radius: var(--am-r-cap);
   transition:
-    color 0.12s ease,
-    background 0.12s ease;
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease);
 }
 
 .am-side__item:hover {
   color: var(--am-text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--am-fill-1);
 }
 
 .am-side__item--on {
   color: var(--am-text);
-  background: var(--am-accent-soft);
-  box-shadow: inset 2px 0 0 var(--am-accent);
+  background: linear-gradient(
+    100deg,
+    rgb(var(--am-accent-rgb) / 0.22),
+    rgb(var(--am-accent-2-rgb) / 0.1)
+  );
+}
+
+/* Активный пункт помечен каплей слева, а не рамкой: её видно и в узком
+   рельсе, где подписи скрыты. */
+.am-side__item--on::before {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 3px;
+  height: 18px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
+  box-shadow: 0 0 10px rgb(var(--am-accent-rgb) / 0.6);
+  transform: translateY(-50%);
+  animation: am-mark var(--am-mid) var(--am-ease) both;
+}
+
+@keyframes am-mark {
+  from {
+    height: 4px;
+    opacity: 0;
+  }
+  to {
+    height: 18px;
+    opacity: 1;
+  }
 }
 
 .am-side__icon {
@@ -173,9 +244,10 @@ function onReload(): void {
 
 .am-side__foot {
   margin-top: auto;
-  padding: 0 8px;
+  padding: 0 10px;
   font-size: 12px;
   color: var(--am-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .am-body {
@@ -190,42 +262,104 @@ function onReload(): void {
   top: 0;
   z-index: 5;
   display: flex;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
-  padding: 14px 32px;
-  background: rgba(8, 11, 17, 0.82);
-  border-bottom: 1px solid var(--am-line);
-  backdrop-filter: blur(10px);
+  padding: 14px clamp(18px, 2vw, 44px);
+}
+
+/* Граница шапки — перетекание вниз, а не линия: жёсткий край резал
+   уезжающие плитки пополам. Слой отдельный: маска на самой шапке съела бы
+   и кнопки вместе с фоном. */
+.am-top::before {
+  position: absolute;
+  inset: 0 0 -28px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-bar) 0%, var(--am-bar) 58%, transparent 100%);
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.2);
+  -webkit-mask-image: linear-gradient(180deg, #000 58%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 58%, transparent 100%);
+  pointer-events: none;
+}
+
+.am-top > * {
+  position: relative;
+  z-index: 1;
 }
 
 .am-top__back {
   display: inline-flex;
   gap: 7px;
   align-items: center;
-  padding: 7px 14px;
+  min-height: 34px;
+  padding: 0 14px;
   font: inherit;
   font-size: 13px;
   color: var(--am-dim);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
 }
 
 .am-top__back:hover {
   color: var(--am-text);
-  background: var(--am-hover);
+  background: var(--am-fill-2);
+  transform: translateX(-2px);
 }
 
 .am-top__title {
   margin: 0;
   font-size: 17px;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
 }
 
 .am-top__gap {
   flex: 1;
+}
+
+/* Переключатель тем: три знака в одной капсуле. Подписи живут в title:
+   три слова в шапке шумели бы громче заголовка экрана. */
+.am-skin {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+}
+
+.am-skin__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--am-faint);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--am-r-cap);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-mid) var(--am-ease);
+}
+
+.am-skin__btn:hover {
+  color: var(--am-text);
+}
+
+.am-skin__btn--on {
+  color: var(--am-text);
+  background: var(--am-glass-2);
+  box-shadow: var(--am-sh-1), inset 0 1px 0 var(--am-edge);
 }
 
 /* Круглая кнопка справа: обновляет окно целиком. */
@@ -240,21 +374,25 @@ function onReload(): void {
   font-size: 16px;
   color: var(--am-dim);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    transform var(--am-slow) var(--am-ease);
 }
 
 .am-top__icon:hover {
   color: var(--am-text);
-  background: var(--am-hover);
   border-color: var(--am-accent);
+  transform: rotate(180deg);
 }
 
 .am-view {
   flex: 1;
   width: 100%;
-  padding: 26px 32px 64px;
+  padding: clamp(16px, 1.6vw, 30px) clamp(18px, 2vw, 44px) 72px;
 }
 
 /* Потолок ширины с центровкой: без него на широком окне
@@ -263,33 +401,51 @@ function onReload(): void {
   width: 100%;
   max-width: var(--am-page-max);
   margin: 0 auto;
+  animation: am-rise var(--am-mid) var(--am-ease) both;
 }
 
-/* Узкое окно: меню сжимается до значков, содержимое остаётся главным. */
+/* Смена экрана всплывает, а не моргает: ключ на имени экрана перезапускает
+   эту анимацию на каждом переходе. */
+@keyframes am-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Узкое окно: рельс сжимается до значков, содержимое остаётся главным. */
 @media (max-width: 1080px) {
   .am-shell {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: var(--am-side-slim) minmax(0, 1fr);
   }
 
   .am-side {
-    padding: 20px 10px;
+    padding: 16px 8px;
+  }
+
+  .am-side__brand {
+    justify-content: center;
+    padding: 2px 0 6px;
   }
 
   .am-side__name,
   .am-side__text,
-  .am-side__foot {
+  .am-side__foot,
+  .am-top__word {
     display: none;
   }
 
   .am-side__item {
     justify-content: center;
-    padding: 11px 0;
+    padding: 0;
   }
 
-  .am-top,
-  .am-view {
-    padding-right: 20px;
-    padding-left: 20px;
+  .am-side__item--on::before {
+    left: 2px;
   }
 }
 </style>

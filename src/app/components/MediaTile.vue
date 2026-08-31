@@ -58,7 +58,7 @@ watch(
 
 /** Подложка в тон обложки: серый прямоугольник на месте картинки выглядит брошенным. */
 const artStyle = computed(() => ({
-  background: props.color ?? 'linear-gradient(160deg, #1b2534, #0f151e)',
+  background: props.color ?? 'linear-gradient(160deg, var(--am-panel-2), var(--am-bg-2))',
 }))
 
 /** Первая буква названия — для тайтла без обложки. */
@@ -92,6 +92,7 @@ const hasTags = computed(
         <span v-else class="am-tile__letter" aria-hidden="true">{{ letter }}</span>
 
         <span class="am-tile__shade" aria-hidden="true" />
+        <span class="am-tile__sheen" aria-hidden="true" />
 
         <span v-if="hasTags" class="am-tile__tags">
           <span v-if="mark" class="am-tile__tag">{{ mark }}</span>
@@ -138,7 +139,11 @@ const hasTags = computed(
 </template>
 
 <style scoped>
+/* Цвет текста и меток поверх постера не тематический: завеса под ними
+   тёмная во всех трёх темах. Объявлен один раз и дальше берётся только var(). */
 .am-tile {
+  --am-on-art: #eef3fb;
+
   position: relative;
   min-width: 0;
 }
@@ -146,7 +151,7 @@ const hasTags = computed(
 .am-tile__hit {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
   padding: 0;
   font: inherit;
@@ -157,24 +162,31 @@ const hasTags = computed(
   border: 0;
 }
 
+/* Форма «листа»: три угла круглые, один почти острый. Ряд таких плиток
+   читается ритмом, а не сеткой одинаковых прямоугольников. */
 .am-tile__art {
   position: relative;
   display: block;
   aspect-ratio: 2 / 3;
   overflow: hidden;
   border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
+  border-radius: var(--am-r-leaf);
   box-shadow: var(--am-sh-2);
   transition:
-    transform 0.16s ease,
-    box-shadow 0.16s ease,
-    border-color 0.16s ease;
+    transform var(--am-mid) var(--am-ease),
+    box-shadow var(--am-mid) var(--am-ease),
+    border-color var(--am-mid) var(--am-ease),
+    border-radius var(--am-slow) var(--am-ease);
 }
 
-.am-tile__hit:hover .am-tile__art {
-  border-color: rgba(88, 166, 255, 0.55);
-  box-shadow: 0 22px 46px rgba(2, 5, 10, 0.65);
-  transform: translateY(-4px);
+/* Под курсором форма перетекает в «каплю»: движение самого края заметнее
+   любой тени и не требует ни одного лишнего слова. */
+.am-tile__hit:hover .am-tile__art,
+.am-tile__hit:focus-visible .am-tile__art {
+  border-color: color-mix(in srgb, var(--am-accent) 55%, transparent);
+  border-radius: var(--am-r-drop);
+  box-shadow: var(--am-sh-2), 0 20px 46px rgb(var(--am-accent-rgb) / 0.26);
+  transform: translateY(-6px) scale(1.015);
 }
 
 .am-tile__hit:hover .am-tile__name {
@@ -195,19 +207,40 @@ const hasTags = computed(
   justify-content: center;
   font-size: 34px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.32);
+  color: color-mix(in srgb, var(--am-on-art) 30%, transparent);
 }
 
+/* Завеса сверху и снизу — под метки и счёт, середина обложки свободна. */
 .am-tile__shade {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     180deg,
-    rgba(3, 6, 12, 0.55) 0%,
-    rgba(3, 6, 12, 0) 34%,
-    rgba(3, 6, 12, 0) 52%,
-    rgba(3, 6, 12, 0.88) 100%
+    color-mix(in srgb, var(--am-veil) 55%, transparent) 0%,
+    transparent 32%,
+    transparent 50%,
+    color-mix(in srgb, var(--am-veil) 92%, transparent) 100%
   );
+}
+
+/* Блик пробегает по постеру один раз на наведение: постоянное свечение
+   в сетке на сотню плиток было бы рябью. */
+.am-tile__sheen {
+  position: absolute;
+  inset: -40% -20%;
+  background: linear-gradient(
+    104deg,
+    transparent 44%,
+    color-mix(in srgb, var(--am-on-art) 20%, transparent) 50%,
+    transparent 56%
+  );
+  transform: translateX(-130%);
+  transition: transform var(--am-slow) var(--am-ease);
+  pointer-events: none;
+}
+
+.am-tile__hit:hover .am-tile__sheen {
+  transform: translateX(130%);
 }
 
 .am-tile__tags {
@@ -216,46 +249,56 @@ const hasTags = computed(
   left: 8px;
   display: flex;
   gap: 4px;
-  max-width: calc(100% - 44px);
+  max-width: calc(100% - 46px);
 }
 
+/* Метки — стекло, а не плотные пилюли: на светлых обложках чёрные плашки
+   читались как грязь на картинке. */
 .am-tile__tag {
   display: inline-flex;
   align-items: center;
-  padding: 3px 8px;
+  padding: 3px 9px;
   overflow: hidden;
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
-  color: #eaf1fb;
+  color: var(--am-on-art);
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(8, 12, 18, 0.72);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--am-veil) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-on-art) 14%, transparent);
+  border-radius: var(--am-r-cap);
+  backdrop-filter: blur(8px) saturate(1.2);
 }
 
 /* Отметка знаком тише оценки: она рядом, а не вместо неё. */
 .am-tile__tag--sign {
   padding: 3px 7px;
   font-size: 10.5px;
-  color: #cbd7e8;
+  color: color-mix(in srgb, var(--am-on-art) 80%, transparent);
 }
 
 .am-tile__tag--adult {
-  color: #ffd9d9;
-  background: rgba(255, 90, 90, 0.6);
+  color: var(--am-on-art);
+  background: color-mix(in srgb, var(--am-bad) 62%, transparent);
+  border-color: color-mix(in srgb, var(--am-bad) 70%, transparent);
 }
 
+/* Оценка каталога: стекло с тёплым текстом. Заливка жёлтым кричала
+   громче самого постера. */
 .am-tile__score {
   position: absolute;
   top: 8px;
   right: 8px;
-  padding: 3px 8px;
+  padding: 3px 9px;
   font-size: 11px;
   font-weight: 700;
-  color: #101820;
-  background: linear-gradient(180deg, #ffe49a, var(--am-warn));
-  border-radius: 999px;
+  color: var(--am-warn);
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--am-veil) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-warn) 30%, transparent);
+  border-radius: var(--am-r-cap);
+  backdrop-filter: blur(8px);
 }
 
 /* Идущий сезон — одна точка в углу: надпись шумела бы на всю сетку. */
@@ -266,29 +309,39 @@ const hasTags = computed(
   width: 8px;
   height: 8px;
   background: var(--am-good);
-  border-radius: 999px;
-  box-shadow:
-    0 0 0 3px rgba(61, 220, 151, 0.18),
-    0 1px 3px rgba(0, 0, 0, 0.6);
+  border-radius: var(--am-r-cap);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--am-good) 22%, transparent);
+  animation: am-pulse 2.6s var(--am-ease-soft) infinite;
+}
+
+@keyframes am-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--am-good) 22%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--am-good) 8%, transparent);
+  }
 }
 
 /* Если в том же углу оценка каталога, точка садится под неё. */
 .am-tile__live--low {
-  top: 34px;
+  top: 36px;
 }
 
 .am-tile__own {
   position: absolute;
   right: 10px;
-  bottom: 10px;
+  bottom: 11px;
   left: 10px;
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
-  color: #eef3fb;
+  color: var(--am-on-art);
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 4px var(--am-veil);
 }
 
 .am-tile__line {
@@ -297,13 +350,15 @@ const hasTags = computed(
   bottom: 0;
   left: 0;
   height: 3px;
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--am-on-art) 18%, transparent);
 }
 
 .am-tile__fill {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--am-accent), var(--am-accent-2));
+  box-shadow: 0 0 10px rgb(var(--am-accent-rgb) / 0.5);
+  transition: width var(--am-slow) var(--am-ease);
 }
 
 .am-tile__name {
@@ -314,6 +369,7 @@ const hasTags = computed(
   line-height: 1.35;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  transition: color var(--am-fast) var(--am-ease);
 }
 
 .am-tile__facts {
@@ -338,11 +394,12 @@ const hasTags = computed(
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: #eaf1fb;
+  color: var(--am-on-art);
   cursor: pointer;
-  background: rgba(8, 12, 18, 0.85);
-  border: 1px solid var(--am-line-soft);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--am-veil) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-on-art) 16%, transparent);
+  border-radius: var(--am-r-cap);
+  backdrop-filter: blur(8px);
 }
 
 /* Цель нажатия расширена до 44 пикселей невидимой окантовкой. */
