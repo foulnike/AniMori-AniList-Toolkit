@@ -56,7 +56,6 @@ const {
   mineFacts,
   franchiseRows,
   franchiseHidden,
-  boardClass,
   load,
   studioLogo,
   franchiseName,
@@ -179,7 +178,7 @@ watch(mediaId, () => {
           </div>
         </div>
 
-        <div class="am-board" :class="boardClass">
+        <div class="am-board">
           <div class="am-split__main">
             <div class="am-panel am-about-box">
               <h3 class="am-h3">Описание</h3>
