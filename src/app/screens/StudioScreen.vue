@@ -8,14 +8,16 @@ import { hiddenCount, keepAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
+import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
 import { currentRoute, navigate } from '../router'
 import { toTileRow, type TileRow } from '../tile-row'
 
-/** Сколько плиток-заглушек показать, пока идёт первый ответ. */
-const HOLD_COUNT = 12
+/** Сколько плиток-заглушек показать, пока идёт первый ответ: два ряда
+    широкого окна, чтобы ожидание не выглядело короче выдачи. */
+const HOLD_COUNT = 18
 
 /** По скольку тайтлов просить русские названия за заход. */
 const TITLE_CHUNK = 20
@@ -30,8 +32,8 @@ const page = ref(1)
 /** Скрытое отбором 18+ число говорится вслух, а не тихо теряется. */
 const hidden = ref(0)
 
-/** Первая буква имени для монограммы: логотипов у большинства студий нет. */
-const mono = computed<string>(() => name.value.trim().slice(0, 1).toUpperCase())
+/** Литография студии или `null`. Промах штатен: шапка останется текстом. */
+const logo = ref<string | null>(null)
 
 /** Выписки этого показа: по ним плитки перерисовываются с названиями. */
 let briefs: readonly MediaBrief[] = []
@@ -51,6 +53,18 @@ function describe(e: unknown): string {
 
 function redraw(): void {
   rows.value = briefs.map(toTileRow)
+}
+
+/**
+ * Ищет литографию студии по имени. Список берётся у Шикимори раз за сеанс
+ * и ложится на склад, так что второй визит сети не тревожит. Промах по имени —
+ * штатный исход: у многих студий картинки нет вовсе.
+ */
+async function fillLogo(mine: number, studioName: string): Promise<void> {
+  const map = await studioLogos()
+  if (mine !== run || map === null) return
+
+  logo.value = map.get(studioName.trim().toLowerCase()) ?? null
 }
 
 /**
@@ -90,6 +104,7 @@ async function load(add = false): Promise<void> {
     briefs = []
     rows.value = []
     name.value = ''
+    logo.value = null
     hidden.value = 0
   }
 
@@ -123,6 +138,7 @@ async function load(add = false): Promise<void> {
     hasNext.value = found.hasNext && found.known > 0
     name.value = found.name
     redraw()
+    if (!add) void fillLogo(mine, found.name)
     await fillTitles([...new Set(found.items.map((item) => item.mediaId))])
   } catch (e) {
     if (mine !== run) return
@@ -171,7 +187,17 @@ watch(studioId, () => {
 
     <template v-else>
       <header v-if="name" class="am-studio">
-        <span class="am-studio__mono" aria-hidden="true">{{ mono }}</span>
+        <!-- Литография только когда она есть: буква в квадрате на её месте
+             ничего не сообщала и только шумела рядом с названием. -->
+        <img
+          v-if="logo"
+          class="am-studio__logo"
+          :src="logo"
+          :alt="name"
+          loading="lazy"
+          decoding="async"
+          @error="logo = null"
+        />
 
         <div class="am-studio__text">
           <h2 class="am-studio__name">{{ name }}</h2>
@@ -224,7 +250,7 @@ watch(studioId, () => {
 </template>
 
 <style scoped>
-/* Шапка студии: имя с монограммой вместо голого заголовка в ряду. */
+/* Шапка студии: имя и литография, если она есть у источника. */
 .am-studio {
   display: flex;
   gap: 16px;
@@ -237,24 +263,20 @@ watch(studioId, () => {
   backdrop-filter: blur(var(--am-blur)) saturate(1.4);
 }
 
-/* Монограмма формы капли: окружность рядом с круглыми аватарами
-   людей читалась бы как ещё один человек. */
-.am-studio__mono {
-  display: grid;
+/* Литография вписывается целиком: знаки студий бывают и квадратными,
+   и вытянутыми в строку, а обрезка съедала бы слово. Подложка светлая
+   во всех трёх темах: у источника знаки лежат на прозрачном фоне тёмной
+   заливкой, и на тёмной теме они исчезали бы целиком. */
+.am-studio__logo {
   flex: 0 0 auto;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--am-text);
-  background: linear-gradient(
-    140deg,
-    rgb(var(--am-accent-rgb) / 0.34),
-    rgb(var(--am-accent-2-rgb) / 0.22)
-  );
-  border: 1px solid rgb(var(--am-accent-rgb) / 0.28);
-  border-radius: var(--am-r-drop);
+  box-sizing: border-box;
+  width: 84px;
+  height: 54px;
+  padding: 6px 8px;
+  object-fit: contain;
+  background: color-mix(in srgb, #fff 90%, transparent);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-m);
 }
 
 .am-studio__text {
