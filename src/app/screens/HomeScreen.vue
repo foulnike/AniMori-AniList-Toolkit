@@ -361,17 +361,21 @@ watch(homeGenre, () => {
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
+    <!-- Внутренний ряд нужен для центровки: сам прокрутчик шириной во всю
+         страницу, а ряд — ровно по содержимому. -->
     <div class="am-choose">
-      <button
-        v-for="genre in GENRE_CHOICES"
-        :key="genre"
-        class="am-chip"
-        :class="{ 'am-chip--on': homeGenre === genre }"
-        type="button"
-        @click="toggleGenre(genre)"
-      >
-        {{ genreWord(genre) }}
-      </button>
+      <div class="am-choose__row">
+        <button
+          v-for="genre in GENRE_CHOICES"
+          :key="genre"
+          class="am-chip"
+          :class="{ 'am-chip--on': homeGenre === genre }"
+          type="button"
+          @click="toggleGenre(genre)"
+        >
+          {{ genreWord(genre) }}
+        </button>
+      </div>
     </div>
 
     <div v-if="busy" class="am-shelf">
@@ -528,7 +532,6 @@ watch(homeGenre, () => {
    по краю чип честно говорит, что ряд прокручивается. */
 .am-choose {
   display: flex;
-  gap: 8px;
   padding: 2px 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -538,6 +541,16 @@ watch(homeGenre, () => {
 
 .am-choose::-webkit-scrollbar {
   height: 0;
+}
+
+/* Центровка автоотступами, а не justify-content: когда лента шире экрана,
+   автоотступ обращается в нуль и начало ряда остаётся доступным прокруткой,
+   а центрованный флекс в этом случае срезал бы первые жанры насовсем. */
+.am-choose__row {
+  display: flex;
+  gap: 8px;
+  width: max-content;
+  margin-inline: auto;
 }
 
 .am-choose .am-chip {
