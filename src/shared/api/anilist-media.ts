@@ -11,6 +11,19 @@ const PAGE_SIZE = 50
 
 /** Сколько находок на странице поиска. Больше одного экрана всё равно не читают. */
 export const SEARCH_PAGE_SIZE = 20
+export const STUDIO_PAGE_SIZE = SEARCH_PAGE_SIZE
+
+/** Дедупликация работ студии: сервер может повторить title при выпуске страницы. */
+function dedupeBriefs(items: MediaBrief[]): MediaBrief[] {
+  const seen = new Set<number>()
+  const out: MediaBrief[] = []
+  for (const item of items) {
+    if (seen.has(item.mediaId)) continue
+    seen.add(item.mediaId)
+    out.push(item)
+  }
+  return out
+}
 
 /** MAL-соответствия живут весь запуск: один тайтл нужен нескольким виджетам. */
 const malMemory = new Map<number, number | null>()
@@ -389,6 +402,8 @@ export interface StudioPage {
   items: MediaBrief[]
   hasNext: boolean
   total: number | null
+  /** Сколько уникальных работ показано после текущей страницы. */
+  known: number
 }
 
 /**
@@ -630,11 +645,15 @@ export async function searchMedia(word: string, page = 1): Promise<SearchPage | 
 }
 
 /** Работы студии по популярности, страницами. Подпись не нужна: всё публичное. */
-export async function fetchStudioWorks(studioId: number, page = 1): Promise<StudioPage | null> {
+export async function fetchStudioWorks(
+  studioId: number,
+  page = 1,
+  previous: ReadonlyArray<MediaBrief> = [],
+): Promise<StudioPage | null> {
   const reply = await anilistQuery<StudioReply>(STUDIO_QUERY, {
     id: studioId,
     page,
-    perPage: SEARCH_PAGE_SIZE,
+    perPage: STUDIO_PAGE_SIZE,
   })
 
   const studio = reply.data?.Studio
@@ -643,21 +662,29 @@ export async function fetchStudioWorks(studioId: number, page = 1): Promise<Stud
     return null
   }
 
+  const knownIds = new Set<number>(previous.map((item) => item.mediaId))
   const items: MediaBrief[] = []
   const nodes = studio.media?.nodes
   if (Array.isArray(nodes)) {
     for (const node of nodes) {
       const brief = briefOrNull(node)
-      if (brief) items.push(brief)
+      if (!brief || knownIds.has(brief.mediaId)) continue
+      knownIds.add(brief.mediaId)
+      items.push(brief)
     }
   }
 
-  Logger('API', `Студия ${studioId}: страница ${page}, работ ${items.length}`)
+  const total = countOrNull(studio.media?.pageInfo?.total)
+  const unique = dedupeBriefs(items)
+  const known = previous.length + unique.length
+
+  Logger('API', `Студия ${studioId}: страница ${page}, новых работ ${items.length}`)
 
   return {
     name: textOrNull(studio.name) ?? `Студия #${studioId}`,
-    items,
-    hasNext: studio.media?.pageInfo?.hasNextPage === true,
-    total: countOrNull(studio.media?.pageInfo?.total),
+    items: unique,
+    hasNext: studio.media?.pageInfo?.hasNextPage === true && unique.length > 0,
+    total,
+    known,
   }
 }

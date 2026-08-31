@@ -18,16 +18,12 @@ import { toTileRow, type TileRow } from '../tile-row'
 const HOLD_COUNT = 12
 
 /** По скольку тайтлов просить русские названия за заход. */
-const TITLE_CHUNK = 10
-
-/** Скольким верхним строкам добирать названия сетью. */
-const TITLE_DEPTH = 20
+const TITLE_CHUNK = 20
 
 const name = ref('')
 const rows = ref<TileRow[]>([])
 const busy = ref(false)
 const trouble = ref('')
-const total = ref<number | null>(null)
 const hasNext = ref(false)
 const page = ref(1)
 
@@ -58,12 +54,10 @@ function redraw(): void {
  * Добирает русские названия верхним строкам. У студии в выдаче только
  * аниме, поэтому проход один: разбивать строки по видам больше незачем.
  */
-async function fillTitles(): Promise<void> {
+async function fillTitles(targetIds: readonly number[]): Promise<void> {
   const mine = ++titleRun
-  const ids = briefs
-    .slice(0, TITLE_DEPTH)
-    .filter((brief) => peekRussianName(brief.mediaId) === null)
-    .map((brief) => brief.mediaId)
+  const ids = targetIds.filter((id) => peekRussianName(id) === null)
+  if (ids.length === 0) return
 
   try {
     for (let from = 0; from < ids.length; from += TITLE_CHUNK) {
@@ -93,7 +87,6 @@ async function load(add = false): Promise<void> {
     briefs = []
     rows.value = []
     name.value = ''
-    total.value = null
     hidden.value = 0
   }
 
@@ -106,9 +99,10 @@ async function load(add = false): Promise<void> {
   trouble.value = ''
 
   const wanted = add ? page.value + 1 : 1
+  const known = add ? briefs : []
 
   try {
-    const found = await fetchStudioWorks(id, wanted)
+    const found = await fetchStudioWorks(id, wanted, known)
     if (mine !== run) return
 
     if (found === null) {
@@ -123,18 +117,16 @@ async function load(add = false): Promise<void> {
     hidden.value = hiddenCount(fresh, (brief) => brief.isAdult)
     briefs = keepAllowed(fresh, (brief) => brief.isAdult)
     page.value = wanted
-    hasNext.value = found.hasNext
+    hasNext.value = found.hasNext && found.known > 0
     name.value = found.name
-    total.value = found.total
     redraw()
+    await fillTitles([...new Set(found.items.map((item) => item.mediaId))])
   } catch (e) {
     if (mine !== run) return
     trouble.value = describe(e)
   } finally {
     if (mine === run) busy.value = false
   }
-
-  void fillTitles()
 }
 
 /** Добор следующей страницы. */
@@ -178,14 +170,13 @@ watch(studioId, () => {
       <div v-if="name" class="am-bar">
         <h2 class="am-h2">{{ name }}</h2>
         <span class="am-bar__gap" />
-        <span v-if="total !== null" class="am-meta">Работ: {{ total }}</span>
       </div>
 
       <p v-if="hidden > 0" class="am-meta">Скрыто с меткой 18+: {{ hidden }}</p>
 
       <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
-      <ul v-if="busy && rows.length === 0" class="am-grid">
+      <ul v-if="busy && rows.length === 0" class="am-grid am-studio-grid">
         <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
           <span class="am-skeleton am-hold__art" />
           <span class="am-skeleton am-hold__line" />
@@ -197,7 +188,7 @@ watch(studioId, () => {
         <span>У студии пока ничего не числится.</span>
       </div>
 
-      <ul v-else class="am-grid">
+      <ul v-else class="am-grid am-studio-grid">
         <MediaTile
           v-for="row in rows"
           :key="row.mediaId"
@@ -226,6 +217,10 @@ watch(studioId, () => {
 </template>
 
 <style scoped>
+.am-studio-grid {
+  grid-template-columns: repeat(auto-fit, minmax(var(--am-tile), 1fr));
+}
+
 .am-more {
   display: flex;
   justify-content: center;
