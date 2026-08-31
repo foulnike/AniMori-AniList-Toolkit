@@ -11,7 +11,14 @@ const PAGE_SIZE = 50
 
 /** Сколько находок на странице поиска. Больше одного экрана всё равно не читают. */
 export const SEARCH_PAGE_SIZE = 20
-export const STUDIO_PAGE_SIZE = SEARCH_PAGE_SIZE
+
+/**
+ * Сколько работ студии просим за заход. Двадцать семь, а не двадцать, как
+ * у поиска: на широком окне сетка постеров встаёт по девять в ряд, и число,
+ * не кратное девяти, оставляло последнюю строку рваной. Двадцать семь дают
+ * ровно три полных ряда, а на узком окне лишнее просто уходит ниже сгиба.
+ */
+export const STUDIO_PAGE_SIZE = 27
 
 /** Дедупликация работ студии: сервер может повторить title при выпуске страницы. */
 function dedupeBriefs(items: MediaBrief[]): MediaBrief[] {
@@ -438,7 +445,10 @@ export async function fetchMalIds(ids: number[]): Promise<Map<number, number>> {
           for (const item of media) {
             if (!item || typeof item.id !== 'number') continue
             seen.add(item.id)
-            malMemory.set(item.id, typeof item.idMal === 'number' && item.idMal > 0 ? item.idMal : null)
+            malMemory.set(
+              item.id,
+              typeof item.idMal === 'number' && item.idMal > 0 ? item.idMal : null,
+            )
           }
           for (const id of chunk) {
             if (!seen.has(id)) malMemory.set(id, null)
