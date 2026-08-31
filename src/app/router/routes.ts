@@ -31,16 +31,19 @@ export type MenuItem = {
 // Студии в меню нет: на неё ведут чипы карточки.
 // Журнала в меню нет: он нужен при разборе поломки, а не каждый день,
 // и ведёт на него кнопка из настроек.
+//
+// Подписи и имена экранов живут раздельно: имя 'lists' стоит в адресе
+// окна и в памяти отбора, поэтому подпись меняется, а имя остаётся.
 export const MENU: ReadonlyArray<MenuItem> = [
   { name: 'home', title: 'Главная', icon: '⌂' },
-  { name: 'lists', title: 'Списки', icon: '≡' },
+  { name: 'lists', title: 'Моё', icon: '≡' },
   { name: 'search', title: 'Поиск', icon: '⌕' },
   { name: 'settings', title: 'Настройки', icon: '⚙' },
 ]
 
 export const SCREEN_TITLES: Record<ScreenName, string> = {
   home: 'Главная',
-  lists: 'Списки',
+  lists: 'Моё',
   search: 'Поиск',
   media: 'Тайтл',
   studio: 'Студия',
