@@ -14,6 +14,8 @@ const props = withDefaults(
     mark?: string | null
     repeat?: number
     ongoing?: boolean
+    /** Анонс: тайтл объявлен, но ни одной серии ещё не вышло. */
+    soon?: boolean
     own?: string | null
     done?: number
     adult?: boolean
@@ -27,6 +29,7 @@ const props = withDefaults(
     mark: null,
     repeat: 0,
     ongoing: false,
+    soon: false,
     own: null,
     done: 0,
     adult: false,
@@ -41,11 +44,16 @@ function barWidth(): string {
   const part = Math.min(1, Math.max(0, props.done))
   return `${Math.round(part * 100)}%`
 }
+
+/** Подпись полосы: свой счёт, когда он есть, иначе доля процентами. */
+function barHint(): string {
+  return props.own === null ? `Пройдено ${barWidth()}` : `Пройдено: ${props.own}`
+}
 </script>
 
 <template>
-  <li class="am-row" :class="{ 'am-row--art': art }">
-    <button class="am-row__hit" type="button" @click="emit('open')">
+  <li class="am-row" :class="{ 'am-row--art': art, 'am-row--bar': done > 0 }">
+    <button class="am-row__hit" v-tip="title" type="button" @click="emit('open')">
       <img
         v-if="art && cover"
         class="am-row__art"
@@ -57,14 +65,6 @@ function barWidth(): string {
       <span v-else-if="art" class="am-row__art am-row__art--empty" aria-hidden="true">
         {{ title.slice(0, 1) }}
       </span>
-      <!-- В компактной строке постера нет, и цвет тайтла остаётся
-           единственной приметой, по которой глаз ловит знакомую запись. -->
-      <span
-        v-else
-        class="am-row__dot"
-        :style="color ? { background: color } : undefined"
-        aria-hidden="true"
-      />
 
       <span class="am-row__text">
         <span class="am-row__name">{{ title }}</span>
@@ -74,15 +74,18 @@ function barWidth(): string {
           <span v-if="own">{{ own }}</span>
           <span v-if="repeat > 0">↻ {{ repeat }}</span>
           <span v-if="ongoing" class="am-row__live">идёт</span>
+          <span v-else-if="soon" class="am-row__soon">анонс</span>
           <span v-if="adult" class="am-row__adult">18+</span>
-        </span>
-
-        <span v-if="done > 0" class="am-line am-row__line">
-          <span class="am-line__fill" :style="{ width: barWidth() }" />
         </span>
       </span>
 
       <span v-if="mark" class="am-row__mark">{{ mark }}</span>
+
+      <!-- Полоса лежит по нижней кромке строки, а не в колонке текста:
+           шкала во всю ширину сама показывает, где у пройденного конец. -->
+      <span v-if="done > 0" v-tip="barHint()" class="am-line am-row__line">
+        <span class="am-line__fill" :style="{ width: barWidth() }" />
+      </span>
     </button>
   </li>
 </template>
@@ -95,6 +98,7 @@ function barWidth(): string {
 /* Цель нажатия — вся строка: в закладке на сотни записей целиться
    в само название невозможно. */
 .am-row__hit {
+  position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -121,6 +125,12 @@ function barWidth(): string {
   min-height: 74px;
   padding: 8px 16px 8px 10px;
   border-radius: var(--am-r-m);
+}
+
+/* Полоса стоит над кромкой, а не на ней: без запаса снизу она легла бы
+   на границу строки и читалась как подчёркивание. */
+.am-row--bar .am-row__hit {
+  padding-bottom: 14px;
 }
 
 .am-row__hit:hover,
@@ -152,14 +162,6 @@ function barWidth(): string {
   color: var(--am-faint);
 }
 
-.am-row__dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  background: var(--am-fill-3);
-  border-radius: var(--am-r-cap);
-}
-
 .am-row__text {
   display: flex;
   flex: 1;
@@ -169,7 +171,7 @@ function barWidth(): string {
 }
 
 /* Название в одну строку с отсечкой: ровный шаг строк важнее полного
-   имени у трёх самых длинных тайтлов. */
+   имени у трёх самых длинных тайтлов: полное покажет подпись. */
 .am-row__name {
   overflow: hidden;
   font-size: 13.5px;
@@ -192,15 +194,33 @@ function barWidth(): string {
   color: var(--am-good);
 }
 
+/* Анонс тише идущего сезона: событие будущее, а не сегодняшнее. */
+.am-row__soon {
+  color: var(--am-accent);
+}
+
 .am-row__adult {
   color: var(--am-bad);
 }
 
-/* Полоса пройденного не тянется во всю строку: на широком окне она
-   превращалась в линейку через весь экран. */
+/* Полоса пройденного тянется до правого края строки: короткий отрезок
+   посреди строки не давал шкалы — было не видно, где сто процентов.
+   Поток разметки она не трогает: иначе строка с полосой была бы выше
+   строки без полосы, и шаг списка гулял бы от записи к записи. */
 .am-row__line {
-  max-width: 220px;
-  height: 3px;
+  position: absolute;
+  right: 14px;
+  bottom: 6px;
+  left: 14px;
+  height: 4px;
+  border-radius: var(--am-r-cap);
+}
+
+/* В строке с постером полоса начинается от текста, а не из-под обложки:
+   постер выше полосы и перекрывал её левый конец. */
+.am-row--art .am-row__line {
+  right: 16px;
+  left: 62px;
 }
 
 .am-row__mark {
