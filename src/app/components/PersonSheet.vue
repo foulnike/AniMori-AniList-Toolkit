@@ -687,8 +687,16 @@ onBeforeUnmount(() => {
   border-radius: var(--am-r-cap);
 }
 
-/* Полка работ автора: горизонтальная прокрутка общего .am-rail. */
+/* Полка работ автора: горизонтальная прокрутка берётся у общего .am-rail,
+   а шаг колонки — свой. Общая полка размечена колонками в --am-tile
+   (148…216 пикселей по ширине окна), а постер работы вдвое уже:
+   остаток колонки становился пустотой, и чем шире окно и длиннее
+   полка, тем больше таких дыр было видно сразу. */
 .am-ps-works {
+  --am-ps-art: 104px;
+
+  grid-auto-columns: var(--am-ps-art);
+  gap: 12px;
   padding-bottom: 4px;
 }
 
@@ -697,7 +705,7 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   flex-direction: column;
   gap: 6px;
-  width: 104px;
+  width: 100%;
   padding: 0;
   font: inherit;
   color: inherit;
@@ -709,7 +717,7 @@ onBeforeUnmount(() => {
 
 .am-ps-work__art {
   display: block;
-  width: 104px;
+  width: 100%;
   aspect-ratio: 2 / 3;
   object-fit: cover;
   background: var(--am-fill-2);
@@ -846,6 +854,12 @@ onBeforeUnmount(() => {
 
   .am-ps-portrait__img {
     width: 84px;
+  }
+
+  /* На узком окне постер работы чуть мельче: четырёх колонок по 104
+     в тело окна уже не влезало, и полка открывалась полупостером. */
+  .am-ps-works {
+    --am-ps-art: 92px;
   }
 }
 
