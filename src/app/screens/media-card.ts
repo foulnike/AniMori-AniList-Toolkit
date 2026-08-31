@@ -72,7 +72,6 @@ export interface MediaCardView {
   mineFacts: ComputedRef<MineFact[]>
   franchiseRows: ComputedRef<readonly FranchiseWork[]>
   franchiseHidden: ComputedRef<number>
-  boardClass: ComputedRef<string>
   load: () => Promise<void>
   studioLogo: (name: string) => string | null
   franchiseName: (work: FranchiseWork) => string
@@ -399,17 +398,6 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     )
   })
 
-  /**
-   * Облик доски. Длинная франшиза владеет правым краем на две строки —
-   * люди подтягиваются под описание и пустоты не остаётся. Короткая
-   * занимает только свой ряд, люди идут во всю ширину под ней.
-   */
-  const boardClass = computed<string>(() => {
-    const count = franchiseRows.value.length
-    if (count === 0) return ''
-    return count > 5 ? 'am-board--fran-long' : 'am-board--fran-short'
-  })
-
   /** Дерево франшизы: склад или сеть, затем русские имена частей фоном. */
   async function beginFranchise(mine: number, id: number, found: MediaCard): Promise<void> {
     const works = await fetchFranchise(id, found.malId)
@@ -622,7 +610,6 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     mineFacts,
     franchiseRows,
     franchiseHidden,
-    boardClass,
     load,
     studioLogo,
     franchiseName,
