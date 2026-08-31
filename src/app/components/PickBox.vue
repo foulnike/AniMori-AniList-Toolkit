@@ -202,9 +202,16 @@ watch(
   box-shadow: var(--am-sh-glow);
 }
 
+/* Значок слева — тоже в своём квадрате: символы вроде ⚑ и ◆ имеют
+   разную высоту коробки и без рамки сдвигали строку каждый своё число пикселей. */
 .am-roll__mark {
+  display: grid;
   flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 16px;
   font-size: 13px;
+  line-height: 1;
   color: var(--am-faint);
 }
 
@@ -216,9 +223,19 @@ watch(
 }
 
 /* Стрелка поворачивается на раскрытии: без этого непонятно, список
-   открыт или просто что-то перекрыло экран. */
+   открыт или просто что-то перекрыло экран.
+
+   Свой квадрат под знак обязателен: голый ⌄ стоял по базовой линии
+   шрифта и сидел ниже середины пилюли, а после поворота та же
+   ошибка удваивалась вверх. Оптическая поправка идёт отступом,
+   а не transform: transform здесь занят поворотом. */
 .am-roll__arrow {
+  display: grid;
   flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: -2px;
   font-size: 15px;
   line-height: 1;
   color: var(--am-faint);
@@ -226,6 +243,7 @@ watch(
 }
 
 .am-roll__arrow--up {
+  margin-top: 2px;
   transform: rotate(180deg);
 }
 
@@ -308,9 +326,15 @@ watch(
   flex: 1 1 auto;
 }
 
+/* Галка тоже в квадрате: без него она тянула строку вниз на пиксель. */
 .am-roll__tick {
+  display: grid;
   flex: 0 0 auto;
+  place-items: center;
+  width: 14px;
+  height: 14px;
   font-size: 12px;
+  line-height: 1;
   color: var(--am-accent);
 }
 
