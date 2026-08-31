@@ -302,135 +302,140 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="am-sheet" role="dialog" aria-modal="true" @click.self="emit('close')">
-    <div ref="box" class="am-sheet__box">
-      <button
-        v-if="depth > 0"
-        class="am-btn am-btn--ghost am-ps-back"
-        type="button"
-        @click="goBackPerson"
-      >
-        ← Назад
-      </button>
-
-      <!-- Шапка -->
-      <div class="am-ps-top">
-        <div class="am-ps-portrait">
-          <img
-            v-if="largeImage()"
-            class="am-ps-portrait__img"
-            :src="largeImage()!"
-            :alt="fullName()"
-            decoding="async"
-          />
-          <span v-else class="am-ps-portrait__img am-ps-portrait__img--empty" aria-hidden="true">
-            {{ fullName().slice(0, 1) }}
-          </span>
-        </div>
-
-        <div class="am-ps-names">
-          <p class="am-ps-names__full">{{ fullName() }}</p>
-          <p v-if="ruPerson" class="am-ps-names__russian">{{ ruPerson.russian }}</p>
-          <p v-if="nativeName()" class="am-ps-names__native">{{ nativeName() }}</p>
-          <p v-if="altNames().length" class="am-ps-names__alt">
-            {{ altNames().join(' · ') }}
-          </p>
-
-          <!-- Стафф: занятия, язык, город -->
-          <template v-if="current.kind === 'staff' && staffCard">
-            <p v-if="staffCard.primaryOccupations?.length" class="am-dim am-ps-names__occ">
-              {{ staffCard.primaryOccupations.map(occupationWord).join(', ') }}
-            </p>
-            <p v-if="staffCard.languageV2" class="am-dim">
-              {{ langWord(staffCard.languageV2)
-              }}<template v-if="staffCard.homeTown">, {{ staffCard.homeTown }}</template>
-            </p>
-            <p v-if="fmtDate(staffCard.dateOfBirth)" class="am-dim">
-              {{ fmtDate(staffCard.dateOfBirth)
-              }}<template v-if="fmtDate(staffCard.dateOfDeath)">
-                &nbsp;—&nbsp;{{ fmtDate(staffCard.dateOfDeath) }}</template
-              >
-            </p>
-          </template>
-
-          <!-- Персонаж: пол, возраст, дата рождения -->
-          <template v-if="current.kind === 'character' && charCard">
-            <p v-if="charCard.gender || charCard.age" class="am-dim">
-              <template v-if="charCard.gender">{{ genderWord(charCard.gender) }}</template
-              ><template v-if="charCard.gender && charCard.age"> · </template
-              ><template v-if="charCard.age">{{ charCard.age }}</template>
-            </p>
-            <p v-if="fmtDate(charCard.dateOfBirth)" class="am-dim">
-              {{ fmtDate(charCard.dateOfBirth) }}
-            </p>
-          </template>
-        </div>
-
-        <button class="am-sheet__close" type="button" aria-label="Закрыть" @click="emit('close')">
-          ×
+    <div class="am-sheet__box">
+      <!-- Шапка стоит на месте: прокручивается только тело ниже. -->
+      <header class="am-sheet__head">
+        <button
+          v-if="depth > 0"
+          class="am-btn am-btn--ghost am-ps-back"
+          type="button"
+          @click="goBackPerson"
+        >
+          ← Назад
         </button>
+
+        <div class="am-ps-top">
+          <div class="am-ps-portrait">
+            <img
+              v-if="largeImage()"
+              class="am-ps-portrait__img"
+              :src="largeImage()!"
+              :alt="fullName()"
+              decoding="async"
+            />
+            <span v-else class="am-ps-portrait__img am-ps-portrait__img--empty" aria-hidden="true">
+              {{ fullName().slice(0, 1) }}
+            </span>
+          </div>
+
+          <div class="am-ps-names">
+            <p class="am-ps-names__full">{{ fullName() }}</p>
+            <p v-if="ruPerson" class="am-ps-names__russian">{{ ruPerson.russian }}</p>
+            <p v-if="nativeName()" class="am-ps-names__native">{{ nativeName() }}</p>
+            <p v-if="altNames().length" class="am-ps-names__alt">
+              {{ altNames().join(' · ') }}
+            </p>
+
+            <!-- Стафф: занятия, язык, город -->
+            <template v-if="current.kind === 'staff' && staffCard">
+              <p v-if="staffCard.primaryOccupations?.length" class="am-dim am-ps-names__occ">
+                {{ staffCard.primaryOccupations.map(occupationWord).join(', ') }}
+              </p>
+              <p v-if="staffCard.languageV2" class="am-dim">
+                {{ langWord(staffCard.languageV2)
+                }}<template v-if="staffCard.homeTown">, {{ staffCard.homeTown }}</template>
+              </p>
+              <p v-if="fmtDate(staffCard.dateOfBirth)" class="am-dim">
+                {{ fmtDate(staffCard.dateOfBirth)
+                }}<template v-if="fmtDate(staffCard.dateOfDeath)">
+                  &nbsp;—&nbsp;{{ fmtDate(staffCard.dateOfDeath) }}</template
+                >
+              </p>
+            </template>
+
+            <!-- Персонаж: пол, возраст, дата рождения -->
+            <template v-if="current.kind === 'character' && charCard">
+              <p v-if="charCard.gender || charCard.age" class="am-dim">
+                <template v-if="charCard.gender">{{ genderWord(charCard.gender) }}</template
+                ><template v-if="charCard.gender && charCard.age"> · </template
+                ><template v-if="charCard.age">{{ charCard.age }}</template>
+              </p>
+              <p v-if="fmtDate(charCard.dateOfBirth)" class="am-dim">
+                {{ fmtDate(charCard.dateOfBirth) }}
+              </p>
+            </template>
+          </div>
+
+          <button class="am-sheet__close" type="button" aria-label="Закрыть" @click="emit('close')">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+      </header>
+
+      <div ref="box" class="am-sheet__body">
+        <!-- Скелетон -->
+        <template v-if="busy">
+          <span class="am-skeleton am-ps-skel" />
+          <span class="am-skeleton am-ps-skel" />
+          <span class="am-skeleton am-ps-skel am-ps-skel--short" />
+        </template>
+
+        <!-- Описание -->
+        <template v-else>
+          <p v-if="rawDesc()" class="am-ps-desc">
+            <template v-for="(part, i) in descParts()" :key="i">
+              <a v-if="part.url" class="am-ps-link" href="#" @click.prevent="openLink(part.url)">{{
+                part.text
+              }}</a>
+              <template v-else>{{ part.text }}</template>
+            </template>
+          </p>
+          <button
+            v-if="hasMore()"
+            class="am-btn am-btn--ghost am-ps-wide"
+            type="button"
+            @click="expanded = true"
+          >
+            Показать полностью
+          </button>
+
+          <!-- Сэйю (только для персонажей): строка кликабельна, окно то же -->
+          <template v-if="current.kind === 'character' && voiceActors().length">
+            <h4 class="am-ps-sub">Голоса</h4>
+            <div class="am-ps-voices">
+              <button
+                v-for="va in voiceActors()"
+                :key="va.id"
+                class="am-ps-va"
+                type="button"
+                :title="`Карточка: ${va.name.full}`"
+                @click="openVoice(va)"
+              >
+                <img
+                  v-if="va.image?.medium || va.image?.large"
+                  class="am-ps-va__art"
+                  :src="(va.image.medium ?? va.image.large)!"
+                  :alt="va.name.full"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span v-else class="am-ps-va__art am-ps-va__art--empty" aria-hidden="true">
+                  {{ va.name.full.slice(0, 1) }}
+                </span>
+                <span class="am-ps-va__name">{{ vaName(va) }}</span>
+                <span class="am-ps-va__go" aria-hidden="true">→</span>
+              </button>
+            </div>
+          </template>
+        </template>
       </div>
 
-      <!-- Скелетон -->
-      <template v-if="busy">
-        <span class="am-skeleton am-ps-skel" />
-        <span class="am-skeleton am-ps-skel" />
-        <span class="am-skeleton am-ps-skel am-ps-skel--short" />
-      </template>
-
-      <!-- Описание -->
-      <template v-else>
-        <p v-if="rawDesc()" class="am-ps-desc">
-          <template v-for="(part, i) in descParts()" :key="i">
-            <a v-if="part.url" class="am-ps-link" href="#" @click.prevent="openLink(part.url)">{{
-              part.text
-            }}</a>
-            <template v-else>{{ part.text }}</template>
-          </template>
-        </p>
-        <button
-          v-if="hasMore()"
-          class="am-btn am-btn--ghost"
-          type="button"
-          @click="expanded = true"
-        >
-          Показать полностью
-        </button>
-
-        <!-- Сэйю (только для персонажей): строка кликабельна, окно то же -->
-        <template v-if="current.kind === 'character' && voiceActors().length">
-          <h4 class="am-ps-sub">Голоса</h4>
-          <div class="am-ps-voices">
-            <button
-              v-for="va in voiceActors()"
-              :key="va.id"
-              class="am-ps-va"
-              type="button"
-              :title="`Карточка: ${va.name.full}`"
-              @click="openVoice(va)"
-            >
-              <img
-                v-if="va.image?.medium || va.image?.large"
-                class="am-ps-va__art"
-                :src="(va.image.medium ?? va.image.large)!"
-                :alt="va.name.full"
-                loading="lazy"
-                decoding="async"
-              />
-              <span v-else class="am-ps-va__art am-ps-va__art--empty" aria-hidden="true">
-                {{ va.name.full.slice(0, 1) }}
-              </span>
-              <span class="am-ps-va__name">{{ vaName(va) }}</span>
-            </button>
-          </div>
-        </template>
-      </template>
-
       <!-- Футер -->
-      <div v-if="current.siteUrl" class="am-sheet__foot">
+      <footer v-if="current.siteUrl" class="am-sheet__foot">
         <button class="am-btn am-btn--ghost" type="button" @click="openSite()">
           Открыть на AniList
         </button>
-      </div>
+      </footer>
     </div>
   </div>
 </template>
@@ -443,51 +448,95 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(4, 7, 12, 0.72);
-  backdrop-filter: blur(6px);
+  padding: clamp(12px, 3vw, 40px);
+  background: var(--am-veil);
+  backdrop-filter: blur(8px);
+  animation: am-veil-in var(--am-mid) var(--am-ease-soft) both;
 }
 
+/* Три этажа: шапка, прокручиваемое тело и подвал со ссылкой наружу. */
 .am-sheet__box {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 16px;
   width: 100%;
-  max-width: 780px;
-  max-height: 90vh;
-  padding: 26px;
-  overflow-y: auto;
-  background: linear-gradient(180deg, var(--am-panel-2), var(--am-panel));
-  border-radius: var(--am-r-l);
-  box-shadow: var(--am-sh-2);
+  max-width: 820px;
+  max-height: min(90vh, 940px);
+  padding: clamp(18px, 2.2vw, 28px);
+  overflow: hidden;
+  background: linear-gradient(165deg, var(--am-glass-2), var(--am-glass));
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-xl);
+  box-shadow:
+    var(--am-sh-2),
+    inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.5);
+  animation: am-sheet-in var(--am-mid) var(--am-ease) both;
 }
 
+@keyframes am-veil-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes am-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+}
+
+.am-sheet__head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.am-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+/* Цель нажатия в 44 пикселя и форма, плывущая к окружности под курсором —
+   точно так же, как в окне правки записи. */
 .am-sheet__close {
+  display: grid;
   flex: none;
-  align-self: flex-start;
-  width: 44px;
-  height: 44px;
+  place-items: center;
+  width: var(--am-touch);
+  height: var(--am-touch);
+  margin-left: auto;
   padding: 0;
+  font: inherit;
   font-size: 22px;
   line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
-  background: none;
-  border: 0;
-  border-radius: 50%;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-drop);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
 }
 
 .am-sheet__close:hover,
 .am-sheet__close:focus-visible {
   color: var(--am-text);
-  background: var(--am-hover);
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
 }
 
 .am-sheet__foot {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
-  padding-top: 4px;
+  padding-top: 14px;
   border-top: 1px solid var(--am-line-soft);
 }
 
@@ -499,7 +548,7 @@ onBeforeUnmount(() => {
 /* Шапка */
 .am-ps-top {
   display: flex;
-  gap: 20px;
+  gap: clamp(14px, 1.6vw, 22px);
   align-items: flex-start;
 }
 
@@ -508,18 +557,18 @@ onBeforeUnmount(() => {
 }
 
 .am-ps-portrait__img {
-  width: 110px;
+  display: block;
+  width: clamp(92px, 8vw, 128px);
   aspect-ratio: 2 / 3;
   object-fit: cover;
-  background: var(--am-panel-2);
+  background: var(--am-fill-2);
   border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
+  border-radius: var(--am-r-leaf);
 }
 
 .am-ps-portrait__img--empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-size: 32px;
   color: var(--am-faint);
 }
@@ -530,7 +579,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 /* У параграфов браузерные маргины, зазор держит только gap раскладки. */
@@ -539,15 +588,17 @@ onBeforeUnmount(() => {
 }
 
 .am-ps-names__full {
-  font-size: 18px;
+  font-size: clamp(17px, 1.6vw, 22px);
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
 }
 
 /* Русское имя читается первым по смыслу, поэтому ярче оригинала. */
 .am-ps-names__russian {
   font-size: 14px;
-  color: var(--am-text);
+  font-weight: 600;
+  color: var(--am-accent);
 }
 
 .am-ps-names__native {
@@ -564,13 +615,17 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-/* Описание */
+/* Описание лежит на своей подложке: стена текста без границ не читалась. */
 .am-ps-desc {
   margin: 0;
+  padding: 14px 16px;
   font-size: 14px;
   line-height: 1.65;
-  white-space: pre-line;
   color: var(--am-dim);
+  white-space: pre-line;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-l);
 }
 
 .am-ps-link {
@@ -581,44 +636,68 @@ onBeforeUnmount(() => {
 
 .am-ps-link:hover,
 .am-ps-link:focus-visible {
-  color: var(--am-accent, var(--am-text));
+  color: var(--am-accent);
+}
+
+.am-ps-wide {
+  align-self: flex-start;
 }
 
 /* Голоса */
 .am-ps-sub {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 600;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
   color: var(--am-faint);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+}
+
+.am-ps-sub::before {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 12px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
 }
 
 .am-ps-voices {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
 }
 
-/* Строка сэйю — кнопка: из неё открывается его карточка в этом же окне. */
+/* Строка сэйю — кнопка: из неё открывается его карточка в этом же окне.
+   Капсула такая же, как у авторов в блоке людей карточки. */
 .am-ps-va {
   display: flex;
-  gap: 10px;
+  gap: 11px;
   align-items: center;
   width: 100%;
-  padding: 4px 6px;
+  min-width: 0;
+  padding: 7px 12px;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  background: none;
-  border: 0;
-  border-radius: var(--am-r-m);
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
 }
 
 .am-ps-va:hover,
 .am-ps-va:focus-visible {
   background: var(--am-hover);
+  border-color: rgb(var(--am-accent-rgb) / 0.45);
+  transform: translateY(-1px);
 }
 
 .am-ps-va:hover .am-ps-va__name {
@@ -630,21 +709,37 @@ onBeforeUnmount(() => {
   width: 40px;
   height: 40px;
   object-fit: cover;
-  background: var(--am-panel-2);
-  border-radius: 50%;
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
 }
 
 .am-ps-va__art--empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-size: 16px;
   color: var(--am-faint);
 }
 
 .am-ps-va__name {
+  overflow: hidden;
   font-size: 13.5px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--am-fast) var(--am-ease);
+}
+
+/* Стрелка говорит, что строка ведёт дальше: без неё клик не угадать. */
+.am-ps-va__go {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--am-faint);
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-ps-va:hover .am-ps-va__go {
+  color: var(--am-accent);
+  transform: translateX(3px);
 }
 
 /* Скелетон */
@@ -656,5 +751,29 @@ onBeforeUnmount(() => {
 
 .am-ps-skel--short {
   width: 60%;
+}
+
+/* Узкое окно: портрет и имена встают колонкой, иначе имена сжимает в нить. */
+@media (max-width: 620px) {
+  .am-ps-top {
+    flex-wrap: wrap;
+  }
+
+  .am-ps-portrait__img {
+    width: 84px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-sheet,
+  .am-sheet__box {
+    animation: none;
+  }
+
+  .am-ps-va:hover,
+  .am-ps-va:focus-visible,
+  .am-ps-va:hover .am-ps-va__go {
+    transform: none;
+  }
 }
 </style>
