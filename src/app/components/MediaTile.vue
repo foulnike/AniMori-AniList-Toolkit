@@ -4,6 +4,8 @@
 // Своих данных не добывает: сотня плиток ушла бы в сеть сотню раз.
 import { computed, ref, watch } from 'vue'
 
+import { soonHint, soonWord } from '../labels'
+
 interface Props {
   title: string
   /** Короткая подпись под названием: вид, год, части. */
@@ -15,12 +17,14 @@ interface Props {
   score?: string | null
   /** Своя закладка или своя оценка: левый верхний угол. */
   mark?: string | null
-  /** Сколько раз пройдено повторно: отметка рядом с оценкой. */
+  /** Сколько раз пройдено повторно: знак без цифры, счёт — в подсказке. */
   repeat?: number
-  /** Свой комментарий: отметка с текстом во всплывающей подсказке. */
+  /** Свой комментарий: знак с текстом в подсказке. */
   note?: string | null
   /** Идёт ли сезон прямо сейчас: тихая точка в углу. */
   ongoing?: boolean
+  /** Ни одной части ещё не вышло: метка анонса. */
+  soon?: boolean
   /** Свой счёт частей строкой вида «7 / 12». */
   own?: string | null
   /** Доля пройденного от нуля до единицы: полоса внизу постера. */
@@ -39,6 +43,7 @@ const props = withDefaults(defineProps<Props>(), {
   repeat: 0,
   note: null,
   ongoing: false,
+  soon: false,
   own: null,
   done: 0,
   adult: false,
@@ -67,18 +72,26 @@ const letter = computed(() => props.title.trim().charAt(0).toUpperCase() || '?')
 /** Ширина полосы счёта. За края шкалы не выходим даже при чужом странном счёте. */
 const donePart = computed(() => `${Math.round(Math.min(1, Math.max(0, props.done)) * 100)}%`)
 
-/** Подсказка отметки повторов: знак сам за себя не говорит. */
+/**
+ * Подсказка отметки повторов. Сам счёт живёт только здесь: цифра рядом
+ * со знаком читалась в сетке как вторая оценка.
+ */
 const repeatHint = computed(() => `Повторных проходов: ${props.repeat}`)
 
 /** Есть ли вообще что показывать в левом верхнем углу. */
 const hasTags = computed(
-  () => props.mark !== null || props.adult || props.repeat > 0 || props.note !== null,
+  () =>
+    props.mark !== null ||
+    props.adult ||
+    props.soon ||
+    props.repeat > 0 ||
+    props.note !== null,
 )
 </script>
 
 <template>
   <li class="am-tile" :class="{ 'am-tile--hidable': hidable }">
-    <button class="am-tile__hit" type="button" :title="title" @click="emit('open')">
+    <button v-tip="title" class="am-tile__hit" type="button" @click="emit('open')">
       <span class="am-tile__art" :style="artStyle">
         <img
           v-if="cover && !imageFailed"
@@ -95,13 +108,17 @@ const hasTags = computed(
         <span class="am-tile__sheen" aria-hidden="true" />
 
         <span v-if="hasTags" class="am-tile__tags">
-          <span v-if="mark" class="am-tile__tag">{{ mark }}</span>
-
-          <span v-if="repeat > 0" class="am-tile__tag am-tile__tag--sign" :title="repeatHint">
-            ↻{{ repeat }}
+          <span v-if="soon" v-tip="soonHint()" class="am-tile__tag am-tile__tag--soon">
+            {{ soonWord() }}
           </span>
 
-          <span v-if="note" class="am-tile__tag am-tile__tag--sign" :title="note">✎</span>
+          <span v-if="mark" class="am-tile__tag">{{ mark }}</span>
+
+          <span v-if="repeat > 0" v-tip="repeatHint" class="am-tile__tag am-tile__tag--sign">
+            ↻
+          </span>
+
+          <span v-if="note" v-tip="note" class="am-tile__tag am-tile__tag--sign">✎</span>
 
           <span v-if="adult" class="am-tile__tag am-tile__tag--adult">18+</span>
         </span>
@@ -110,9 +127,9 @@ const hasTags = computed(
 
         <span
           v-if="ongoing"
+          v-tip="'Сезон идёт: части ещё выходят'"
           class="am-tile__live"
           :class="{ 'am-tile__live--low': score !== null }"
-          title="Сезон идёт: части ещё выходят"
         />
 
         <span v-if="own" class="am-tile__own">{{ own }}</span>
@@ -128,9 +145,9 @@ const hasTags = computed(
 
     <button
       v-if="hidable"
+      v-tip="'Не интересует'"
       class="am-tile__hide"
       type="button"
-      title="Не интересует"
       @click="emit('hide')"
     >
       <span aria-hidden="true">✕</span>
@@ -249,6 +266,7 @@ const hasTags = computed(
   left: 8px;
   display: flex;
   gap: 4px;
+  align-items: center;
   max-width: calc(100% - 46px);
   transition:
     opacity var(--am-fast) var(--am-ease),
@@ -283,11 +301,34 @@ const hasTags = computed(
   backdrop-filter: blur(8px) saturate(1.2);
 }
 
-/* Отметка знаком тише оценки: она рядом, а не вместо неё. */
+/* Метка анонса: единственная цветная в ряду, и только потому, что говорит
+   о тайтле главное: смотреть пока нечего. */
+.am-tile__tag--soon {
+  color: var(--am-on-art);
+  background: color-mix(in srgb, var(--am-accent) 58%, transparent);
+  border-color: color-mix(in srgb, var(--am-accent) 66%, transparent);
+}
+
+/* Знаки пересмотра и заметки — круглые монетки без подписей: ряд пилюль
+   разной длины читался как список оценок. Счёт и текст — в подсказке. */
 .am-tile__tag--sign {
-  padding: 3px 7px;
-  font-size: 10.5px;
-  color: color-mix(in srgb, var(--am-on-art) 80%, transparent);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--am-on-art) 78%, transparent);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
+}
+
+.am-tile__hit:hover .am-tile__tag--sign {
+  color: var(--am-on-art);
+  border-color: color-mix(in srgb, var(--am-on-art) 26%, transparent);
+  border-radius: var(--am-r-drop);
 }
 
 .am-tile__tag--adult {
