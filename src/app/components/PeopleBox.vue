@@ -214,22 +214,25 @@ watch(
             :title="person.native ?? person.name"
             @click="onShow('character', person)"
           >
-            <img
-              v-if="person.image"
-              class="am-face__art"
-              :src="person.image"
-              :alt="person.name"
-              loading="lazy"
-              decoding="async"
-            />
-            <span v-else class="am-face__art am-face__art--empty" aria-hidden="true">
-              {{ letter(person.name) }}
+            <span class="am-face__frame">
+              <img
+                v-if="person.image"
+                class="am-face__art"
+                :src="person.image"
+                :alt="person.name"
+                loading="lazy"
+                decoding="async"
+              />
+              <span v-else class="am-face__art am-face__art--empty" aria-hidden="true">
+                {{ letter(person.name) }}
+              </span>
+
+              <span v-if="roleWord(person.role)" class="am-face__role">
+                {{ roleWord(person.role) }}
+              </span>
             </span>
 
             <span class="am-face__name">{{ displayName('character', person) }}</span>
-            <span v-if="roleWord(person.role)" class="am-face__role">
-              {{ roleWord(person.role) }}
-            </span>
           </button>
 
           <!-- Озвучка своей целью: это второй человек, и окно у него своё. -->
@@ -296,83 +299,122 @@ watch(
 </template>
 
 <style scoped>
+/* Ширина лица одним токеном: трек полки, плитка и заглушка раньше
+   повторяли 132px три раза и легко расходились. */
 .am-folk {
+  --am-face: clamp(112px, 8.5vw, 156px);
+
   display: flex;
   flex-direction: column;
   gap: 14px;
+  border-radius: var(--am-r-leaf);
 }
 
-/* Общая полка растягивает треки на всю ширину: при горсти лиц это разнос.
-   Трек фиксированный — лица жмутся влево. */
+/* Засечка акцентом вместо голого заголовка: панелей на карточке много. */
+.am-folk .am-h3 {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.am-folk .am-h3::before {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 14px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
+}
+
+/* Общая полка растягивает треки на всю ширину: при горсти лиц это разнос. */
 .am-folk .am-rail {
-  grid-auto-columns: 132px;
+  grid-auto-columns: var(--am-face);
+  justify-content: start;
+  mask-image: linear-gradient(to right, #000 94%, transparent);
 }
 
 /* Персонажи полкой, а не сеткой: их бывает два десятка, и сетка
    утопила бы панель записи в самый низ экрана. */
 .am-face {
   display: flex;
-  flex: none;
   flex-direction: column;
   gap: 4px;
-  width: 132px;
+  min-width: 0;
 }
 
 .am-face__hit {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 7px;
   width: 100%;
   padding: 0;
   font: inherit;
   color: inherit;
   text-align: left;
+  cursor: pointer;
   background: none;
   border: 0;
-  cursor: pointer;
+}
+
+/* Обойма портрета держит капсулу роли и режет её по форме. */
+.am-face__frame {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-leaf);
+  transition:
+    transform var(--am-mid) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
+}
+
+.am-face__hit:hover .am-face__frame,
+.am-face__hit:focus-visible .am-face__frame {
+  transform: translateY(-3px);
+  border-color: rgb(var(--am-accent-rgb) / 0.55);
+  border-radius: var(--am-r-drop);
 }
 
 .am-face__art {
+  display: block;
   width: 100%;
   aspect-ratio: 2 / 3;
-  margin-bottom: 4px;
   object-fit: cover;
-  background: var(--am-panel-2);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
-  transition: transform 0.16s ease;
-}
-
-.am-face__hit:hover .am-face__art,
-.am-face__hit:focus-visible .am-face__art {
-  transform: translateY(-2px);
-  border-color: var(--am-accent);
+  background: var(--am-fill-2);
 }
 
 .am-face__art--empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-size: 28px;
   color: var(--am-faint);
 }
 
+/* Роль — капсула на портрете, а не третья серая строка под именем. */
+.am-face__role {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--am-text);
+  background: color-mix(in srgb, var(--am-veil) 72%, transparent);
+  border-radius: var(--am-r-cap);
+  backdrop-filter: blur(6px);
+}
+
 .am-face__wait {
-  flex: none;
-  width: 132px;
+  width: var(--am-face);
   aspect-ratio: 2 / 3;
-  border-radius: var(--am-r-m);
+  border-radius: var(--am-r-leaf);
 }
 
 .am-face__name {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.3;
-}
-
-.am-face__role {
-  font-size: 11.5px;
-  color: var(--am-faint);
 }
 
 /* Озвучка бледнее имени: это второй человек в той же плитке. */
@@ -385,6 +427,7 @@ watch(
   cursor: pointer;
   background: none;
   border: 0;
+  transition: color var(--am-fast) var(--am-ease);
 }
 
 .am-face__voice:hover,
@@ -401,38 +444,42 @@ watch(
 
 .am-mate {
   display: flex;
-  gap: 10px;
+  gap: 11px;
   align-items: center;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 8px 12px;
   font: inherit;
   color: inherit;
   text-align: left;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
   cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
 }
 
 .am-mate:hover,
 .am-mate:focus-visible {
   background: var(--am-hover);
-  border-color: var(--am-accent);
+  border-color: rgb(var(--am-accent-rgb) / 0.45);
+  transform: translateY(-1px);
 }
 
 .am-mate__art {
   flex: none;
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   object-fit: cover;
-  background: var(--am-panel-2);
-  border-radius: 50%;
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
 }
 
 .am-mate__art--empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-size: 17px;
   color: var(--am-faint);
 }
@@ -453,7 +500,19 @@ watch(
 }
 
 .am-mate__role {
+  overflow: hidden;
   font-size: 11.5px;
   color: var(--am-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-face__hit:hover .am-face__frame,
+  .am-face__hit:focus-visible .am-face__frame,
+  .am-mate:hover,
+  .am-mate:focus-visible {
+    transform: none;
+  }
 }
 </style>
