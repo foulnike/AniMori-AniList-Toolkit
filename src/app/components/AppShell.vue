@@ -66,7 +66,7 @@ function onReload(): void {
     <div class="am-body">
       <header class="am-top">
         <button v-if="canGoBack" class="am-top__back" type="button" @click="goBack">
-          <span aria-hidden="true">←</span>
+          <span class="am-top__sign" aria-hidden="true">←</span>
           <span class="am-top__word">Назад</span>
         </button>
         <h1 class="am-top__title">{{ title }}</h1>
@@ -222,10 +222,17 @@ function onReload(): void {
   }
 }
 
+/* Значок пункта — в своём квадрате с центровкой по двум осям. text-align
+   ровнял только по горизонтали, а по вертикали знак стоял на базовой
+   линии шрифта: у разных символов она разная, и ряд пунктов плясал. */
 .am-side__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
   width: 18px;
+  height: 18px;
   font-size: 16px;
-  text-align: center;
+  line-height: 1;
 }
 
 .am-side__foot {
@@ -291,10 +298,23 @@ function onReload(): void {
     transform var(--am-fast) var(--am-ease);
 }
 
-.am-top__back:hover {
+.am-top__back:hover,
+.am-top__back:focus-visible {
   color: var(--am-text);
   background: var(--am-fill-2);
   transform: translateX(-2px);
+}
+
+/* Стрелка «Назад» в своём квадрате: без него она тянула строку вниз
+   и слово рядом стояло на пиксель выше знака. */
+.am-top__sign {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .am-top__title {
@@ -319,15 +339,17 @@ function onReload(): void {
   border-radius: var(--am-r-cap);
 }
 
+/* Знаки тем разной высоты (солнце, луна, круг), поэтому центр считается
+   от кнопки, а не от строки текста. */
 .am-skin__btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   width: 30px;
   height: 28px;
   padding: 0;
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   color: var(--am-faint);
   cursor: pointer;
   background: none;
@@ -338,8 +360,21 @@ function onReload(): void {
     background-color var(--am-mid) var(--am-ease);
 }
 
-.am-skin__btn:hover {
+.am-skin__btn:hover,
+.am-skin__btn:focus-visible {
   color: var(--am-text);
+}
+
+.am-skin__btn > span {
+  display: block;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+/* Знак поднимается вместо подсветки целой кнопки: подложка здесь
+   занята выбранной темой. */
+.am-skin__btn:hover > span,
+.am-skin__btn:focus-visible > span {
+  transform: translateY(-1px);
 }
 
 .am-skin__btn--on {
@@ -350,14 +385,14 @@ function onReload(): void {
 
 /* Круглая кнопка справа: обновляет окно целиком. */
 .am-top__icon {
-  display: inline-flex;
+  display: grid;
   flex: none;
-  align-items: center;
-  justify-content: center;
+  place-items: center;
   width: 34px;
   height: 34px;
   font: inherit;
   font-size: 16px;
+  line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
   background: var(--am-fill-1);
@@ -365,13 +400,24 @@ function onReload(): void {
   border-radius: var(--am-r-cap);
   transition:
     color var(--am-fast) var(--am-ease),
-    border-color var(--am-fast) var(--am-ease),
-    transform var(--am-slow) var(--am-ease);
+    border-color var(--am-fast) var(--am-ease);
 }
 
-.am-top__icon:hover {
+.am-top__icon:hover,
+.am-top__icon:focus-visible {
   color: var(--am-text);
   border-color: var(--am-accent);
+}
+
+/* Крутится сам знак, а не кнопка: поворот всей кнопки тащил за собой
+   рамку и фокусное кольцо, а они должны стоять на месте. */
+.am-top__icon > span {
+  display: block;
+  transition: transform var(--am-slow) var(--am-ease);
+}
+
+.am-top__icon:hover > span,
+.am-top__icon:focus-visible > span {
   transform: rotate(180deg);
 }
 
@@ -432,6 +478,23 @@ function onReload(): void {
 
   .am-side__item--on::before {
     left: 2px;
+  }
+}
+
+/* Спокойное движение: системная просьба сильнее наших красот. */
+@media (prefers-reduced-motion: reduce) {
+  .am-view__hold,
+  .am-side__item--on::before {
+    animation: none;
+  }
+
+  .am-top__back:hover,
+  .am-top__back:focus-visible,
+  .am-skin__btn:hover > span,
+  .am-skin__btn:focus-visible > span,
+  .am-top__icon:hover > span,
+  .am-top__icon:focus-visible > span {
+    transform: none;
   }
 }
 </style>
