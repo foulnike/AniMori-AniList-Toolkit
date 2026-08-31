@@ -6,6 +6,11 @@
 // Здесь осталась только разметка: данные в media-card.ts, оформление
 // в media-screen.css. Собранный в одном файле экран переставал поддаваться
 // точечной правке.
+//
+// Порядок модулей: герой с действиями у постера, описание широкой
+// колонкой, своя запись и оценки площадок справа, ниже франшиза
+// и люди. Главные действия стояли в правой колонке и на широком
+// окне уезжали от названия на полметра.
 import { computed, onMounted, ref, watch } from 'vue'
 
 import EntrySheet from '../components/EntrySheet.vue'
@@ -67,6 +72,10 @@ const {
   onPickCompleted,
   onPickNotes,
 } = useMediaCard(mediaId)
+
+// Плеер ещё не сделан, но место под него в герое уже занято:
+// иначе главное действие пришлось бы втискивать в готовую разметку.
+const PLAYER_HINT = 'Плеер ещё не подключён: место под него зарезервировано'
 
 onMounted(() => {
   void load()
@@ -131,18 +140,6 @@ watch(mediaId, () => {
                 </li>
               </ul>
 
-              <ul v-if="ratings.length > 0" class="am-pills">
-                <li
-                  v-for="rate in ratings"
-                  :key="rate.key"
-                  class="am-pill am-pill--rate"
-                  :title="`Средняя оценка на ${rate.label}`"
-                >
-                  <span class="am-pill__src">{{ rate.label }}</span>
-                  ★ {{ rate.value }}
-                </li>
-              </ul>
-
               <ul v-if="card.studios.length > 0" class="am-pills">
                 <li v-for="studio in card.studios" :key="studio.studioId">
                   <button
@@ -164,6 +161,19 @@ watch(mediaId, () => {
                   </button>
                 </li>
               </ul>
+
+              <div class="am-acts">
+                <button class="am-acts__play" type="button" disabled :title="PLAYER_HINT">
+                  <span aria-hidden="true">▶</span>
+                  <span>Смотреть</span>
+                  <span class="am-acts__soon">скоро</span>
+                </button>
+
+                <button class="am-acts__save" type="button" @click="sheetOpen = true">
+                  <span v-if="listed" class="am-acts__dot" aria-hidden="true" />
+                  {{ listLabel }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -191,40 +201,56 @@ watch(mediaId, () => {
           </div>
 
           <aside class="am-split__side">
-            <div class="am-mine">
-              <button
-                class="am-mine__pick"
-                :class="{ 'am-mine__pick--empty': !listed }"
-                type="button"
-                @click="sheetOpen = true"
-              >
-                <span v-if="listed" class="am-mine__dot" aria-hidden="true" />
-                {{ listLabel }}
-                <span v-if="listed" class="am-mine__hint">Изменить</span>
-              </button>
-
-              <div v-if="listed" class="am-mine__progress">
-                <div class="am-mine__prow">
-                  <span class="am-mine__pname">Эпизоды</span>
-                  <span class="am-mine__pval">{{ progressText }}</span>
-                </div>
-                <span class="am-line am-mine__line">
-                  <span class="am-line__fill" :style="{ width: donePart }" />
-                </span>
+            <div class="am-panel am-mine">
+              <div class="am-mine__head">
+                <h3 class="am-h3">Моя запись</h3>
+                <button class="am-mine__edit" type="button" @click="sheetOpen = true">
+                  {{ listed ? 'Изменить' : 'Добавить' }}
+                </button>
               </div>
 
-              <dl v-if="mineFacts.length > 0" class="am-mine__rows">
-                <div v-for="fact in mineFacts" :key="fact.key" class="am-mine__row">
-                  <dt class="am-mine__rname">{{ fact.name }}</dt>
-                  <dd class="am-mine__rval">{{ fact.value }}</dd>
+              <template v-if="listed">
+                <div class="am-mine__progress">
+                  <div class="am-mine__prow">
+                    <span class="am-mine__pname">Эпизоды</span>
+                    <span class="am-mine__pval">{{ progressText }}</span>
+                  </div>
+                  <span class="am-line am-mine__line">
+                    <span class="am-line__fill" :style="{ width: donePart }" />
+                  </span>
                 </div>
-              </dl>
 
-              <p v-if="notes" class="am-mine__note">{{ notes }}</p>
+                <dl v-if="mineFacts.length > 0" class="am-mine__rows">
+                  <div v-for="fact in mineFacts" :key="fact.key" class="am-mine__row">
+                    <dt class="am-mine__rname">{{ fact.name }}</dt>
+                    <dd class="am-mine__rval">{{ fact.value }}</dd>
+                  </div>
+                </dl>
 
-              <p v-if="drifted" class="am-mine__drift">
-                Правка сохранена и ждёт отправки на AniList.
-              </p>
+                <p v-if="notes" class="am-mine__note">{{ notes }}</p>
+
+                <p v-if="drifted" class="am-mine__drift">
+                  Правка сохранена и ждёт отправки на AniList.
+                </p>
+              </template>
+
+              <p v-else class="am-mine__none">Тайтла нет в ваших списках.</p>
+            </div>
+
+            <div v-if="ratings.length > 0" class="am-panel am-rates">
+              <h3 class="am-h3">Оценки площадок</h3>
+
+              <ul class="am-rates__list">
+                <li
+                  v-for="rate in ratings"
+                  :key="rate.key"
+                  class="am-rates__row"
+                  :title="`Средняя оценка на ${rate.label}`"
+                >
+                  <span class="am-rates__src">{{ rate.label }}</span>
+                  <span class="am-rates__val">★ {{ rate.value }}</span>
+                </li>
+              </ul>
             </div>
           </aside>
 
