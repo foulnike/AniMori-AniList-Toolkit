@@ -2,6 +2,10 @@
 // Зеркало media-title.ts: тот же склад mediaCache и те же приёмы, только
 // ключи от людей, а не от тайтлов. Очередь опроса ведёт компонент: ему
 // виднее, когда тайтл сменился и спрашивать дальше бессмысленно.
+//
+// Описание ложится на склад как приехало, с BBcode Шикимори: разбирает его
+// core/rich-text.ts на слое показа. Прежде теги вырезались здесь, и ссылки
+// со спойлерами терялись ещё до кэша — восстанавливать было нечего.
 
 import { CACHE_TIME } from './constants'
 import { dbGet, dbSet } from './db'
@@ -19,12 +23,17 @@ import type { MediaCacheRecord } from './types'
 /** Чем человек является в карточке тайтла: героем или автором. */
 export type PersonKind = 'character' | 'staff'
 
-/** Префиксы ключей на складе. Цифра — версия формы записи, а не номер источника. */
-const KEY_PREFIX: Record<PersonKind, string> = { character: 'CHR2_', staff: 'STF3_' }
+/**
+ * Префиксы ключей на складе. Цифра — версия формы записи, а не номер
+ * источника. CHR3 и STF4 — описание с разметкой: в записях прежних
+ * версий теги уже вырезаны, а срок хранения у нас бессрочный.
+ */
+const KEY_PREFIX: Record<PersonKind, string> = { character: 'CHR3_', staff: 'STF4_' }
 
 /** Готовая русская карточка человека. */
 export interface RussianPerson {
   russian: string
+  /** Описание с разметкой источника: разбирается при показе. */
   description: string | null
   /** Номер у Шикимори: по нему добирается описание. */
   shikiId?: number
@@ -70,13 +79,14 @@ async function writeCache(kind: PersonKind, personId: number, data: RussianPerso
   await dbSet('mediaCache', { key: cacheKey(kind, personId), data, ts: Date.now() })
 }
 
-/** Описание с Шикимори приходит с BBcode: теги выкидываются, текст остаётся. */
-function stripBbcode(text: string | null): string | null {
-  if (!text) return null
-  const clean = text
-    .replace(/\[url=[^\]]+\]([\s\S]*?)\[\/url\]/gi, '$1')
-    .replace(/\[\/?[a-z][^\]]*\]/gi, '')
-    .trim()
+/**
+ * Строка или `null`: пустое описание равносильно отсутствию. Разметка
+ * источника сохраняется: её разбирает core/rich-text.ts при показе.
+ */
+function textOrNull(text: string | null | undefined): string | null {
+  if (typeof text !== 'string') return null
+
+  const clean = text.trim()
   return clean === '' ? null : clean
 }
 
@@ -111,7 +121,7 @@ async function loadOne(
 
   const card: RussianPerson = {
     russian: found.data.russian,
-    description: stripBbcode(found.data.description),
+    description: textOrNull(found.data.description),
     shikiId: found.data.id,
   }
 
@@ -244,7 +254,7 @@ export async function getRussianPersonFull(
 
     const full: RussianPerson = {
       russian: details.russian ?? known.russian,
-      description: stripBbcode(details.description),
+      description: textOrNull(details.description),
       shikiId: known.shikiId,
     }
     memory.set(key, full)

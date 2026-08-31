@@ -12,10 +12,13 @@
 // в memory тем же null, что и отказ сети, — и одна прокрутка списка глушила
 // открытую карточку того же тайтла целиком.
 //
-// Датасет — первый источник, но не последняя инстанция: чего в нём нет,
+// Датасет — первый источник, но не последняя инстанция: чего в нẹ́м нет,
 // спрашивается в рантайме. Сетки тратят на это один заход на тайтл за всю
 // жизнь установки, отказ ложится на склад. Открытая карточка ходит в сеть
 // всегда: один запрос на осознанное нажатие — не та цена, чтобы её копить.
+//
+// Описание ложится как приехало, с разметкой источника: разбирает его
+// core/rich-text.ts на слое показа.
 
 import { CACHE_TIME } from './constants'
 import { lookupDatasetName } from './dataset-names'
@@ -25,8 +28,13 @@ import { resolveTitle } from '../api/titles'
 import { Logger } from '../utils/logger'
 import type { MediaCacheRecord } from './types'
 
-/** Префикс ключа на складе. Цифра — версия формы записи: RU3 — с оценками площадок. */
-const KEY_PREFIX = 'RU3_'
+/**
+ * Префикс ключа на складе. Цифра — версия формы записи: RU4 — описание
+ * с разметкой источника. В RU3 описание лежало уже без тегов, а срок
+ * хранения у нас бессрочный: без нового префикса старая запись жила бы
+ * вечно и после правки.
+ */
+const KEY_PREFIX = 'RU4_'
 
 /**
  * Префикс склада имён. Отдельная запись, а не поле карточки: имён читаются
@@ -47,6 +55,7 @@ const NONAME_PREFIX = 'NONAME1_'
 /** Готовая русская карточка тайтла. */
 export interface RussianTitle {
   russian: string
+  /** Описание с разметкой источника: разбирается при показе. */
   description: string | null
   url: string
   /** Имя источника для подписи под описанием. */
@@ -348,77 +357,4 @@ export async function prefetchRussianNames(mediaIds: number[]): Promise<number> 
 
     // Склад спрашивается один раз за запуск: прокрутка возвращается к тем же
     // строкам, а от повторного чтения ответ склада не меняется.
-    const stored = askedNames.has(mediaId) ? null : await readNameCache(mediaId)
-    if (stored !== null) {
-      names.set(mediaId, stored)
-      continue
-    }
-
-    const cached = asked.has(mediaId) ? null : await readCache(mediaId)
-    if (cached) {
-      memory.set(mediaId, cached)
-
-      // Имя переносится в свою запись: следующий запуск возьмёт строку,
-      // не поднимая описание с оценками и голосами.
-      await writeNameCache(mediaId, cached.russian)
-      continue
-    }
-
-    // Отрицательная запись спрашивается последней: имя могло приехать
-    // на склад позже отказа — например, попутно с поиском.
-    if (await readNoname(mediaId)) {
-      skipped++
-      continue
-    }
-
-    unknown.push(mediaId)
-  }
-
-  if (unknown.length === 0) {
-    if (skipped > 0) Logger('DB', `Русские имена: ${skipped} без перевода, сеть не трогаем`)
-    return 0
-  }
-
-  const malIds = await fetchMalIds(unknown)
-  let added = 0
-
-  for (const mediaId of unknown) {
-    const malId = malIds.get(mediaId)
-    if (!malId) {
-      // Номера MAL нет — спрашивать источники не по чему. Знание на склад,
-      // но не в память: пачечный путь не решает за открытую карточку.
-      await writeNoname(mediaId)
-      continue
-    }
-
-    try {
-      if (await fetchByMal(mediaId, malId)) added++
-    } catch (e) {
-      // Один упавший тайтл не повод бросать остальной экран без названий.
-      Logger('WARN', `Русское имя: тайтл ${mediaId} пропущен`, e)
-    }
-  }
-
-  const tail = skipped > 0 ? `, пропущено ${skipped}` : ''
-  Logger('INFO', `Русские имена: добыто ${added} из ${unknown.length}${tail}`)
-  return added
-}
-
-/**
- * Русское название, известное прямо сейчас: из полной карточки или попутное.
- * Строкам списка и выдачи большего и не надо.
- */
-export function peekRussianName(mediaId: number): string | null {
-  return memory.get(mediaId)?.russian ?? names.get(mediaId) ?? null
-}
-
-/** Забывает знание запуска. Склад не трогается: его чистят из настроек. */
-export function forgetRussianTitles(): void {
-  memory.clear()
-  names.clear()
-  noname.clear()
-  asked.clear()
-  askedNames.clear()
-  askedNoname.clear()
-  pending.clear()
-}
+    const stored = askedNames.has(mediaId) ? null : await readNameCache(
