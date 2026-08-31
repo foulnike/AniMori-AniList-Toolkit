@@ -9,11 +9,18 @@ import type { MediaBrief } from '../api/anilist-media'
 import { Logger } from '../utils/logger'
 import type { MediaCacheRecord } from './types'
 
-/** Префикс ключа на складе. Цифра — версия формы записи, а не номер источника. */
-const KEY_PREFIX = 'LOOK2_'
+/**
+ * Префикс ключа на складе. Цифра — версия формы записи, а не номер источника.
+ * Третья: в облике появился статус выпуска, а хранение бессрочное — старые
+ * записи иначе остались бы без него навсегда.
+ */
+const KEY_PREFIX = 'LOOK3_'
 
 /** По скольку тайтлов спрашиваем за раз: потолок страницы у AniList. */
 const LOOK_CHUNK = 50
+
+/** Статус тайтла, у которого ни одной части ещё не вышло. */
+const SOON_STATUS = 'NOT_YET_RELEASED'
 
 /**
  * Внешность тайтла. Названия здесь запасные: русские имена и описания
@@ -28,6 +35,8 @@ export interface MediaLook {
   averageScore: number | null
   romaji: string | null
   english: string | null
+  /** Статус выпуска с сервера: из него видна метка анонса на постере. */
+  status: string | null
   /** Номер серии, которая ещё только выйдет. У завершённого его нет. */
   airingEpisode: number | null
   /** Срок выхода той серии в секундах: по нему видно, что облик отстал. */
@@ -68,6 +77,14 @@ export function partsOut(
   if (aired !== null && aired > 0) return aired
 
   return look.episodes
+}
+
+/**
+ * Анонс ли это. Сравнение живёт в ядре, чтобы строка статуса не
+ * разъехалась по экранам.
+ */
+export function notOutYet(look: MediaLook | null): boolean {
+  return look !== null && look.status === SOON_STATUS
 }
 
 /**
@@ -123,6 +140,7 @@ function fromBrief(brief: MediaBrief): MediaLook {
     averageScore: brief.averageScore,
     romaji: brief.romaji,
     english: brief.english,
+    status: brief.status,
     airingEpisode: brief.airingEpisode,
     airingAt: brief.airingAt,
   }
