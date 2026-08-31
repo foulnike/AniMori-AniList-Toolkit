@@ -2,6 +2,12 @@
 // Отдельно от shikimori.ts: там транспорт, здесь стратегия, но бюджет темпа у них общий.
 // Сложность оттого, что Shikimori ищет по точному порядку слов, а AniList даёт западный.
 //
+// Состав тайтла берётся через GraphQL, REST /roles остался фоллбэком. Причина одна:
+// в REST у персоны нет поля japanese, и сопоставление имён держалось на чтении
+// латиницей. А чтения расходятся как раз там, где нужнее всего: один и тот же
+// человек у AniList «Mashiko Koshimaru», у Shikimori «Yakuko Etsushimaru», кандзи
+// же у них одни и те же.
+//
 // Про мангу здесь речь идёт не о наших данных, а об опознании человека: у мангак
 // главные работы лежат в манге, и именно они доказывают, что найденный тёзка —
 // тот самый автор. Стирать эти ветки вместе с мангой в приложении нельзя.
@@ -24,6 +30,10 @@ const PERSON_TIMEOUT_MS = 7000
 
 export interface ShikiPerson {
   id: number
+  /** Имя латиницей: по нему же ищется карточка человека на AniList. */
+  name: string | null
+  /** Имя на кандзи: второй заход того же поиска и главный признак совпадения. */
+  japanese: string | null
   russian: string | null
   description: string | null
   url: string | null
@@ -107,6 +117,8 @@ export interface PersonCandidate extends NameCandidate {
 /** Детали персоны. Связи с тайтлами лежат в четырёх разных полях. */
 interface PersonDetails {
   id?: number
+  name?: string | null
+  japanese?: string | null
   russian?: string | null
   description?: string | null
   url?: string | null
@@ -304,6 +316,8 @@ export async function fetchShikiPersonREST(
             status: 200,
             data: {
               id: detailsRes.id ?? item.id,
+              name: detailsRes.name ?? item.name ?? null,
+              japanese: detailsRes.japanese ?? item.japanese ?? null,
               russian: detailsRes.russian ?? item.russian ?? null,
               description: detailsRes.description ?? null,
               url: detailsRes.url ?? null,
@@ -316,6 +330,8 @@ export async function fetchShikiPersonREST(
           status: 200,
           data: {
             id: item.id,
+            name: item.name ?? null,
+            japanese: item.japanese ?? null,
             russian: item.russian ?? null,
             description: null,
             url: null,
@@ -352,6 +368,12 @@ interface ShikiRoleEntry {
   person?: PersonCandidate | null
 }
 
+/** Ответ GraphQL на состав тайтла: разделы зовутся так же, как коллекции REST. */
+interface RolesNode {
+  characterRoles?: Array<{ character?: PersonCandidate | null } | null> | null
+  personRoles?: Array<{ person?: PersonCandidate | null } | null> | null
+}
+
 /**
  * Сколько тайтлов максимум проверяем при резолве через роли.
  * Совпадение почти всегда на первых: список AniList идёт по убыванию значимости.
@@ -364,16 +386,75 @@ const MAX_MEDIA_PROBES = 5
  */
 const rolesCache = new Map<string, Promise<ShikiRoleEntry[] | null>>()
 
-/** Загружает роли тайтла через кэш. */
+/**
+ * Состав тайтла через GraphQL. Главное отличие от REST — поле japanese: без
+ * кандзи имена сходятся только по чтению латиницей, а именно чтения у AniList
+ * и Shikimori расходятся сильнее всего.
+ */
+async function loadRolesGql(kind: string, id: number): Promise<ShikiRoleEntry[] | null> {
+  const query =
+    `query($ids: String!) { ${kind}(ids: $ids, limit: 1) ` +
+    '{ characterRoles { character { id name russian japanese } } ' +
+    'personRoles { person { id name russian japanese } } } }'
+
+  for (const domain of SHIKI_DOMAINS) {
+    const r = await request({
+      method: 'POST',
+      url: mirrorUrl(domain, '/api/graphql'),
+      domain,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      data: JSON.stringify({ query, variables: { ids: String(id) } }),
+    })
+    if (r.status !== 200) continue
+
+    try {
+      const res = JSON.parse(r.responseText) as {
+        data?: Record<string, RolesNode[] | undefined>
+      }
+      const node = res.data?.[kind]?.[0]
+      if (!node) continue
+
+      const out: ShikiRoleEntry[] = []
+      for (const row of node.characterRoles ?? []) {
+        if (row?.character) out.push({ character: row.character })
+      }
+      for (const row of node.personRoles ?? []) {
+        if (row?.person) out.push({ person: row.person })
+      }
+      if (out.length > 0) return out
+    } catch (e) {
+      Logger('WARN', `Shikimori: неразборчивый состав тайтла (${domain})`, e)
+    }
+  }
+
+  return null
+}
+
+/** Тот же состав через REST: кандзи не отдаёт, зато живёт на любом зеркале. */
+async function loadRolesRest(kind: string, id: number): Promise<ShikiRoleEntry[] | null> {
+  try {
+    const res = await fetchShiki<ShikiRoleEntry[]>('/api/' + kind + '/' + String(id) + '/roles')
+    return res.data
+  } catch (e) {
+    Logger('WARN', `Не удалось загрузить роли: ${kind}/${String(id)}`, e)
+    return null
+  }
+}
+
+/** Загружает роли тайтла через кэш: сначала GraphQL, затем REST. */
 function loadRoles(kind: string, id: number): Promise<ShikiRoleEntry[] | null> {
   const key = kind + '/' + String(id)
   const cached = rolesCache.get(key)
   if (cached) return cached
 
-  const task = fetchShiki<ShikiRoleEntry[]>('/api/' + kind + '/' + String(id) + '/roles')
-    .then((res) => res.data)
+  const task = loadRolesGql(kind, id)
+    .then(async (viaGql) => viaGql ?? (await loadRolesRest(kind, id)))
+    .then((res) => {
+      // Пустой итог не кэшируем: зеркало могло лечь на минуту.
+      if (res === null) rolesCache.delete(key)
+      return res
+    })
     .catch((e: unknown) => {
-      // Сбой не кэшируем: зеркало могло лечь временно.
       rolesCache.delete(key)
       Logger('WARN', `Не удалось загрузить роли: ${key}`, e)
       return null
@@ -457,7 +538,8 @@ export async function fetchShikiRoles(
 
 /**
  * Детали персоны по уже известному номеру: один запрос без поиска.
- * Нужен добором описания для карточек, добытых списком ролей.
+ * Нужен добором описания для карточек, добытых списком ролей, и переходом
+ * по ссылке из описания: латинское и японское имя ищутся потом на AniList.
  */
 export async function fetchShikiPersonDetails(
   endpointStr: PersonEndpoint,
@@ -477,6 +559,8 @@ export async function fetchShikiPersonDetails(
       const d = JSON.parse(r.responseText) as PersonDetails
       return {
         id: d.id ?? id,
+        name: d.name ?? null,
+        japanese: d.japanese ?? null,
         russian: d.russian ?? null,
         description: d.description ?? null,
         url: d.url ?? null,
