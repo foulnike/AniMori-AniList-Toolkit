@@ -1,6 +1,10 @@
 // Резолвер русского названия и описания: основной источник, затем фоллбэк.
 // Отдельно от shikimori.ts и anime365.ts: зависит от обоих, иначе цикл внутри api/.
 // Настройки читаются в момент вызова, а не при импорте — так решено в docs/DECISIONS.md.
+//
+// Описание отдаётся как приехало, с разметкой источника: разбирает её
+// core/rich-text.ts на слое показа. Прежде теги вырезались здесь, и вместе
+// с ними терялись ссылки на другие тайтлы, спойлеры и начертания.
 
 import { settings } from '../core/settings'
 import { fetchShiki } from './shikimori'
@@ -9,6 +13,7 @@ import type { ShikiMedia } from '../core/types'
 
 export interface ResolvedTitle {
   russian: string
+  /** Описание с разметкой источника: BBcode Шикимори или маркдаун AniList. */
   description: string | null
   url: string
   /** Человекочитаемое имя источника для подписи в UI. */
@@ -19,21 +24,11 @@ export interface ResolvedTitle {
   rates: Array<{ name: string; value: number }> | null
 }
 
-/** Описание с Шикимори приходит с BBcode: теги выкидываются, текст остаётся. */
-function stripBbcode(text: string | null): string | null {
-  if (!text) return null
+/** Строка или `null`. Пустая строка равносильна отсутствию значения. */
+function textOrNull(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
 
-  // Парные теги вида [character=123]...[/character]: содержимое остаётся,
-  // прогон до неподвижной точки снимает вложенность.
-  let clean = text
-  const pair = /\[([a-z][a-z0-9]*)(?:=[^\]]*)?\]([\s\S]*?)\[\/\1\]/gi
-  let prev = ''
-  while (prev !== clean) {
-    prev = clean
-    clean = clean.replace(pair, '$2')
-  }
-
-  clean = clean.replace(/\[\/?[a-z][a-z0-9]*(?:=[^\]]*)?\]/gi, '').trim()
+  const clean = value.trim()
   return clean === '' ? null : clean
 }
 
@@ -54,7 +49,7 @@ export async function resolveTitle(malId: number | null): Promise<ResolvedTitle 
         const rawScore = Number(shiki.data.score)
         return {
           russian: shiki.data.russian,
-          description: stripBbcode(shiki.data.description ?? null),
+          description: textOrNull(shiki.data.description),
           url: 'https://' + (shiki.domain ?? '') + (shiki.data.url ?? ''),
           sourceName: 'Shikimori',
           score: Number.isFinite(rawScore) && rawScore > 0 ? rawScore : null,
@@ -68,7 +63,7 @@ export async function resolveTitle(malId: number | null): Promise<ResolvedTitle 
       if (a?.russian) {
         return {
           russian: a.russian,
-          description: stripBbcode(a.description),
+          description: textOrNull(a.description),
           url: a.url,
           sourceName: 'anime365',
           score: null,
