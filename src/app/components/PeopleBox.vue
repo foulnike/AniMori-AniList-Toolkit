@@ -1,6 +1,9 @@
 <script setup lang="ts">
 // Пункт 3.9: люди тайтла под двумя колонками карточки. Добыча своя:
 // ответ тяжелее карточки, и ждать его сверху экрана незачем.
+//
+// Окошко человека блок больше не держит: оно в общем слое (person-layer.ts),
+// потому что теперь человека открывает ещё и ссылка из любого описания.
 import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 
 import { fetchMalIds } from '@/api/anilist-media'
@@ -10,7 +13,6 @@ import {
   type PersonRef,
   type StaffRef,
 } from '@/api/anilist-people'
-import type { PersonTarget } from '@/api/anilist-person'
 import {
   getRussianPerson,
   peekRussianPerson,
@@ -21,8 +23,9 @@ import {
 import { settings } from '@/core/settings'
 import { Logger } from '@/utils/logger'
 
+import { openPerson } from '../person-layer'
+
 import { CREW_WORDS } from './crew-words'
-import PersonSheet from './PersonSheet.vue'
 
 const props = defineProps<{ mediaId: number }>()
 
@@ -47,9 +50,6 @@ const busy = ref(false)
 
 /** Раскрыт ли хвост списка авторов. */
 const wide = ref(false)
-
-/** Открытый человек или `null`. Окно живёт здесь: плитки о нём не знают. */
-const shown = ref<PersonTarget | null>(null)
 
 /** Номер показа: ответ на прежний тайтл приходит уже не к месту. */
 let run = 0
@@ -102,7 +102,6 @@ async function load(): Promise<void> {
   folk.value = []
   crew.value = []
   wide.value = false
-  shown.value = null
 
   if (props.mediaId === 0) return
 
@@ -179,8 +178,8 @@ async function beginRussian(mine: number): Promise<void> {
 }
 
 /** Открывает человека окошком поверх экрана: уход на сайт тут ни к чему. */
-function onShow(kind: PersonTarget['kind'], person: PersonRef): void {
-  shown.value = { kind, ...person }
+function onShow(kind: PersonKind, person: PersonRef): void {
+  openPerson({ kind, ...person })
 }
 
 onMounted(() => {
@@ -299,8 +298,6 @@ watch(
       </div>
     </div>
   </template>
-
-  <PersonSheet v-if="shown" :start="shown" @close="shown = null" />
 </template>
 
 <style scoped>
