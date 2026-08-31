@@ -15,6 +15,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import EntrySheet from '../components/EntrySheet.vue'
 import PeopleBox from '../components/PeopleBox.vue'
+import RichText from '../components/RichText.vue'
 import { genreWord } from '../labels'
 import { currentRoute } from '../router'
 
@@ -182,7 +183,9 @@ watch(mediaId, () => {
           <div class="am-split__main">
             <div class="am-panel am-about-box">
               <h3 class="am-h3">Описание</h3>
-              <p v-if="about" class="am-about">{{ about }}</p>
+              <!-- Разметка источника живая: ссылки, спойлеры и начертания рисует
+                   компонент, а типографика .am-about остаётся на его корне. -->
+              <RichText v-if="about" class="am-about" :text="about" />
               <p v-else class="am-dim">Описания ни один источник не дал.</p>
 
               <p v-if="aboutLinks.length > 0" class="am-about__tail">
