@@ -2,6 +2,10 @@
 // Настройки: вход в AniList, внешность и распоряжение своими данными.
 // На экране только то, что человеку решать: как всё устроено внутри —
 // дело документации, а не карточки настроек.
+//
+// Раскладка — две колонки известной ширины, а не сетка auto-fit: панели
+// разной высоты расползались по всему фуллскрину, и глазу негде было
+// зацепиться. Слева то, что делают руками, справа — вид и справка.
 import { onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
@@ -149,7 +153,7 @@ async function readState(): Promise<void> {
     const days = daysSince(ds.builtAt)
 
     // Возраст рядом с датой: дата отвечает «когда собран», а возраст —
-    // «пора ли дљ1гать репозиторий», и здесь важнее второй вопрос.
+    // «пора ли дёргать репозиторий», и здесь важнее второй вопрос.
     const age = days === null ? '' : ` · ${ageText(days)}`
     datasetText.value = `${date} · ${count} записей${age}`
     datasetStale.value = days !== null && days > STALE_DAYS
@@ -262,8 +266,8 @@ function onAdult(): void {
     : 'Взрослое скрыто из поиска и каталога.'
 }
 
-// Память сбрасывается только руками. Перезагрузка не дљ1гается сама:
-// человек может быть середине правок.
+// Память сбрасывается только руками. Перезагрузка не делается сама:
+// человек может быть в середине правок.
 function onClear(): void {
   void guard(async () => {
     note.value = ''
@@ -331,253 +335,257 @@ onMounted(() => {
 
 <template>
   <section class="am-page">
-    <div class="am-split">
-      <div class="am-panel am-box">
-        <div class="am-bar">
-          <h3 class="am-h3">AniList</h3>
-          <span class="am-bar__gap" />
-          <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
-            <span class="am-flag__dot" aria-hidden="true" />
-            {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
-          </span>
-        </div>
-
-        <p v-if="!desktop" class="am-meta">
-          Подключение работает только в приложении. Запустите <code>npm run tauri dev</code>.
-        </p>
-
-        <template v-else>
-          <p class="am-meta">
-            {{
-              authStatus.authorized
-                ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
-                : 'Подключите аккаунт, чтобы перенести свой список и править его на AniList. Поиск, карточки и свои записи работают и без него.'
-            }}
-          </p>
-
-          <div class="am-row">
-            <button
-              v-if="!authStatus.authorized"
-              class="am-btn"
-              type="button"
-              :disabled="busy"
-              @click="onLogin"
-            >
-              Подключить аккаунт
-            </button>
-            <template v-else>
-              <button
-                class="am-btn"
-                type="button"
-                :disabled="busy"
-                title="Забрать список с AniList и заменить им местный"
-                @click="onAsk"
-              >
-                {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
-              </button>
-              <button
-                class="am-btn am-btn--ghost"
-                type="button"
-                :disabled="busy"
-                title="Разорвать связь с AniList. Список останется здесь"
-                @click="onLogout"
-              >
-                Отключить
-              </button>
-            </template>
-
-            <button
-              v-if="!authStatus.authorized"
-              class="am-btn am-btn--ghost"
-              type="button"
-              @click="manualOpen = !manualOpen"
-            >
-              Ввести токен
-            </button>
+    <div class="am-set">
+      <!-- Левая колонка — действия: подключение счёта и распоряжение данными.
+           Обе панели здесь умеют менять то, что лежит на диске. -->
+      <div class="am-set__col">
+        <div class="am-panel am-box">
+          <div class="am-bar">
+            <h3 class="am-h3">AniList</h3>
+            <span class="am-bar__gap" />
+            <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
+              <span class="am-flag__dot" aria-hidden="true" />
+              {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
+            </span>
           </div>
 
-          <!-- Вопрос перед заменой: человек видит, что будет с местными записями. -->
-          <div v-if="asking" class="am-ask">
-            <p class="am-ask__text">
-              Список с AniList заменит местный целиком. Записи, добавленные здесь без входа, будут
-              потеряны, если их нет на AniList. Сейчас у нас записей: {{ listCount }}.
+          <p v-if="!desktop" class="am-meta">
+            Подключение работает только в приложении. Запустите <code>npm run tauri dev</code>.
+          </p>
+
+          <template v-else>
+            <p class="am-meta">
+              {{
+                authStatus.authorized
+                  ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
+                  : 'Подключите аккаунт, чтобы перенести свой список и править его на AniList. Поиск, карточки и свои записи работают и без него.'
+              }}
             </p>
 
             <div class="am-row">
-              <button class="am-btn" type="button" :disabled="busy" @click="onPull">
-                Перенести и заменить
+              <button
+                v-if="!authStatus.authorized"
+                class="am-btn"
+                type="button"
+                :disabled="busy"
+                @click="onLogin"
+              >
+                Подключить аккаунт
               </button>
-              <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+              <template v-else>
+                <button
+                  v-tip="'Забрать список с AniList и заменить им местный'"
+                  class="am-btn"
+                  type="button"
+                  :disabled="busy"
+                  @click="onAsk"
+                >
+                  {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
+                </button>
+                <button
+                  v-tip="'Разорвать связь с AniList. Список останется здесь'"
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="busy"
+                  @click="onLogout"
+                >
+                  Отключить
+                </button>
+              </template>
+
+              <button
+                v-if="!authStatus.authorized"
+                class="am-btn am-btn--ghost"
+                type="button"
+                @click="manualOpen = !manualOpen"
+              >
+                Ввести токен
+              </button>
             </div>
-          </div>
 
-          <!-- Показывается только после нажатия: до него окна входа нет и ждать
-               человеку нечего. -->
-          <p v-if="login && !authStatus.authorized" class="am-meta">
-            Окно AniList открыто, после разрешения оно закроется само. Ожидание —
-            {{ waitText(login.waitSecs) }}.
-          </p>
+            <!-- Вопрос перед заменой: человек видит, что будет с местными записями. -->
+            <div v-if="asking" class="am-ask">
+              <p class="am-ask__text">
+                Список с AniList заменит местный целиком. Записи, добавленные здесь без входа,
+                будут потеряны, если их нет на AniList. Сейчас у нас записей: {{ listCount }}.
+              </p>
 
-          <div v-if="manualOpen && !authStatus.authorized" class="am-row">
-            <label class="am-field">
-              <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
-            </label>
-            <button
-              class="am-btn"
-              type="button"
-              :disabled="busy || !manual.trim()"
-              @click="onManual"
-            >
-              Сохранить
-            </button>
-          </div>
+              <div class="am-row">
+                <button class="am-btn" type="button" :disabled="busy" @click="onPull">
+                  Перенести и заменить
+                </button>
+                <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+              </div>
+            </div>
 
-          <p v-if="error" class="am-error">{{ error }}</p>
-        </template>
-      </div>
+            <!-- Показывается только после нажатия: до него окна входа нет и ждать
+                 человеку нечего. -->
+            <p v-if="login && !authStatus.authorized" class="am-meta">
+              Окно AniList открыто, после разрешения оно закроется само. Ожидание —
+              {{ waitText(login.waitSecs) }}.
+            </p>
 
-      <!-- Внешность второй панелью: меняют её часто, а опасные кнопки ниже. -->
-      <div class="am-panel am-box">
-        <h3 class="am-h3">Оформление</h3>
+            <div v-if="manualOpen && !authStatus.authorized" class="am-row">
+              <label class="am-field">
+                <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
+              </label>
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="busy || !manual.trim()"
+                @click="onManual"
+              >
+                Сохранить
+              </button>
+            </div>
 
-        <div class="am-skins">
-          <button
-            v-for="item in APPEARANCES"
-            :key="item.name"
-            class="am-skins__btn"
-            :class="{ 'am-skins__btn--on': item.name === appearance }"
-            type="button"
-            @click="setAppearance(item.name)"
-          >
-            <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
-            <span class="am-skins__name">{{ item.title }}</span>
-          </button>
+            <p v-if="error" class="am-error">{{ error }}</p>
+          </template>
         </div>
 
-        <p class="am-meta">
-          AMOLED гасит подсветку до чёрного: на таких экранах это экономит заряд. Тема
-          переключается и тремя знаками в шапке.
-        </p>
+        <div class="am-panel am-box">
+          <h3 class="am-h3">Свои данные</h3>
 
-        <label class="am-switch">
-          <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
-          <span class="am-switch__text">
-            <span class="am-switch__name">Показывать взрослое (18+)</span>
-            <span class="am-switch__hint">
-              Хентай и прочее взрослое в поиске и каталоге. Своего списка это не касается:
-              добавленные записи видны всегда.
-            </span>
-          </span>
-        </label>
-      </div>
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Записей в списке</span>
+              <span class="am-fact__value">{{ listCount }}</span>
+            </li>
+            <li v-if="usedSize" class="am-fact">
+              <span class="am-fact__name">Занято на диске</span>
+              <span class="am-fact__value">{{ usedSize }}</span>
+            </li>
+          </ul>
 
-      <div class="am-panel am-box">
-        <h3 class="am-h3">Свои данные</h3>
-
-        <ul class="am-facts">
-          <li class="am-fact">
-            <span class="am-fact__name">Записей в списке</span>
-            <span class="am-fact__value">{{ listCount }}</span>
-          </li>
-          <li v-if="usedSize" class="am-fact">
-            <span class="am-fact__name">Занято на диске</span>
-            <span class="am-fact__value">{{ usedSize }}</span>
-          </li>
-        </ul>
-
-        <p class="am-meta">
-          Список живёт здесь, на вашем диске, и от отключения счёта не исчезает. Память — это
-          названия, описания и обложки: её можно сбросить без потерь.
-        </p>
-
-        <div class="am-row">
-          <button
-            class="am-btn am-btn--ghost"
-            type="button"
-            :disabled="busy"
-            title="Убрать сохранённые названия, описания и обложки"
-            @click="onClear"
-          >
-            Очистить память
-          </button>
-
-          <button
-            v-if="listCount > 0"
-            class="am-btn am-btn--ghost"
-            type="button"
-            :disabled="busy"
-            title="Удалить свой список с этого устройства"
-            @click="onAskDrop"
-          >
-            Удалить мой список
-          </button>
-
-          <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
-            Перезагрузить
-          </button>
-        </div>
-
-        <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
-        <div v-if="askingDrop" class="am-ask">
-          <p class="am-ask__text">
-            Удалить список с этого устройства: записей {{ listCount }}. На AniList ваши записи
-            останутся нетронутыми, а добавленные здесь без входа вернуть будет неоткуда.
+          <p class="am-meta">
+            Список живёт здесь, на вашем диске, и от отключения счёта не исчезает. Память — это
+            названия, описания и обложки: её можно сбросить без потерь.
           </p>
 
           <div class="am-row">
-            <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
-              Удалить список
+            <button
+              v-tip="'Убрать сохранённые названия, описания и обложки'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onClear"
+            >
+              Очистить память
             </button>
-            <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">Отмена</button>
-          </div>
-        </div>
 
-        <p v-if="note" class="am-note">{{ note }}</p>
+            <button
+              v-if="listCount > 0"
+              v-tip="'Удалить свой список с этого устройства'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onAskDrop"
+            >
+              Удалить мой список
+            </button>
+
+            <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
+              Перезагрузить
+            </button>
+          </div>
+
+          <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
+          <div v-if="askingDrop" class="am-ask">
+            <p class="am-ask__text">
+              Удалить список с этого устройства: записей {{ listCount }}. На AniList ваши записи
+              останутся нетронутыми, а добавленные здесь без входа вернуть будет неоткуда.
+            </p>
+
+            <div class="am-row">
+              <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
+                Удалить список
+              </button>
+              <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">
+                Отмена
+              </button>
+            </div>
+          </div>
+
+          <p v-if="note" class="am-note">{{ note }}</p>
+        </div>
       </div>
 
-      <div class="am-panel am-box">
-        <h3 class="am-h3">О программе</h3>
+      <!-- Правая колонка — вид и справка: то, что смотрят, а не то, чем правят. -->
+      <div class="am-set__col">
+        <div class="am-panel am-box">
+          <h3 class="am-h3">Оформление</h3>
 
-        <ul class="am-facts">
-          <li class="am-fact">
-            <span class="am-fact__name">Версия</span>
-            <span class="am-fact__value">{{ version }}</span>
-          </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Система</span>
-            <span class="am-fact__value">{{ system }}</span>
-          </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Датасет названий</span>
-            <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
-              {{ datasetText }}
+          <div class="am-skins">
+            <button
+              v-for="item in APPEARANCES"
+              :key="item.name"
+              v-tip="item.hint"
+              class="am-skins__btn"
+              :class="{ 'am-skins__btn--on': item.name === appearance }"
+              type="button"
+              @click="setAppearance(item.name)"
+            >
+              <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
+              <span class="am-skins__name">{{ item.title }}</span>
+            </button>
+          </div>
+
+          <label class="am-switch">
+            <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
+            <span class="am-switch__text">
+              <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
+              <span class="am-switch__hint">
+                Контент для взрослых в поиске и каталоге. Своего списка это не касается:
+                добавленные записи видны всегда.
+              </span>
             </span>
-          </li>
-        </ul>
+          </label>
+        </div>
 
-        <!-- Атрибуция по ODbL: имя источника, лицензия и ссылка. Обязательна
-             с первого имени, показанного из датасета. -->
-        <p class="am-meta">
-          Русские названия поставляет датасет
-          <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-          (лицензия ODbL-1.0): номера и связки — manami-project/anime-offline-database, сами
-          названия — из открытых API Шикимори и anime365.
-        </p>
+        <div class="am-panel am-box">
+          <h3 class="am-h3">О программе</h3>
 
-        <!-- Свежесть датасета — единственное, за чем человеку приходится следить
-             руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
-        <p v-if="datasetStale" class="am-stale">
-          Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет, программа
-          добирает из сети по одному — это медленно. Загляните в
-          <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-          и запустите сборку кнопкой.
-        </p>
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Версия</span>
+              <span class="am-fact__value">{{ version }}</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Система</span>
+              <span class="am-fact__value">{{ system }}</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Датасет названий</span>
+              <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
+                {{ datasetText }}
+              </span>
+            </li>
+          </ul>
 
-        <!-- Вход в журнал. Отсюда, а не из меню: читают его, когда что-то
-             не работает, и спрашивают о нём ровно на этом экране. -->
-        <div class="am-log-open">
-          <button class="am-btn am-btn--soft" type="button" @click="onLog">Открыть журнал</button>
-          <span class="am-meta">Записи этого запуска: сеть, склад, очередь правок, ошибки.</span>
+          <!-- Атрибуция по ODbL: имя источника, лицензия и ссылка. Обязательна
+               с первого имени, показанного из датасета. -->
+          <p class="am-meta am-fine">
+            Русские названия поставляет датасет
+            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+            (лицензия ODbL-1.0): номера и связки — manami-project/anime-offline-database, сами
+            названия — из открытых API Шикимори и anime365.
+          </p>
+
+          <!-- Свежесть датасета — единственное, за чем человеку приходится следить
+               руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
+          <p v-if="datasetStale" class="am-stale">
+            Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет,
+            программа добирает из сети по одному — это медленно. Загляните в
+            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+            и запустите сборку кнопкой.
+          </p>
+
+          <!-- Вход в журнал. Отсюда, а не из меню: читают его, когда что-то
+               не работает, и спрашивают о нём ровно на этом экране. -->
+          <div class="am-log-open">
+            <button class="am-btn am-btn--soft" type="button" @click="onLog">Открыть журнал</button>
+            <span class="am-meta">Записи этого запуска: сеть, склад, очередь правок, ошибки.</span>
+          </div>
         </div>
       </div>
     </div>
@@ -585,18 +593,37 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Широкое окно держит панели рядом, узкое ставит их друг под другом. */
-.am-split {
+/* Две колонки известной доли, а не auto-fit по минимальной ширине: на
+   фуллскрине сетка разводила четыре панели в ряд, и настройки читались
+   как россыпь окошек. Потолок ширины держит строку текста читаемой. */
+.am-set {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: var(--am-gap);
   align-items: start;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+/* Колонка сама столбец: панели в ней идут одна под другой с общим шагом. */
+.am-set__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--am-gap);
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .am-set {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .am-box {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
   border-radius: var(--am-r-leaf);
   transition: border-color var(--am-mid) var(--am-ease);
@@ -648,7 +675,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 7px;
   align-items: center;
-  padding: 14px 8px;
+  padding: 13px 8px;
   font: inherit;
   color: var(--am-dim);
   cursor: pointer;
@@ -724,6 +751,13 @@ onMounted(() => {
   border-radius: var(--am-r-m);
 }
 
+/* Атрибуция обязана быть видна, но читают её раз в жизни: своим кеглем
+   она уходит на второй план и не спорит с фактами выше. */
+.am-fine {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* Вход в журнал: кнопка и пояснение рядом, а не строкой фактов выше —
    это действие, а не число. */
 .am-log-open {
@@ -731,7 +765,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 11px 13px;
   background: var(--am-fill-1);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-l);
@@ -877,7 +911,7 @@ onMounted(() => {
   gap: 12px;
   align-items: baseline;
   justify-content: space-between;
-  padding: 9px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--am-line-soft);
 }
 
