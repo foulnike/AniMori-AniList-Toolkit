@@ -2,7 +2,11 @@
 // Окошко персонажа или автора поверх основного интерфейса (пункт 3.9б).
 // Русские имя и описание докидываются фоном из person-title.ts (пункт 3.9а).
 // Сэйю открывается в том же окне со стеком назад: башня затемнений не нужна.
-import { onBeforeUnmount, onMounted, ref, shallowReactive } from 'vue'
+//
+// Показанного человека может подменить слой окошка (app/person-layer.ts):
+// ссылка из описания ведёт на другого. Поэтому загрузка висит не только
+// на onMounted, но и на смене свойства.
+import { onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 
 import {
   fetchCharacterCard,
@@ -282,6 +286,25 @@ function goBackPerson(): void {
   if (prev) void load(prev)
 }
 
+/**
+ * Слой окошка подменил человека: ссылка из описания ведёт на другого.
+ * Прежний уходит в ту же цепочку, что и переход к сэйю, — «Назад» и Escape
+ * работают одинаково независимо от того, откуда пришёл новый человек.
+ */
+watch(
+  () => props.start,
+  (next) => {
+    const now = current.value
+    if (next.kind === now.kind && next.personId === now.personId) return
+
+    history.push(now)
+    depth.value = history.length
+    void load(next).catch((e) => {
+      Logger('WARN', 'Карточка персоны: загрузка не удалась', e)
+    })
+  },
+)
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   void load(props.start).catch((e) => {
@@ -382,8 +405,9 @@ onBeforeUnmount(() => {
             class="am-ps-desc"
             :class="{ 'am-ps-desc--fold': longDesc() && !expanded }"
           >
-            <!-- Ссылка внутрь приложения закрывает окно: иначе карточка
-                 откроется за ним и останется незамеченной. -->
+            <!-- Ссылка на тайтл закрывает окно: иначе карточка откроется за ним
+                 и останется незамеченной. Ссылка на другого человека окно
+                 не закрывает — оно уже показывает нового. -->
             <RichText :text="rawDesc()" @inside="emit('close')" />
           </div>
           <button
