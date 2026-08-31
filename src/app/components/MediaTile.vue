@@ -77,7 +77,7 @@ const hasTags = computed(
 </script>
 
 <template>
-  <li class="am-tile">
+  <li class="am-tile" :class="{ 'am-tile--hidable': hidable }">
     <button class="am-tile__hit" type="button" :title="title" @click="emit('open')">
       <span class="am-tile__art" :style="artStyle">
         <img
@@ -250,6 +250,18 @@ const hasTags = computed(
   display: flex;
   gap: 4px;
   max-width: calc(100% - 46px);
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+/* Крестик витрины занимает тот же левый угол, что метки, поэтому на
+   время наведения метки уступают ему место: две стеклянные пилюли
+   внахлёст не читаются ни одна. */
+.am-tile--hidable:hover .am-tile__tags,
+.am-tile--hidable:focus-within .am-tile__tags {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 /* Метки — стекло, а не плотные пилюли: на светлых обложках чёрные плашки
@@ -380,11 +392,13 @@ const hasTags = computed(
   white-space: nowrap;
 }
 
-/* Крестик «не интересует»: виден под курсором и фокусом, а не всегда. */
+/* Крестик «не интересует»: виден под курсором и фокусом, а не всегда.
+   Сидит слева: в правом углу он закрывал оценку каталога и точку
+   идущего сезона — ровно то, по чему выбирают тайтл в витрине. */
 .am-tile__hide {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
   z-index: 2;
   display: none;
   align-items: center;
