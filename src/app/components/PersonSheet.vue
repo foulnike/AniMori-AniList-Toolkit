@@ -11,7 +11,8 @@ import {
   type PersonTarget,
   type StaffCard,
 } from '@/api/anilist-person'
-import { Bridge } from '@/bridge'
+import { fetchStaffWorks, type StaffWork } from '@/api/anilist-staff-works'
+import { keepAllowed } from '@/core/adult'
 import {
   getRussianPerson,
   getRussianPersonFull,
@@ -22,21 +23,18 @@ import { settings } from '@/core/settings'
 import { Logger } from '@/utils/logger'
 
 import { genderWord, langWord, occupationWord } from '../labels'
+import { navigate } from '../router'
+
+import RichText from './RichText.vue'
 
 const props = defineProps<{ start: PersonTarget }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-/** Предел описания до кнопки «Ещё». */
-const DESC_LIMIT = 400
+/** Длина описания, после которой оно складывается под кнопку. */
+const DESC_LIMIT = 600
 
 /** Сэйю из карточки персонажа. */
 type VoiceActor = NonNullable<CharacterCard['media']>['edges'][number]['voiceActors'][number]
-
-/** Кусок описания: просто текст или ссылка наружу. */
-interface DescPart {
-  text: string
-  url: string | null
-}
 
 /** Кто показан сейчас: из окна персонажа можно шагнуть в карточку сэйю. */
 const current = ref<PersonTarget>(props.start)
@@ -51,6 +49,9 @@ const charCard = ref<CharacterCard | null>(null)
 const staffCard = ref<StaffCard | null>(null)
 const busy = ref(true)
 const expanded = ref(false)
+
+/** Главные работы автора: полка постеров под описанием. */
+const works = ref<StaffWork[]>([])
 
 /** Коробка окна: при переходе к сэйю её прокрутка возвращается наверх. */
 const box = ref<HTMLElement | null>(null)
@@ -82,30 +83,18 @@ function rawDesc(): string {
   )
 }
 
-function shortDesc(): string {
-  const d = rawDesc()
-  return expanded.value || d.length <= DESC_LIMIT ? d : d.slice(0, DESC_LIMIT) + '…'
+/**
+ * Длинное ли описание. Резать текст больше нельзя: в нём разметка,
+ * и рез по символам попадал в середину тега. Длина теперь только признак
+ * того, что описание надо сложить по высоте.
+ */
+function longDesc(): boolean {
+  return rawDesc().length > DESC_LIMIT
 }
 
-function hasMore(): boolean {
-  return rawDesc().length > DESC_LIMIT && !expanded.value
-}
-
-/** Описание кусками: маркдаун-ссылки AniList становятся кликабельными. */
-function descParts(): DescPart[] {
-  const d = shortDesc()
-  const parts: DescPart[] = []
-  const link = /\[([^\]]+)\]\((https?:[^)\s]+)\)/g
-  let last = 0
-  let m: RegExpExecArray | null
-  while ((m = link.exec(d)) !== null) {
-    if (m.index > last) parts.push({ text: d.slice(last, m.index), url: null })
-    // Обе группы гарантированы самим выражением: [текст](url).
-    parts.push({ text: m[1]!, url: m[2]! })
-    last = m.index + m[0].length
-  }
-  if (last < d.length) parts.push({ text: d.slice(last), url: null })
-  return parts
+/** Видимые работы: отбор 18+ живёт на слое показа, а не в запросе. */
+function shownWorks(): readonly StaffWork[] {
+  return keepAllowed(works.value, (work) => work.isAdult)
 }
 
 function fullName(): string {
@@ -195,14 +184,10 @@ function vaName(va: VoiceActor): string {
   return ruVoices.get(va.id) ?? va.name.full
 }
 
-function openLink(url: string): void {
-  Bridge.shell.openExternal(url).catch(() => {})
-}
-
-function openSite(): void {
-  const url = current.value.siteUrl
-  if (url === null) return
-  Bridge.shell.openExternal(url).catch(() => {})
+/** Переход на карточку работы: окно закрывается, иначе оно заслонит карточку. */
+function openWork(mediaId: number): void {
+  navigate('media', { id: String(mediaId) })
+  emit('close')
 }
 
 function onKey(e: KeyboardEvent): void {
@@ -213,7 +198,7 @@ function onKey(e: KeyboardEvent): void {
 }
 
 /**
- * Русские имя и описание: окно они не держат, докидываются по готовности.
+ * Русские имя и описание: окно их не держит, докидываются по готовности.
  * Гарда тёзок тут нет: списка тайтлов человека под рукой нет, а пара
  * имя + кандзи даёт точный балл и без него. Главному лицу спрашивается
  * полная карточка: имя из списка ролей добирает описание одним запросом.
@@ -247,6 +232,7 @@ async function load(target: PersonTarget): Promise<void> {
   current.value = target
   charCard.value = null
   staffCard.value = null
+  works.value = []
   ruVoices.clear()
   expanded.value = false
   busy.value = true
@@ -258,6 +244,15 @@ async function load(target: PersonTarget): Promise<void> {
   if (target.kind === 'character') {
     charCard.value = await fetchCharacterCard(target.personId)
   } else {
+    // Полка работ идёт своим доходом: карточка её не ждёт, а без работ она живая.
+    void fetchStaffWorks(target.personId)
+      .then((list) => {
+        if (alive && mine === run) works.value = list
+      })
+      .catch((e) => {
+        Logger('WARN', 'Карточка персоны: работы не загрузились', e)
+      })
+
     staffCard.value = await fetchStaffCard(target.personId)
   }
   if (!alive || mine !== run) return
@@ -382,22 +377,52 @@ onBeforeUnmount(() => {
 
         <!-- Описание -->
         <template v-else>
-          <p v-if="rawDesc()" class="am-ps-desc">
-            <template v-for="(part, i) in descParts()" :key="i">
-              <a v-if="part.url" class="am-ps-link" href="#" @click.prevent="openLink(part.url)">{{
-                part.text
-              }}</a>
-              <template v-else>{{ part.text }}</template>
-            </template>
-          </p>
+          <div
+            v-if="rawDesc()"
+            class="am-ps-desc"
+            :class="{ 'am-ps-desc--fold': longDesc() && !expanded }"
+          >
+            <!-- Ссылка внутрь приложения закрывает окно: иначе карточка
+                 откроется за ним и останется незамеченной. -->
+            <RichText :text="rawDesc()" @inside="emit('close')" />
+          </div>
           <button
-            v-if="hasMore()"
+            v-if="longDesc() && !expanded"
             class="am-btn am-btn--ghost am-ps-wide"
             type="button"
             @click="expanded = true"
           >
             Показать полностью
           </button>
+
+          <!-- Работы (только для авторов): полка постеров с переходом внутрь -->
+          <template v-if="current.kind === 'staff' && shownWorks().length">
+            <h4 class="am-ps-sub">Работы</h4>
+            <div class="am-rail am-ps-works">
+              <button
+                v-for="work in shownWorks()"
+                :key="work.mediaId"
+                class="am-ps-work"
+                type="button"
+                :title="work.role ? `${work.name} · ${work.role}` : work.name"
+                @click="openWork(work.mediaId)"
+              >
+                <img
+                  v-if="work.cover"
+                  class="am-ps-work__art"
+                  :src="work.cover"
+                  :alt="work.name"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span v-else class="am-ps-work__art am-ps-work__art--empty" aria-hidden="true">
+                  {{ work.name.slice(0, 1) }}
+                </span>
+                <span class="am-ps-work__name">{{ work.name }}</span>
+                <span v-if="work.year" class="am-ps-work__year">{{ work.year }}</span>
+              </button>
+            </div>
+          </template>
 
           <!-- Сэйю (только для персонажей): строка кликабельна, окно то же -->
           <template v-if="current.kind === 'character' && voiceActors().length">
@@ -429,13 +454,6 @@ onBeforeUnmount(() => {
           </template>
         </template>
       </div>
-
-      <!-- Футер -->
-      <footer v-if="current.siteUrl" class="am-sheet__foot">
-        <button class="am-btn am-btn--ghost" type="button" @click="openSite()">
-          Открыть на AniList
-        </button>
-      </footer>
     </div>
   </div>
 </template>
@@ -454,10 +472,11 @@ onBeforeUnmount(() => {
   animation: am-veil-in var(--am-mid) var(--am-ease-soft) both;
 }
 
-/* Три этажа: шапка, прокручиваемое тело и подвал со ссылкой наружу. */
+/* Два этажа: шапка и прокручиваемое тело. Подвала больше нет: единственная
+   его кнопка уводила на AniList, а пустая полка со границей только ела высоту. */
 .am-sheet__box {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
   width: 100%;
   max-width: 820px;
@@ -501,8 +520,8 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-/* Цель нажатия в 44 пикселя и форма, плывущая к окружности под курсором —
-   точно так же, как в окне правки записи. */
+/* Цель нажатия в 44 пикселя. В покое круг, под курсором лепесток:
+   форма отвечает на наведение, а не живёт лепестком всё время. */
 .am-sheet__close {
   display: grid;
   flex: none;
@@ -518,7 +537,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: var(--am-fill-1);
   border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-drop);
+  border-radius: var(--am-r-cap);
   transition:
     color var(--am-fast) var(--am-ease),
     background-color var(--am-fast) var(--am-ease),
@@ -529,15 +548,19 @@ onBeforeUnmount(() => {
 .am-sheet__close:focus-visible {
   color: var(--am-text);
   background: var(--am-fill-2);
-  border-radius: var(--am-r-cap);
+  border-radius: var(--am-r-drop);
 }
 
-.am-sheet__foot {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  padding-top: 14px;
-  border-top: 1px solid var(--am-line-soft);
+/* Символ поднимается вместе с формой, но своим слоем: центровку держит
+   place-items родителя, и сдвиг её не сбивает. */
+.am-sheet__close > span {
+  display: block;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-sheet__close:hover > span,
+.am-sheet__close:focus-visible > span {
+  transform: translateY(-1px);
 }
 
 /* Шаг назад по цепочке «персонаж → сэйю»: сидит над шапкой слева. */
@@ -615,35 +638,34 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-/* Описание лежит на своей подложке: стена текста без границ не читалась. */
+/* Описание лежит на своей подложке: стена текста без границ не читалась.
+   Переносы и разметку держит сам RichText, здесь только типографика. */
 .am-ps-desc {
   margin: 0;
   padding: 14px 16px;
   font-size: 14px;
   line-height: 1.65;
   color: var(--am-dim);
-  white-space: pre-line;
   background: var(--am-fill-1);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-l);
 }
 
-.am-ps-link {
-  color: var(--am-text);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.am-ps-link:hover,
-.am-ps-link:focus-visible {
-  color: var(--am-accent);
+/* Длинное описание складывается по высоте, а не режется по символам:
+   рез размеченного текста ломал теги. Хвост гаснет маской — видно,
+   что текст продолжается. */
+.am-ps-desc--fold {
+  max-height: 230px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 68%, transparent);
+  mask-image: linear-gradient(180deg, #000 68%, transparent);
 }
 
 .am-ps-wide {
   align-self: flex-start;
 }
 
-/* Голоса */
+/* Подзаголовки тела: Голоса, Работы */
 .am-ps-sub {
   display: flex;
   gap: 9px;
@@ -663,6 +685,69 @@ onBeforeUnmount(() => {
   content: '';
   background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
   border-radius: var(--am-r-cap);
+}
+
+/* Полка работ автора: горизонтальная прокрутка общего .am-rail. */
+.am-ps-works {
+  padding-bottom: 4px;
+}
+
+.am-ps-work {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  width: 104px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.am-ps-work__art {
+  display: block;
+  width: 104px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  background: var(--am-fill-2);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-m);
+  transition:
+    border-color var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+.am-ps-work__art--empty {
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  color: var(--am-faint);
+}
+
+.am-ps-work:hover .am-ps-work__art,
+.am-ps-work:focus-visible .am-ps-work__art {
+  border-color: rgb(var(--am-accent-rgb) / 0.55);
+  transform: translateY(-2px);
+}
+
+/* Имя в две строки: одной не хватало почти ни одному тайтлу, а третья
+   ломала ровный ряд постеров. */
+.am-ps-work__name {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.am-ps-work__year {
+  font-size: 11px;
+  color: var(--am-faint);
 }
 
 .am-ps-voices {
@@ -770,6 +855,10 @@ onBeforeUnmount(() => {
     animation: none;
   }
 
+  .am-sheet__close:hover > span,
+  .am-sheet__close:focus-visible > span,
+  .am-ps-work:hover .am-ps-work__art,
+  .am-ps-work:focus-visible .am-ps-work__art,
   .am-ps-va:hover,
   .am-ps-va:focus-visible,
   .am-ps-va:hover .am-ps-va__go {
