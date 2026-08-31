@@ -29,6 +29,10 @@ const TITLE_CHUNK = 6
 /** Сколько заглушек держать на время подъёма снимка. */
 const HOLD_COUNT = 7
 
+/** Ниже этого числа плиток полка не показывается: огрызок из одной-двух
+    картинок после чистки повторов выглядит ошибкой загрузки. */
+const SHELF_MIN = 3
+
 /** Плитка своей полки. Тот же вид, что в списках: вид тайтла везде один. */
 interface Row {
   mediaId: number
@@ -185,38 +189,52 @@ function buildOwn(): void {
   void fillTitles()
 }
 
-/** Состав витрины: свой подбор впереди; чип жанра замещает три полки каталога. */
+/** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
+    и по нему же решается, кому достанется тайтл при повторе. Нажатый жанр —
+    явная просьба хозяина, поэтому он впереди всего и замещает три полки
+    каталога. */
 function shelfDefs(): ShelfDef[] {
-  const defs: ShelfDef[] = [
-    { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf() },
-    { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf() },
-  ]
-
   const genre = homeGenre.value
   if (genre !== '') {
-    defs.push({
-      key: 'genre',
-      title: `Жанр: ${genreWord(genre) ?? genre}`,
-      load: () => recShelf('genre', [genre]),
-    })
-    return defs
+    return [
+      {
+        key: 'genre',
+        title: `Жанр: ${genreWord(genre) ?? genre}`,
+        load: () => recShelf('genre', [genre]),
+      },
+      { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf() },
+      { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf() },
+    ]
   }
 
-  defs.push({ key: 'airing', title: 'Сейчас выходит', load: () => recShelf('airing') })
-  defs.push({ key: 'trending', title: 'В тренде', load: () => recShelf('trending') })
-  defs.push({ key: 'top', title: 'Лучшее за всё время', load: () => recShelf('top') })
-  return defs
+  return [
+    { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf() },
+    { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf() },
+    { key: 'airing', title: 'Сейчас выходит', load: () => recShelf('airing') },
+    { key: 'trending', title: 'В тренде', load: () => recShelf('trending') },
+    { key: 'top', title: 'Лучшее за всё время', load: () => recShelf('top') },
+  ]
 }
 
-/** Собирает полки в показ: приехавшее встаёт на своё место в порядке состава. */
+/** Собирает полки в показ: приехавшее встаёт на своё место в порядке состава.
+    Тайтл показывается ровно на одной полке: «тренд», «лучшее» и жанровые
+    подборки у каталога пересекаются почти наполовину, и витрина читалась
+    одним и тем же рядом под разными заголовками. */
 function publish(): void {
   const out: Shelf[] = []
+  const seen = new Set<number>()
+
   for (const def of activeDefs) {
     const items = staged.get(def.key)
-    if (items !== undefined && items.length > 0) {
-      out.push({ key: def.key, title: def.title, rows: items.map(toTileRow) })
-    }
+    if (items === undefined || items.length === 0) continue
+
+    const fresh = items.filter((brief) => !seen.has(brief.mediaId))
+    if (fresh.length < SHELF_MIN) continue
+
+    for (const brief of fresh) seen.add(brief.mediaId)
+    out.push({ key: def.key, title: def.title, rows: fresh.map(toTileRow) })
   }
+
   recs.value = out
 }
 
