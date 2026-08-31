@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Настройки: вход в AniList и распоряжение своими данными.
+// Настройки: вход в AniList, внешность и распоряжение своими данными.
 // На экране только то, что человеку решать: как всё устроено внутри —
 // дело документации, а не карточки настроек.
 import { onMounted, ref } from 'vue'
@@ -16,6 +16,7 @@ import { datasetStatus, initDatasetNames } from '@/core/dataset-names'
 import { clearCache, getDbStats } from '@/core/db'
 import { saveSetting, settings } from '@/core/settings'
 
+import { APPEARANCES, appearance, setAppearance } from '../appearance'
 import {
   authStatus,
   isDesktop,
@@ -148,7 +149,7 @@ async function readState(): Promise<void> {
     const days = daysSince(ds.builtAt)
 
     // Возраст рядом с датой: дата отвечает «когда собран», а возраст —
-    // «пора ли дёргать репозиторий», и здесь важнее второй вопрос.
+    // «пора ли дљ1гать репозиторий», и здесь важнее второй вопрос.
     const age = days === null ? '' : ` · ${ageText(days)}`
     datasetText.value = `${date} · ${count} записей${age}`
     datasetStale.value = days !== null && days > STALE_DAYS
@@ -261,7 +262,7 @@ function onAdult(): void {
     : 'Взрослое скрыто из поиска и каталога.'
 }
 
-// Память сбрасывается только руками. Перезагрузка не дёргается сама:
+// Память сбрасывается только руками. Перезагрузка не дљ1гается сама:
 // человек может быть середине правок.
 function onClear(): void {
   void guard(async () => {
@@ -435,6 +436,41 @@ onMounted(() => {
         </template>
       </div>
 
+      <!-- Внешность второй панелью: меняют её часто, а опасные кнопки ниже. -->
+      <div class="am-panel am-box">
+        <h3 class="am-h3">Оформление</h3>
+
+        <div class="am-skins">
+          <button
+            v-for="item in APPEARANCES"
+            :key="item.name"
+            class="am-skins__btn"
+            :class="{ 'am-skins__btn--on': item.name === appearance }"
+            type="button"
+            @click="setAppearance(item.name)"
+          >
+            <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
+            <span class="am-skins__name">{{ item.title }}</span>
+          </button>
+        </div>
+
+        <p class="am-meta">
+          AMOLED гасит подсветку до чёрного: на таких экранах это экономит заряд. Тема
+          переключается и тремя знаками в шапке.
+        </p>
+
+        <label class="am-switch">
+          <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
+          <span class="am-switch__text">
+            <span class="am-switch__name">Показывать взрослое (18+)</span>
+            <span class="am-switch__hint">
+              Хентай и прочее взрослое в поиске и каталоге. Своего списка это не касается:
+              добавленные записи видны всегда.
+            </span>
+          </span>
+        </label>
+      </div>
+
       <div class="am-panel am-box">
         <h3 class="am-h3">Свои данные</h3>
 
@@ -500,21 +536,6 @@ onMounted(() => {
       </div>
 
       <div class="am-panel am-box">
-        <h3 class="am-h3">Показ</h3>
-
-        <label class="am-switch">
-          <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
-          <span class="am-switch__text">
-            <span class="am-switch__name">Показывать взрослое (18+)</span>
-            <span class="am-switch__hint">
-              Хентай и прочее взрослое в поиске и каталоге. Своего списка это не касается:
-              добавленные записи видны всегда.
-            </span>
-          </span>
-        </label>
-      </div>
-
-      <div class="am-panel am-box">
         <h3 class="am-h3">О программе</h3>
 
         <ul class="am-facts">
@@ -545,7 +566,7 @@ onMounted(() => {
 
         <!-- Свежесть датасета — единственное, за чем человеку приходится следить
              руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
-        <p v-if="datasetStale" class="am-warn">
+        <p v-if="datasetStale" class="am-stale">
           Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет, программа
           добирает из сети по одному — это медленно. Загляните в
           <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
@@ -567,8 +588,8 @@ onMounted(() => {
 /* Широкое окно держит панели рядом, узкое ставит их друг под другом. */
 .am-split {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--am-gap);
   align-items: start;
 }
 
@@ -577,6 +598,30 @@ onMounted(() => {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  border-radius: var(--am-r-leaf);
+  transition: border-color var(--am-mid) var(--am-ease);
+}
+
+.am-box:hover {
+  border-color: var(--am-edge);
+}
+
+/* Засечка акцентом у заголовка: панели одинаковые, и глазу нужна зацепка. */
+.am-box > .am-h3,
+.am-box .am-bar .am-h3 {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.am-box > .am-h3::before,
+.am-box .am-bar .am-h3::before {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 14px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
 }
 
 .am-row {
@@ -591,33 +636,91 @@ onMounted(() => {
   min-width: 200px;
 }
 
-/* Вопрос перед заменой списка: отделён рамкой, но без крика. */
+/* Выбор темы: три карточки рядом, выбранная подсвечена акцентом. */
+.am-skins {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.am-skins__btn {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+  padding: 14px 8px;
+  font: inherit;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-l);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+.am-skins__btn:hover {
+  color: var(--am-text);
+  background: var(--am-hover);
+  border-radius: var(--am-r-drop);
+  transform: translateY(-2px);
+}
+
+.am-skins__btn--on {
+  color: var(--am-text);
+  background: rgb(var(--am-accent-rgb) / 0.12);
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
+  border-radius: var(--am-r-drop);
+  box-shadow: var(--am-sh-glow);
+}
+
+.am-skins__mark {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.am-skins__btn--on .am-skins__mark {
+  color: var(--am-accent);
+}
+
+.am-skins__name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* Вопрос перед заменой списка: отделён рамкой, но без крика.
+   Тон берётся от --am-warn: жёлтый литерал на светлой теме слепил. */
 .am-ask {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 13px 15px;
-  background: rgba(255, 190, 90, 0.07);
-  border: 1px solid rgba(255, 190, 90, 0.35);
-  border-radius: var(--am-r-m);
+  background: color-mix(in srgb, var(--am-warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-warn) 42%, transparent);
+  border-radius: var(--am-r-l);
 }
 
 .am-ask__text {
   margin: 0;
   font-size: 13px;
+  line-height: 1.55;
   color: var(--am-dim);
 }
 
 /* Просрочка датасета: тот же тон, что у вопроса перед заменой списка.
    Это подсказка, а не ошибка, и красным её показывать неправильно. */
-.am-warn {
+.am-stale {
   margin: 0;
   padding: 11px 13px;
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--am-dim);
-  background: rgba(255, 190, 90, 0.07);
-  border: 1px solid rgba(255, 190, 90, 0.35);
+  background: color-mix(in srgb, var(--am-warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-warn) 42%, transparent);
   border-radius: var(--am-r-m);
 }
 
@@ -625,9 +728,13 @@ onMounted(() => {
    это действие, а не число. */
 .am-log-open {
   display: flex;
-  align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-l);
 }
 
 /* Исход действия: виден сразу и не путается с пояснениями рядом. */
@@ -640,17 +747,60 @@ onMounted(() => {
 /* Настройка-тумблер: вся строка нажимается, пояснение под названием. */
 .am-switch {
   display: flex;
-  gap: 11px;
+  gap: 12px;
   align-items: flex-start;
+  padding: 12px 14px;
   cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-l);
+  transition: background-color var(--am-fast) var(--am-ease);
 }
 
+.am-switch:hover {
+  background: var(--am-hover);
+}
+
+/* Свой переключатель вместо системной галочки: та игнорирует тему
+   и рисуется по-своему в каждом движке. */
 .am-switch__box {
-  width: 17px;
-  height: 17px;
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
   margin: 1px 0 0;
-  accent-color: var(--am-accent);
+  appearance: none;
   cursor: pointer;
+  background: var(--am-fill-3);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    background var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease);
+}
+
+.am-switch__box::before {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  content: '';
+  background: var(--am-faint);
+  border-radius: var(--am-r-cap);
+  transition:
+    transform var(--am-mid) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease);
+}
+
+.am-switch__box:checked {
+  background: linear-gradient(135deg, var(--am-accent), var(--am-accent-2));
+  border-color: transparent;
+}
+
+.am-switch__box:checked::before {
+  background: var(--am-bg);
+  transform: translateX(18px);
 }
 
 .am-switch__text {
@@ -661,7 +811,7 @@ onMounted(() => {
 }
 
 .am-switch__name {
-  font-weight: 550;
+  font-weight: 600;
 }
 
 .am-switch__hint {
@@ -675,11 +825,11 @@ onMounted(() => {
   padding: 0;
   font: inherit;
   color: var(--am-accent);
-  background: none;
-  border: 0;
-  cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  cursor: pointer;
+  background: none;
+  border: 0;
 }
 
 /* Состояние подключения точкой: видно без чтения. */
@@ -690,27 +840,27 @@ onMounted(() => {
   padding: 5px 12px;
   font-size: 12.5px;
   color: var(--am-dim);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
 }
 
 .am-flag__dot {
   width: 8px;
   height: 8px;
   background: var(--am-faint);
-  border-radius: 50%;
+  border-radius: var(--am-r-cap);
 }
 
 .am-flag--on {
   color: var(--am-good);
-  background: rgba(61, 220, 151, 0.12);
-  border-color: rgba(61, 220, 151, 0.32);
+  background: color-mix(in srgb, var(--am-good) 14%, transparent);
+  border-color: color-mix(in srgb, var(--am-good) 38%, transparent);
 }
 
 .am-flag--on .am-flag__dot {
   background: var(--am-good);
-  box-shadow: 0 0 8px rgba(61, 220, 151, 0.8);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--am-good) 80%, transparent);
 }
 
 .am-facts {
@@ -741,21 +891,26 @@ onMounted(() => {
 }
 
 .am-fact__value {
-  font-weight: 550;
+  font-weight: 600;
   text-align: right;
 }
 
-/* Возраст датасета сверх порога. Цвет литералом, а не переменной темы:
-   жёлтого предупреждения в наборе нет, а неизвестная переменная означает
-   цвет по умолчанию, то есть подсветку, которой не видно. */
+/* Возраст датасета сверх порога. Раньше здесь стоял литерал: жёлтого
+   в наборе не было. Теперь --am-warn есть и подобран под каждую тему. */
 .am-fact__value--stale {
-  color: #f0b34e;
+  color: var(--am-warn);
 }
 
 code {
   padding: 1px 6px;
   font-size: 12.5px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--am-fill-2);
   border-radius: var(--am-r-s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-skins__btn:hover {
+    transform: none;
+  }
 }
 </style>
