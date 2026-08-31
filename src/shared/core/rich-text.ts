@@ -20,13 +20,16 @@ export interface RichFace {
 /**
  * Куда ведёт ссылка из описания.
  *
- * Тайтл отделён от прочего нарочно: у Шикимори номер аниме — это номер
- * MyAnimeList, и карточка находится внутри приложения. Персонажи и люди
- * так не находятся: у них номера свои, и ссылка ведёт наружу.
+ * Тайтл и человек отделены от прочего нарочно, но разбираются по-разному.
+ * У Шикимори номер аниме — это номер MyAnimeList, и карточка находится сразу.
+ * Номера людей у Шикимори свои, и разрешает их слой показа: по номеру
+ * берётся латинское и японское имя, по имени ищется карточка на AniList.
+ * Ядро в этом не участвует: ему негде взять ни сеть, ни адреса экранов.
  */
 export type RichAim =
   | { kind: 'web'; url: string }
   | { kind: 'media'; malId: number; url: string }
+  | { kind: 'person'; who: 'character' | 'staff'; shikiId: number; url: string }
 
 /** Кусок строки: текст или ссылка. */
 export type RichPart =
@@ -74,12 +77,26 @@ const SHIKI_PATHS: Record<string, string | undefined> = {
   topic: 'topics',
 }
 
+/** Разделы людей: имя раздела — кто это в наших карточках. */
+const PERSON_WHO: Record<string, 'character' | 'staff' | undefined> = {
+  characters: 'character',
+  people: 'staff',
+}
+
 /** Тег BBcode в разобранном виде. */
 interface Tag {
   name: string
   arg: string | null
   close: boolean
 }
+
+const TAG_RE = /\[(\/)?([a-z*][a-z0-9_-]*)(?:=([^\]\n]*))?\]/gi
+
+/** Адрес любого зеркала Шикимори: в описаниях живут и .one, и .org, и .io. */
+const SHIKI_HOST_RE = /^https?:\/\/(?:www\.)?shikimori\.[a-z]+\//i
+
+/** Человек в адресе: /characters/293411-… и /people/9-…. */
+const PERSON_URL_RE = /\/(characters|people)\/[a-z]?(\d+)/i
 
 /** Рамка вложенности: спойлер, цитата и список собирают блоки в себя. */
 interface Frame {
@@ -89,8 +106,6 @@ interface Frame {
   blocks: RichBlock[]
   items: RichPart[][]
 }
-
-const TAG_RE = /\[(\/)?([a-z*][a-z0-9_-]*)(?:=([^\]\n]*))?\]/gi
 
 /**
  * Начало адресов зеркала: в BBcode Шикимори ссылки без домена, а домен
@@ -122,13 +137,33 @@ function malFromUrl(url: string): number | null {
   return Number.isFinite(malId) && malId > 0 ? malId : null
 }
 
-/** Ссылка из адреса: тайтл Шикимори ведёт внутрь, прочее — наружу. */
+/**
+ * Человек из адреса. Проверка зеркала обязательна: путь /people/ есть
+ * и у MyAnimeList, но номера там совсем другие.
+ */
+function personFromUrl(url: string): RichAim | null {
+  if (!SHIKI_HOST_RE.test(url)) return null
+
+  const found = PERSON_URL_RE.exec(url)
+  if (found === null) return null
+
+  const who = PERSON_WHO[(found[1] ?? '').toLowerCase()]
+  const shikiId = Number(found[2])
+  if (who === undefined || !Number.isFinite(shikiId) || shikiId <= 0) return null
+
+  return { kind: 'person', who, shikiId, url }
+}
+
+/** Ссылка из адреса: тайтл и человек Шикимори ведут внутрь, прочее — наружу. */
 function webAim(raw: string | null): RichAim | null {
   const asked = (raw ?? '').trim()
   if (asked === '') return null
 
   const url = asked.startsWith('/') ? shikiOrigin() + asked : asked
   if (!isWeb(url)) return null
+
+  const person = personFromUrl(url)
+  if (person !== null) return person
 
   const malId = malFromUrl(url)
   return malId === null ? { kind: 'web', url } : { kind: 'media', malId, url }
@@ -142,8 +177,13 @@ function entityAim(path: string, arg: string | null): RichAim | null {
   if (!Number.isFinite(id) || id <= 0) return null
 
   const url = shikiOrigin() + '/' + path + '/' + String(id)
+
   // Номер аниме у Шикимори — номер MyAnimeList: карточка найдётся внутри.
-  return path === 'animes' ? { kind: 'media', malId: id, url } : { kind: 'web', url }
+  if (path === 'animes') return { kind: 'media', malId: id, url }
+
+  // Номер человека свой, но по нему находится имя, а по имени — карточка.
+  const who = PERSON_WHO[path]
+  return who === undefined ? { kind: 'web', url } : { kind: 'person', who, shikiId: id, url }
 }
 
 function newFrame(kind: Frame['kind'], label = '', who: string | null = null): Frame {
@@ -152,7 +192,7 @@ function newFrame(kind: Frame['kind'], label = '', who: string | null = null): F
 
 /**
  * Приводит разметку AniList и остатки HTML к тому же BBcode: дальше работает
- * один разбор. Своего разбора для маркдауна нет нарочно — два разбора
+ * один разбор. Своего разбора для маркдауна нет нарочно: два разбора
  * расходятся на первой же правке.
  */
 function toBbcode(text: string): string {
