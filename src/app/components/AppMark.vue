@@ -1,67 +1,141 @@
 <script setup lang="ts">
-// Знак приложения: та же ель в скруглённом квадрате, что в иконке окна
-// (mori — лес). Рисуется вектором, а не картинкой из src-tauri/icons: иконка
-// окна одна на все темы и на чёрном фоне светит заплаткой, а здесь знак
-// живёт токенами темы.
+// Знак приложения: сакура с вырезом воспроизведения в скруглённом
+// квадрате — та же фигура, что в иконке окна из src-tauri/icons.
 //
-// Три темы обслуживаются здесь же: на тёмной и светлой квадрат залит
-// акцентным градиентом, а ель — вырез цвета завесы. На AMOLED наоборот:
-// подложка глухая, светится сама ель — яркий квадрат на чистом чёрном
-// бил по глазам сильнее заголовка рядом.
+// Вектором, а не картинкой из иконок: PNG там один на все темы, на
+// тридцати четырёх пикселях рельса он мылится, а на AMOLED его тёмно-синяя
+// подложка светит заплаткой на чистом чёрном.
+//
+// Цвета знака объявлены здесь, а не в theme.css, и это единственное такое
+// место в приложении. Причина: акцент всех трёх тем синий, а сакура
+// акцентного цвета — уже не сакура. Знак — не часть палитры окна,
+// и правило «цвета только токенами» выполнено по сути: три темы правятся
+// в одном месте, а не размазаны по экранам.
+//
+// По темам меняется плита, а не цветок: на тёмной и светлой она
+// остаётся тёмно-синей, как в самой иконке — розовые лепестки на
+// светлой подложке теряют и контур, и узнаваемость. На AMOLED плита
+// гаснет до чёрного и остаётся только кромка: квадрат темнее фона
+// там невозможен, а светлее — грязное пятно.
 </script>
 
 <template>
   <svg class="am-mark" viewBox="0 0 32 32" role="img" aria-label="AniMori">
     <defs>
-      <linearGradient id="am-logo-grad" x1="0" y1="0" x2="1" y2="1">
-        <stop class="am-mark__stop-a" offset="0" />
-        <stop class="am-mark__stop-b" offset="1" />
+      <!-- Плита светлее сверху: ровная заливка выглядит наклейкой,
+           и в иконке окна тот же косой переход. -->
+      <linearGradient id="am-mark-plate" x1="0.1" y1="0" x2="0.55" y2="1">
+        <stop class="am-mark__plate-a" offset="0" />
+        <stop class="am-mark__plate-b" offset="1" />
       </linearGradient>
+
+      <!-- Цветок залит одним градиентом на всю фигуру: заливка по
+           лепестку дала бы пять разных розовых. -->
+      <linearGradient id="am-mark-bloom" x1="0.15" y1="0" x2="0.85" y2="1">
+        <stop class="am-mark__bloom-a" offset="0" />
+        <stop class="am-mark__bloom-b" offset="1" />
+      </linearGradient>
+
+      <!-- Лепесток описан один раз и стоит остриём в центр квадрата:
+           оттуда его разворачивает пять раз. Выемка на конце — тот самый
+           надрез сакуры, без него цветок читается ромашкой. -->
+      <path
+        id="am-mark-petal"
+        d="M16 17.1 C12.1 16.6 9.3 13.2 9.6 9.8 C9.8 6.5 12.9 4.5 16 7 C19.1 4.5 22.2 6.5 22.4 9.8 C22.7 13.2 19.9 16.6 16 17.1 Z"
+      />
+
+      <!-- Треугольник именно вырезан, а не нарисован цветом подложки:
+           подложка градиентная, и заливка поверх выдала бы себя
+           ступенькой на скате. Углы скруглены обводкой того же пути:
+           отдельными дугами это десяток чисел вместо двух свойств. -->
+      <mask id="am-mark-cut">
+        <rect width="32" height="32" fill="#000" />
+
+        <g fill="#fff">
+          <use href="#am-mark-petal" />
+          <use href="#am-mark-petal" transform="rotate(72 16 16)" />
+          <use href="#am-mark-petal" transform="rotate(144 16 16)" />
+          <use href="#am-mark-petal" transform="rotate(216 16 16)" />
+          <use href="#am-mark-petal" transform="rotate(288 16 16)" />
+        </g>
+
+        <path
+          d="M13 12.2 L18.8 16 L13 19.8 Z"
+          fill="#000"
+          stroke="#000"
+          stroke-width="2.6"
+          stroke-linejoin="round"
+          stroke-linecap="round"
+        />
+      </mask>
     </defs>
 
     <rect class="am-mark__plate" width="32" height="32" rx="11" />
-
-    <!-- Ель тремя фигурами: два яруса кроны и ствол. Одним путём было бы
-         короче, но тогда ярусы не разнести по темам порознь. -->
-    <path class="am-mark__cut" d="M16 5.5 22 15.5 10 15.5Z" />
-    <path class="am-mark__cut" d="M16 11.5 25.5 25 6.5 25Z" />
-    <rect class="am-mark__cut" x="14.6" y="24" width="2.8" height="3.4" rx="1" />
+    <rect class="am-mark__bloom" width="32" height="32" mask="url(#am-mark-cut)" />
+    <rect class="am-mark__edge" x="0.5" y="0.5" width="31" height="31" rx="10.5" />
   </svg>
 </template>
 
 <style scoped>
+/* Тёмная — основная: значения взяты с самой иконки окна. */
 .am-mark {
+  --am-mark-plate-1: #1b2534;
+  --am-mark-plate-2: #0a0e16;
+  --am-mark-bloom-1: #f5b3c8;
+  --am-mark-bloom-2: #e88ba9;
+  --am-mark-edge: transparent;
+
   display: block;
   flex: none;
 }
 
 .am-mark__plate {
-  fill: url('#am-logo-grad');
+  fill: url('#am-mark-plate');
 }
 
-.am-mark__stop-a {
-  stop-color: var(--am-accent);
+.am-mark__bloom {
+  fill: url('#am-mark-bloom');
 }
 
-.am-mark__stop-b {
-  stop-color: var(--am-accent-2);
-}
-
-/* Вырез красится завесой, а не фоном окна: на светлой теме фон совпал бы
-   с градиентом и ель исчезла. */
-.am-mark__cut {
-  fill: var(--am-veil);
-}
-
-/* AMOLED: инверсия — глухая плита с акцентной кромкой и светящаяся ель.
-   Селектор глобальный: метка темы стоит на <html>, а не на знаке. */
-:global([data-am-skin='amoled']) .am-mark__plate {
-  fill: var(--am-panel-2);
-  stroke: rgb(var(--am-accent-rgb) / 0.45);
+.am-mark__edge {
+  fill: none;
+  stroke: var(--am-mark-edge);
   stroke-width: 1;
 }
 
-:global([data-am-skin='amoled']) .am-mark__cut {
-  fill: url('#am-logo-grad');
+.am-mark__plate-a {
+  stop-color: var(--am-mark-plate-1);
+}
+
+.am-mark__plate-b {
+  stop-color: var(--am-mark-plate-2);
+}
+
+.am-mark__bloom-a {
+  stop-color: var(--am-mark-bloom-1);
+}
+
+.am-mark__bloom-b {
+  stop-color: var(--am-mark-bloom-2);
+}
+
+/* Светлая: плита чуть светлее и с тёплой кромкой, лепестки на тон глубже:
+   светлый розовый рядом со светлым окном читался выцветшим.
+   Селектор глобальный: метка темы стоит на <html>, а не на знаке. */
+:global([data-am-skin='light']) .am-mark {
+  --am-mark-plate-1: #223047;
+  --am-mark-plate-2: #101a28;
+  --am-mark-bloom-1: #f2a6bf;
+  --am-mark-bloom-2: #e07d9f;
+  --am-mark-edge: rgb(255 255 255 / 0.16);
+}
+
+/* AMOLED: плита гаснет до чёрного, форму держит кромка и сам цветок. */
+:global([data-am-skin='amoled']) .am-mark {
+  --am-mark-plate-1: #05070a;
+  --am-mark-plate-2: #000000;
+  --am-mark-bloom-1: #f0a6bf;
+  --am-mark-bloom-2: #de85a4;
+  --am-mark-edge: rgb(240 166 191 / 0.24);
 }
 </style>
