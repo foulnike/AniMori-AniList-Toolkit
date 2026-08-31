@@ -26,8 +26,13 @@ import PersonSheet from './PersonSheet.vue'
 
 const props = defineProps<{ mediaId: number }>()
 
-/** Сколько авторов видно до раскрытия хвоста. */
-const STAFF_HEAD = 6
+/** Сколько авторов видно до раскрытия хвоста. Восемь, а не шесть: сетка
+    авторов на широком окне встаёт в четыре колонки, и шесть плиток
+    оставляли второй ряд наполовину пустым. */
+const STAFF_HEAD = 8
+
+/** Сколько заглушек класть на полку, пока люди едут. */
+const HOLD_FACES = 8
 
 /** Роли персонажей: сервер называет их тремя словами и других не бывает. */
 const ROLE_WORDS: Record<string, string> = {
@@ -198,7 +203,7 @@ watch(
   <div v-if="busy && empty" class="am-panel am-folk">
     <h3 class="am-h3">Персонажи</h3>
     <div class="am-rail">
-      <span v-for="at in 6" :key="at" class="am-skeleton am-face__wait" />
+      <span v-for="at in HOLD_FACES" :key="at" class="am-skeleton am-face__wait" />
     </div>
   </div>
 
