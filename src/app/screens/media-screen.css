@@ -327,7 +327,6 @@
   margin: 0;
   line-height: 1.65;
   color: color-mix(in srgb, var(--am-text) 88%, transparent);
-  white-space: pre-line;
 }
 
 /* Справка хвостом описания сидит у низа панели, где бы ни кончился текст. */
@@ -706,22 +705,35 @@
     width: auto;
   }
 
+  /* Строка несёт радиус панели, а не капсулы: при 999px скругление равно
+     половине высоты, и постер внутри читался прямоугольником в полукруге.
+     14 снаружи минус 5 отступа дают ровно 10 внутри — радиус постера,
+     и кривые сходятся. */
   .am-board--fran-long .am-part__hit,
   .am-board--fran-short .am-part__hit {
     flex-direction: row;
     gap: 10px;
     align-items: center;
     min-height: var(--am-touch);
-    padding: 4px 8px;
-    border-radius: var(--am-r-cap);
+    padding: 5px 10px;
+    border-radius: var(--am-r-m);
+    transition:
+      background-color var(--am-fast) var(--am-ease),
+      box-shadow var(--am-fast) var(--am-ease);
   }
 
   .am-board--fran-long .am-part__art,
   .am-board--fran-short .am-part__art {
     flex: none;
-    width: 34px;
+    width: 32px;
     margin-bottom: 0;
     border-radius: var(--am-r-s);
+  }
+
+  /* Заглушка без постера: 26 пикселей буквы в 32 пикселя квадратика не влезали. */
+  .am-board--fran-long .am-part__art--empty,
+  .am-board--fran-short .am-part__art--empty {
+    font-size: 13px;
   }
 
   /* На строке подъём постера не нужен: ховерит вся строка. */
@@ -746,15 +758,18 @@
     background: none;
   }
 
-  /* Текущая строка: акцентная кромка слева вдобавок к фону. */
+  /* Текущая строка: акцентная подложка и тонкая кромка по всему контуру.
+     Полоса inset 2px 0 0 слева обрезалась скруглением в огрызок, а рамка
+     сдвинула бы соседние строки на пиксель. */
   .am-board--fran-long .am-part__hit--here,
   .am-board--fran-short .am-part__hit--here {
     background: rgb(var(--am-accent-rgb) / 0.1);
-    box-shadow: inset 2px 0 0 var(--am-accent);
+    box-shadow: inset 0 0 0 1px rgb(var(--am-accent-rgb) / 0.34);
   }
 
   .am-board--fran-long .am-part__hit--here .am-part__art,
   .am-board--fran-short .am-part__hit--here .am-part__art {
+    border-color: rgb(var(--am-accent-rgb) / 0.6);
     box-shadow: none;
   }
 
@@ -781,6 +796,28 @@
   .am-board--fran-short .am-part__here {
     flex: none;
     margin-left: auto;
+  }
+
+  /* Метка справа — пилюля: голый акцентный текст сливался с названием
+     в той же строке, а подложка держит его как отдельный знак. */
+  .am-board--fran-long .am-part__here,
+  .am-board--fran-short .am-part__here {
+    padding: 3px 9px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--am-accent);
+    background: rgb(var(--am-accent-rgb) / 0.16);
+    border-radius: var(--am-r-cap);
+  }
+
+  .am-board--fran-long .am-part__status,
+  .am-board--fran-short .am-part__status {
+    padding: 3px 9px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--am-dim);
+    background: var(--am-fill-2);
+    border-radius: var(--am-r-cap);
   }
 }
 
