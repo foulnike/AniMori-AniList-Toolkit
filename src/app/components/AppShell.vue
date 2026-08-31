@@ -11,6 +11,8 @@ import { APPEARANCES, appearance, setAppearance } from '../appearance'
 import { currentRoute, goBack, navigate } from '../router'
 import { MENU, SCREEN_TITLES } from '../router/routes'
 
+import AppMark from './AppMark.vue'
+
 const version = __ANIMORI_VERSION__
 
 const active = computed(() => currentRoute.value.name)
@@ -36,18 +38,9 @@ function onReload(): void {
   <div class="am-shell">
     <aside class="am-side">
       <div class="am-side__brand">
-        <svg class="am-side__logo" viewBox="0 0 32 32" role="img" aria-label="AniMori">
-          <defs>
-            <linearGradient id="am-logo-grad" x1="0" y1="0" x2="1" y2="1">
-              <stop class="am-side__stop-a" offset="0" />
-              <stop class="am-side__stop-b" offset="1" />
-            </linearGradient>
-          </defs>
-
-          <rect width="32" height="32" rx="11" fill="url(#am-logo-grad)" />
-          <path class="am-side__cut" d="M16 5.5 22 15.5 10 15.5Z" />
-          <path class="am-side__cut" d="M16 11.5 25.5 25 6.5 25Z" />
-        </svg>
+        <!-- Знак приложения отдельным компонентом: три темы ему нужны всегда,
+             и держать их в разметке рельса было не место. -->
+        <AppMark class="am-side__logo" />
 
         <span class="am-side__name">AniMori</span>
       </div>
@@ -141,6 +134,7 @@ function onReload(): void {
   padding: 2px 8px 6px;
 }
 
+/* Здесь только размер и ореол: сам знак и его темы живут в AppMark.vue. */
 .am-side__logo {
   flex: none;
   width: 34px;
@@ -149,18 +143,10 @@ function onReload(): void {
   box-shadow: 0 8px 22px rgb(var(--am-accent-rgb) / 0.35);
 }
 
-.am-side__stop-a {
-  stop-color: var(--am-accent);
-}
-
-.am-side__stop-b {
-  stop-color: var(--am-accent-2);
-}
-
-/* Вырез знака красится завесой, а не фоном окна: на светлой теме
-   фон совпал бы с градиентом и знак исчез. */
-.am-side__cut {
-  fill: var(--am-veil);
+/* На AMOLED ореол убирается: знак там сам тёмный, и свечение вокруг него
+   на чистом чёрном читается грязным пятном. */
+:global([data-am-skin='amoled']) .am-side__logo {
+  box-shadow: none;
 }
 
 .am-side__name {
