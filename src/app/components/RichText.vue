@@ -17,7 +17,7 @@ const props = defineProps<{
   blocks?: RichBlock[]
 }>()
 
-/** Внутренний переход состоялся: окошку человека пора закрыться. */
+/** Переход увёл на другой экран: окошку человека пора закрыться. */
 const emit = defineEmits<{ (e: 'inside'): void }>()
 
 /** Раскрытые спойлеры этого уровня: ключ — место блока в списке. */
@@ -47,8 +47,13 @@ function toggle(at: number): void {
   open.value = next
 }
 
+/**
+ * Идёт по ссылке из описания. Окошко человека закрывается только на переходе
+ * к тайтлу: ссылка на другого человека тоже внутренняя, но после неё окошко
+ * уже показывает нового человека, и закрывать его нечего.
+ */
 async function follow(aim: RichAim): Promise<void> {
-  if (await followRichAim(aim)) emit('inside')
+  if ((await followRichAim(aim)) === 'media') emit('inside')
 }
 </script>
 
