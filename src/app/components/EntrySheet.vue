@@ -269,7 +269,12 @@ onBeforeUnmount(() => {
               :value="startedAt ?? ''"
               @change="onStarted"
             />
-            <button class="am-btn am-btn--ghost" type="button" @click="emit('startedAt', today())">
+            <button
+              class="am-btn am-btn--ghost am-date__now"
+              type="button"
+              title="Поставить сегодняшний день"
+              @click="emit('startedAt', today())"
+            >
               Сегодня
             </button>
           </div>
@@ -285,8 +290,9 @@ onBeforeUnmount(() => {
               @change="onCompleted"
             />
             <button
-              class="am-btn am-btn--ghost"
+              class="am-btn am-btn--ghost am-date__now"
               type="button"
+              title="Поставить сегодняшний день"
               @click="emit('completedAt', today())"
             >
               Сегодня
@@ -333,25 +339,44 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(4, 7, 12, 0.68);
-  backdrop-filter: blur(6px);
+  padding: clamp(12px, 3vw, 40px);
+  background: var(--am-veil);
+  backdrop-filter: blur(8px);
+  animation: am-veil-in var(--am-mid) var(--am-ease-soft) both;
 }
 
-/* Окно шире прежнего: поля встают в два столбца, а не в длинный свиток. */
+/* Стеклянная коробка тремя этажами: шапка и подвал стоят,
+   прокручивается только середина — иначе кнопка «Готово» уезжала вниз. */
 .am-sheet__box {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
   width: 100%;
-  max-width: 860px;
-  max-height: 90vh;
-  overflow-y: auto;
-  padding: 26px;
-  background: linear-gradient(180deg, var(--am-panel-2), var(--am-panel));
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-l);
-  box-shadow: var(--am-sh-2);
+  max-width: 920px;
+  max-height: min(90vh, 940px);
+  padding: clamp(18px, 2.2vw, 28px);
+  overflow: hidden;
+  background: linear-gradient(165deg, var(--am-glass-2), var(--am-glass));
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-xl);
+  box-shadow:
+    var(--am-sh-2),
+    inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.5);
+  animation: am-sheet-in var(--am-mid) var(--am-ease) both;
+}
+
+@keyframes am-veil-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes am-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
 }
 
 .am-sheet__top {
@@ -368,28 +393,29 @@ onBeforeUnmount(() => {
 }
 
 .am-sheet__kicker {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: var(--am-accent);
   text-transform: uppercase;
 }
 
 .am-sheet__name {
   margin: 0;
-  font-size: 20px;
-  font-weight: 650;
-  line-height: 1.25;
+  font-size: clamp(18px, 1.8vw, 24px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
 }
 
-/* Круглая цель, но не мелкая: на телевизоре мелкое просто не поймать. */
+/* Цель нажатия в 44 пикселя: мелкое на телевизоре просто не поймать.
+   Форма плывёт к окружности под курсором. */
 .am-sheet__close {
-  display: inline-flex;
+  display: grid;
   flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
+  place-items: center;
+  width: var(--am-touch);
+  height: var(--am-touch);
   margin-left: auto;
   padding: 0;
   font: inherit;
@@ -397,21 +423,28 @@ onBeforeUnmount(() => {
   line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-drop);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
 }
 
 .am-sheet__close:hover {
   color: var(--am-text);
-  background: var(--am-hover);
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
 }
 
 /* Сетка полей: на широком окне два столбца, на узком один. */
 .am-sheet__body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
+  padding-right: 4px;
+  overflow-y: auto;
 }
 
 /* Закладки, оценка и комментарий занимают всю ширину: рядов там много. */
@@ -424,17 +457,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.02);
+  padding: 15px 16px;
+  background: var(--am-fill-1);
   border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
+  border-radius: var(--am-r-l);
 }
 
 .am-field__name {
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--am-dim);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--am-faint);
   text-transform: uppercase;
 }
 
@@ -454,20 +487,20 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
+  min-height: var(--am-touch);
   padding: 0 18px;
   font: inherit;
   font-size: 14px;
   line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: 999px;
+  background: var(--am-fill-2);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
   transition:
-    color 0.12s ease,
-    background 0.12s ease,
-    border-color 0.12s ease;
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease);
 }
 
 .am-pick:hover {
@@ -476,35 +509,43 @@ onBeforeUnmount(() => {
 }
 
 .am-pick--on {
-  color: #071018;
+  color: var(--am-bg);
   background: linear-gradient(135deg, var(--am-accent), var(--am-accent-2));
   border-color: transparent;
+  box-shadow: var(--am-sh-glow);
 }
 
-/* Балл красится своим тоном шкалы: правила ниже перебивают общую заливку. */
+/* Балл красится своим тоном шкалы: правила ниже перебивают общую заливку.
+   Тон считается в скрипте, поэтому подпись живёт в своём --am-on-mark. */
 .am-pick--num {
+  --am-on-mark: #f7fbff;
+
   min-width: 52px;
-  font-weight: 650;
-  color: rgba(255, 255, 255, 0.92);
+  font-weight: 700;
+  color: var(--am-on-mark);
   background: linear-gradient(180deg, var(--am-mark), var(--am-mark-deep));
-  border-color: rgba(255, 255, 255, 0.1);
-  opacity: 0.6;
+  border-color: var(--am-line-soft);
+  border-radius: var(--am-r-m);
+  opacity: 0.58;
   transition:
-    opacity 0.12s ease,
-    box-shadow 0.12s ease;
+    opacity var(--am-fast) var(--am-ease),
+    box-shadow var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
 }
 
 .am-pick--num:hover {
-  color: #fff;
+  color: var(--am-on-mark);
   background: linear-gradient(180deg, var(--am-mark), var(--am-mark-deep));
-  opacity: 0.85;
+  border-radius: var(--am-r-drop);
+  opacity: 0.88;
 }
 
 .am-pick--num.am-pick--on {
-  color: #fff;
+  color: var(--am-on-mark);
   background: linear-gradient(180deg, var(--am-mark), var(--am-mark-deep));
-  border-color: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16);
+  border-color: var(--am-edge);
+  border-radius: var(--am-r-drop);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--am-mark) 45%, transparent);
   opacity: 1;
 }
 
@@ -515,32 +556,37 @@ onBeforeUnmount(() => {
 }
 
 .am-step {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
+  display: grid;
+  place-items: center;
+  width: var(--am-touch);
+  height: var(--am-touch);
   padding: 0;
   font: inherit;
   font-size: 20px;
   line-height: 1;
   color: var(--am-text);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-s);
+  background: var(--am-fill-2);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-m);
+  transition:
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
 }
 
 .am-step:hover {
   background: var(--am-hover);
-  border-color: var(--am-accent);
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
+  border-radius: var(--am-r-cap);
 }
 
 .am-step__value {
   flex: 1;
   font-size: 17px;
-  font-weight: 650;
+  font-weight: 700;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .am-date-row {
@@ -552,16 +598,20 @@ onBeforeUnmount(() => {
 /* Поле даты одето под панель. Сам выпадающий календарь рисует движок. */
 .am-date {
   flex: 1;
-  min-height: 44px;
+  min-height: var(--am-touch);
   padding: 9px 14px;
   color: var(--am-text);
-  background: var(--am-panel-2);
+  background: var(--am-fill-2);
   border-radius: var(--am-r-m);
 }
 
 .am-date:hover {
   background: var(--am-hover);
-  border-color: var(--am-accent);
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
+}
+
+.am-date__now {
+  flex: 0 0 auto;
 }
 
 .am-date::-webkit-datetime-edit {
@@ -577,18 +627,23 @@ onBeforeUnmount(() => {
   color: var(--am-faint);
 }
 
-/* Значок вызова календаря светлый: родной чёрный на тёмном поле не виден. */
 .am-date::-webkit-calendar-picker-indicator {
   padding: 4px;
   cursor: pointer;
   border-radius: var(--am-r-s);
-  filter: invert(1) brightness(1.4);
   opacity: 0.55;
 }
 
 .am-date::-webkit-calendar-picker-indicator:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--am-fill-3);
   opacity: 1;
+}
+
+/* Значок календаря родной и чёрный: на тёмных темах его приходится
+   выворачивать, на светлой же инверсия делала его белым на белом. */
+html[data-am-skin='dark'] .am-date::-webkit-calendar-picker-indicator,
+html[data-am-skin='amoled'] .am-date::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.4);
 }
 
 /* Заметка не круглая: скругление полей ввода на большом поле смотрится нелепо. */
@@ -597,6 +652,7 @@ onBeforeUnmount(() => {
   padding: 12px 14px;
   font: inherit;
   line-height: 1.5;
+  background: var(--am-fill-2);
   border-radius: var(--am-r-m);
   resize: vertical;
 }
@@ -611,6 +667,13 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .am-sheet__body {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-sheet,
+  .am-sheet__box {
+    animation: none;
   }
 }
 </style>
