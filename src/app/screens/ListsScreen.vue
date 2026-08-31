@@ -1,22 +1,26 @@
 <script setup lang="ts">
 // Пункт 3.5: свой список одним экраном. Данные, обновление и снимок лежат
 // в коллекции, сборка строки с порядком показа и доборами — в lists-row.
-// Здесь остаётся отбор: закладка, слово, потолок показа и перенос с AniList.
+// Здесь остаётся отбор: закладка, слово, потолок показа и вид показа.
+//
+// Переноса списка с AniList на экране нет: он заменяет список целиком
+// и живёт в настройках, рядом со входом и очисткой склада.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { initCollection, refreshFromServer } from '@/core/collection'
+import { initCollection } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
 import { startEditSender } from '@/core/edit-sender'
 import { searchOwnList } from '@/core/media-search'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
 
+import MediaRow from '../components/MediaRow.vue'
 import MediaTile from '../components/MediaTile.vue'
 import PickBox from '../components/PickBox.vue'
 import { statusList } from '../labels'
 import { navigate } from '../router'
 
-import { keptSort, keptStatus, keptWord, type SortName } from './lists-keep'
+import { keptSort, keptStatus, keptView, keptWord, type SortName, type ViewName } from './lists-keep'
 import { sortEntries, toRow, useRowWarm, type Row } from './lists-row'
 
 /**
@@ -35,6 +39,9 @@ const TYPING_PAUSE_MS = 250
 /** Сколько плиток-заглушек показать на время подъёма списка. */
 const HOLD_COUNT = 18
 
+/** Столько же заглушек строками: строк на экран влезает больше, чем плиток. */
+const HOLD_LINES = 12
+
 /** За сколько до конца списка заказывать добор: раньше видного края. */
 const TAIL_MARGIN = '600px'
 
@@ -47,7 +54,17 @@ const SORT_TABS: ReadonlyArray<{ key: SortName; title: string }> = [
   { key: 'nameDown', title: 'Название Я—А' },
 ]
 
-/** Идёт ли работа со списком: подъём снимка или ответ сервера. */
+/**
+ * Виды показа. Плитки хороши на десятках записей, а в закладке на тысячу
+ * строка видна целиком и читается быстрее постера.
+ */
+const VIEW_TABS: ReadonlyArray<{ key: ViewName; title: string; icon: string }> = [
+  { key: 'tiles', title: 'Большие постеры', icon: '▦' },
+  { key: 'slim', title: 'Компактные строки', icon: '≡' },
+  { key: 'wide', title: 'Строки с постером', icon: '▤' },
+]
+
+/** Идёт ли работа со списком: подъём снимка с диска. */
 const busy = ref(true)
 
 /** Идёт ли отбор по слову. На кириллице перед отбором поднимается склад. */
@@ -55,22 +72,11 @@ const searchBusy = ref(false)
 
 const trouble = ref('')
 
-/**
- * Исход переноса словами. Перенос бывает раз в месяц, и человек должен
- * увидеть, что он случился: молча меняется слишком много.
- */
-const note = ref('')
-
-/**
- * Спрошено ли подтверждение переноса. Замена списка целиком не делается
- * одним промахом мыши, поэтому кнопка сначала спрашивает.
- */
-const asking = ref(false)
-
-// Закладка, порядок и слово берутся из памяти между показами:
+// Закладка, порядок, вид и слово берутся из памяти между показами:
 // иначе возврат с карточки открывал чужую закладку.
 const activeStatus = keptStatus
 const sortKey = keptSort
+const view = keptView
 const word = keptWord
 
 const rows = ref<Row[]>([])
@@ -238,47 +244,19 @@ function pickSort(key: string): void {
   refill()
 }
 
+/**
+ * Смена вида показа. Потолок показа не сбрасывается: записи те же самые,
+ * меняется только их одежда, и терять досмотренный хвост незачем.
+ */
+function pickView(key: ViewName): void {
+  if (view.value === key) return
+
+  view.value = key
+}
+
 /** Переход на карточку. Номер идёт строкой: в адресе окна чисел нет. */
 function open(mediaId: number): void {
   navigate('media', { id: String(mediaId) })
-}
-
-/**
- * Переносит список с AniList с заменой местного. Зовётся только из
- * подтверждения: сам по себе экран в сеть за списком не ходит.
- *
- * Отказ показанные данные не стирает: у нас остаётся прежний снимок.
- */
-async function pull(): Promise<void> {
-  busy.value = true
-  trouble.value = ''
-  note.value = ''
-
-  try {
-    const count = await refreshFromServer()
-    refill()
-    note.value = `Список перенесён с AniList: записей ${count}.`
-  } catch (e) {
-    trouble.value = describe(e)
-  } finally {
-    busy.value = false
-  }
-}
-
-/** Нажатие на кнопку переноса: сначала вопрос, действие потом. */
-function onAsk(): void {
-  note.value = ''
-  trouble.value = ''
-  asking.value = true
-}
-
-function onCancel(): void {
-  asking.value = false
-}
-
-function onConfirm(): void {
-  asking.value = false
-  void pull()
 }
 
 onMounted(() => {
@@ -298,7 +276,7 @@ onMounted(() => {
   void (async () => {
     try {
       // Только снимок с диска: в сеть за списком экран сам не ходит.
-      // Перенос заменяет список целиком, и решать это человеку, а не открытию экрана.
+      // Перенос заменяет список целиком, и решать это человеку в настройках.
       await initCollection()
       refill()
 
@@ -359,29 +337,20 @@ onBeforeUnmount(() => {
         @update:model-value="pickSort"
       />
 
-      <button
-        class="am-pull"
-        :class="{ 'am-pull--busy': busy }"
-        type="button"
-        :disabled="busy"
-        title="Забрать список с AniList и заменить им местный"
-        aria-label="Перенести список с AniList"
-        @click="onAsk"
-      >
-        <span aria-hidden="true">⟳</span>
-      </button>
-    </div>
-
-    <!-- Вопрос перед заменой: видно, что именно случится с местными записями. -->
-    <div v-if="asking" class="am-ask">
-      <p class="am-ask__text">
-        Список с AniList заменит местный целиком. Записи, добавленные здесь без входа, будут
-        потеряны, если их нет на AniList.
-      </p>
-
-      <div class="am-ask__acts">
-        <button class="am-btn" type="button" @click="onConfirm">Перенести и заменить</button>
-        <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+      <div class="am-seg am-look" role="group" aria-label="Вид показа">
+        <button
+          v-for="tab in VIEW_TABS"
+          :key="tab.key"
+          class="am-seg__btn am-look__btn"
+          :class="{ 'am-seg__btn--on': tab.key === view }"
+          type="button"
+          :title="tab.title"
+          :aria-label="tab.title"
+          :aria-pressed="tab.key === view"
+          @click="pickView(tab.key)"
+        >
+          <span aria-hidden="true">{{ tab.icon }}</span>
+        </button>
       </div>
     </div>
 
@@ -400,19 +369,28 @@ onBeforeUnmount(() => {
     </div>
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
-    <p v-if="note" class="am-done">{{ note }}</p>
 
-    <ul v-if="busy && rows.length === 0" class="am-grid">
-      <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
-        <span class="am-skeleton am-hold__art" />
-        <span class="am-skeleton am-hold__line" />
-      </li>
-    </ul>
+    <!-- Заглушки под тот вид, который человек выбрал: сетка плиток на месте
+         строк дёргала бы высоту экрана в момент подъёма списка. -->
+    <template v-if="busy && rows.length === 0">
+      <ul v-if="view === 'tiles'" class="am-grid">
+        <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
+          <span class="am-skeleton am-hold__art" />
+          <span class="am-skeleton am-hold__line" />
+        </li>
+      </ul>
+
+      <ul v-else class="am-lines" :class="{ 'am-lines--art': view === 'wide' }">
+        <li v-for="n in HOLD_LINES" :key="n" class="am-lines__hold">
+          <span class="am-skeleton" />
+        </li>
+      </ul>
+    </template>
 
     <div v-else-if="total === 0" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⊘</span>
       <span>Записей пока нет.</span>
-      <span>Добавьте тайтл из поиска или перенесите список с AniList.</span>
+      <span>Добавьте тайтл из поиска или перенесите список с AniList в настройках.</span>
     </div>
 
     <div v-else-if="searchBusy && rows.length === 0" class="am-empty">
@@ -430,7 +408,7 @@ onBeforeUnmount(() => {
       <span>В этой закладке записей нет.</span>
     </div>
 
-    <ul v-else class="am-grid">
+    <ul v-else-if="view === 'tiles'" class="am-grid">
       <MediaTile
         v-for="row in rows"
         :key="row.mediaId"
@@ -445,6 +423,25 @@ onBeforeUnmount(() => {
         :own="row.own"
         :done="row.done"
         :adult="row.adult"
+        @open="open(row.mediaId)"
+      />
+    </ul>
+
+    <ul v-else class="am-lines" :class="{ 'am-lines--art': view === 'wide' }">
+      <MediaRow
+        v-for="row in rows"
+        :key="row.mediaId"
+        :title="row.title"
+        :facts="row.facts"
+        :cover="row.cover"
+        :color="row.color"
+        :mark="row.mark"
+        :repeat="row.repeat"
+        :ongoing="row.ongoing"
+        :own="row.own"
+        :done="row.done"
+        :adult="row.adult"
+        :art="view === 'wide'"
         @open="open(row.mediaId)"
       />
     </ul>
@@ -466,8 +463,15 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* Отбор одной стеклянной полосой: три капсулы в ряд без общего фона
-   читались как три несвязанные панели. */
+   читались как три несвязанные панели.
+
+   position и z-index здесь не украшение: backdrop-filter создаёт свой
+   контекст наложения, и выпадающий список порядка оставался внутри него —
+   его z-index соревновался только с соседями по полосе, а плитки сетки
+   идут дальше по разметке и накрывали ролл-аут. */
 .am-lists__top {
+  position: relative;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -558,45 +562,21 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
-/* Перенос с AniList — значок: действие редкое, а четыре слова в кнопке
-   занимали половину ряда. Смысл объясняет вопрос перед заменой. */
-.am-pull {
-  display: grid;
+/* Вид показа — три значка в одной капсуле. Подписи ушли в подсказку:
+   «Большие постеры» словами занимали половину полосы отбора. */
+.am-look {
   flex: 0 0 auto;
+}
+
+/* Знак ставится сеткой в кнопку известной ширины: на padding он гулял
+   по кнопке от глифа к глифу — у ▦ и ≡ разная ширина. */
+.am-look__btn {
+  display: grid;
   place-items: center;
-  width: var(--am-ctl);
-  height: var(--am-ctl);
-  font-size: 16px;
-  color: var(--am-dim);
-  cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-drop);
-  transition:
-    color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease),
-    background-color var(--am-fast) var(--am-ease);
-}
-
-.am-pull:hover:not(:disabled) {
-  color: var(--am-text);
-  background: var(--am-fill-2);
-  border-radius: var(--am-r-cap);
-}
-
-.am-pull:disabled {
-  cursor: default;
-}
-
-/* Крутящаяся стрелка вместо слова «Переносим…»: ряд не едет по ширине. */
-.am-pull--busy span {
-  animation: am-spin 1.1s linear infinite;
-}
-
-@keyframes am-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  width: 36px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
 }
 
 /* Закладки лентой: шесть чипов с числами на узком окне раскладывались
@@ -618,40 +598,31 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
 }
 
-/* Вопрос перед заменой списка: заметнее обычной панели, но без крика.
-   Граница считается от --am-warn: хардкод на светлой теме пропадал. */
-.am-ask {
+/* Список строками: свой столбец с малым шагом, сетка плиток здесь ни при чём. */
+.am-lines {
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  background: var(--am-glass);
-  border: 1px solid color-mix(in srgb, var(--am-warn) 42%, transparent);
-  border-radius: var(--am-r-leaf);
-  box-shadow: inset 0 1px 0 var(--am-edge);
-  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
-}
-
-.am-ask__text {
-  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 6px;
   margin: 0;
-  font-size: 13px;
-  color: var(--am-dim);
+  padding: 0;
+  list-style: none;
 }
 
-.am-ask__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+.am-lines--art {
+  gap: 8px;
 }
 
-/* Исход переноса: тем же тоном, каким настройки отвечают о своих действиях. */
-.am-done {
-  margin: 0;
-  font-size: 13px;
-  color: var(--am-good);
+/* Заглушка строки повторяет её высоту: иначе экран подпрыгивал в момент,
+   когда заглушки сменялись живыми строками. */
+.am-lines__hold .am-skeleton {
+  display: block;
+  height: 46px;
+  border-radius: var(--am-r-cap);
+}
+
+.am-lines--art .am-lines__hold .am-skeleton {
+  height: 74px;
+  border-radius: var(--am-r-m);
 }
 
 /* Конец списка: место под кнопку добора и сама метка для смотрителя. */
@@ -687,11 +658,5 @@ onBeforeUnmount(() => {
   width: 72%;
   height: 12px;
   border-radius: var(--am-r-s);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .am-pull--busy span {
-    animation: none;
-  }
 }
 </style>
