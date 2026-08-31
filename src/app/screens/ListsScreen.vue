@@ -316,16 +316,28 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="am-page">
-    <div class="am-bar">
-      <label class="am-search am-search--wide">
-        <span class="am-search__mark" aria-hidden="true">⌕</span>
+    <div class="am-lists__top">
+      <label class="am-find">
+        <span class="am-find__mark" aria-hidden="true">⌕</span>
         <input
           v-model="word"
-          class="am-input"
+          class="am-find__field"
           type="search"
           placeholder="Поиск по своему списку"
           @input="onType"
         />
+        <span v-if="searching" class="am-find__num" title="Найдено в своём списке">{{
+          picked
+        }}</span>
+        <button
+          v-if="searching"
+          class="am-find__wipe"
+          type="button"
+          title="Сбросить поиск"
+          @click="onClear"
+        >
+          ×
+        </button>
       </label>
 
       <label class="am-sort">
@@ -337,23 +349,21 @@ onBeforeUnmount(() => {
         </select>
       </label>
 
-      <button v-if="searching" class="am-btn am-btn--ghost" type="button" @click="onClear">
-        Сбросить
-      </button>
-
       <button
-        class="am-btn am-btn--ghost"
+        class="am-pull"
+        :class="{ 'am-pull--busy': busy }"
         type="button"
         :disabled="busy"
         title="Забрать список с AniList и заменить им местный"
+        aria-label="Перенести список с AniList"
         @click="onAsk"
       >
-        {{ busy ? 'Переносим…' : 'Перенести с AniList' }}
+        <span aria-hidden="true">⟳</span>
       </button>
     </div>
 
     <!-- Вопрос перед заменой: видно, что именно случится с местными записями. -->
-    <div v-if="asking" class="am-panel am-ask">
+    <div v-if="asking" class="am-ask">
       <p class="am-ask__text">
         Список с AniList заменит местный целиком. Записи, добавленные здесь без входа, будут
         потеряны, если их нет на AniList.
@@ -365,7 +375,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="!searching" class="am-bar">
+    <div v-if="!searching" class="am-lists__tabs">
       <button
         v-for="tab in statusTabs"
         :key="tab.key"
@@ -436,21 +446,102 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <p class="am-meta">
-      Всего {{ total }} · показано {{ rows.length }} из {{ shown }}
-      <template v-if="looksBusy"> · обложки грузятся…</template>
-      <template v-if="titlesBusy"> · названия грузятся…</template>
+    <p class="am-lists__foot">
+      {{ rows.length }} из {{ shown }} · всего {{ total }}
+      <template v-if="looksBusy"> · обложки…</template>
+      <template v-if="titlesBusy"> · названия…</template>
     </p>
   </section>
 </template>
 
 <style scoped>
-/* Поиск занимает всё свободное место ряда вместо распорки между частями. */
-.am-search--wide {
-  flex: 1 1 320px;
+/* Отбор одной стеклянной полосой: три капсулы в ряд без общего фона
+   читались как три несвязанные панели. */
+.am-lists__top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-xl);
+  box-shadow: inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
 }
 
-/* Выбор порядка выглядит такой же пилюлей, как кнопки и поле рядом. */
+/* Поле поиска занимает всё свободное место ряда. */
+.am-find {
+  position: relative;
+  display: flex;
+  flex: 1 1 320px;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--am-ctl);
+  padding: 0 12px;
+  background: var(--am-fill-1);
+  border: 1px solid transparent;
+  border-radius: var(--am-r-cap);
+  transition:
+    border-color var(--am-fast) var(--am-ease),
+    box-shadow var(--am-mid) var(--am-ease);
+}
+
+.am-find:focus-within {
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
+  box-shadow: var(--am-sh-glow);
+}
+
+.am-find__mark {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: var(--am-faint);
+}
+
+.am-find__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--am-text);
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.am-find__field::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* Ответ поиска внутри поля: глаз уже смотрит сюда. */
+.am-find__num {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--am-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.am-find__wipe {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-2);
+  border: 0;
+  border-radius: var(--am-r-cap);
+  transition: color var(--am-fast) var(--am-ease);
+}
+
+.am-find__wipe:hover {
+  color: var(--am-text);
+}
+
+/* Выбор порядка выглядит такой же пилюлей, как поле рядом. */
 .am-sort {
   position: relative;
   display: inline-flex;
@@ -469,17 +560,83 @@ onBeforeUnmount(() => {
 /* Общий вид выбора живёт в .am-pick, здесь только место под значок. */
 .am-sort__pick {
   padding-left: 32px;
+  border-radius: var(--am-r-cap);
 }
 
-/* Вопрос перед заменой списка: заметнее обычной панели, но без крика. */
+/* Перенос с AniList — значок: действие редкое, а четыре слова в кнопке
+   занимали половину ряда. Смысл объясняет вопрос перед заменой. */
+.am-pull {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: var(--am-ctl);
+  height: var(--am-ctl);
+  font-size: 16px;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-drop);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease);
+}
+
+.am-pull:hover:not(:disabled) {
+  color: var(--am-text);
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
+}
+
+.am-pull:disabled {
+  cursor: default;
+}
+
+/* Крутящаяся стрелка вместо слова «Переносим…»: ряд не едет по ширине. */
+.am-pull--busy span {
+  animation: am-spin 1.1s linear infinite;
+}
+
+@keyframes am-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Закладки лентой: шесть чипов с числами на узком окне раскладывались
+   в три этажа и уводили сетку за границу первого экрана. */
+.am-lists__tabs {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, transparent, #000 18px, #000 96%, transparent);
+}
+
+.am-lists__tabs::-webkit-scrollbar {
+  height: 0;
+}
+
+.am-lists__tabs .am-chip {
+  flex: 0 0 auto;
+}
+
+/* Вопрос перед заменой списка: заметнее обычной панели, но без крика.
+   Граница считается от --am-warn: хардкод на светлой теме пропадал. */
 .am-ask {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
-  border-color: rgba(255, 190, 90, 0.35);
+  padding: 14px 18px;
+  background: var(--am-glass);
+  border: 1px solid color-mix(in srgb, var(--am-warn) 42%, transparent);
+  border-radius: var(--am-r-leaf);
+  box-shadow: inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
 }
 
 .am-ask__text {
@@ -509,6 +666,16 @@ onBeforeUnmount(() => {
   min-height: 8px;
 }
 
+/* Счётчики внизу — служебная строка, а не часть показа. */
+.am-lists__foot {
+  margin: 0;
+  font-size: 12px;
+  color: var(--am-faint);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Заглушка — элемент сетки, а общий .am-hold в слое тем сам сетка. */
 .am-hold {
   display: flex;
   flex-direction: column;
@@ -525,5 +692,11 @@ onBeforeUnmount(() => {
   width: 72%;
   height: 12px;
   border-radius: var(--am-r-s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-pull--busy span {
+    animation: none;
+  }
 }
 </style>
