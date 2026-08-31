@@ -3,6 +3,7 @@
 
 import { createApp } from 'vue'
 import App from './App.vue'
+import { startAppearance } from './appearance'
 import { initCollection } from '@/core/collection'
 import { initDatasetNames, updateDatasetNamesInBackground } from '@/core/dataset-names'
 import { startEditSender } from '@/core/edit-sender'
@@ -24,7 +25,7 @@ if (!root) throw new Error('AniMori: корень #app не найден в inde
  * и окно всё равно открывается.
  *
  * Отправщик очереди правок запускается после монтирования, а не до него:
- * чтение снимка задержало бы первую отрисовку, а очередь минуту-другую
+ * чтение снимка задержало бы первую отрисовку, а очередь минуту-две
  * подождёт. Раньше его не звали вовсе, и фоновый разбор с повтором при
  * возврате сети просто не жил: уходила только правка, сделанная руками
  * при живом сервере.
@@ -35,6 +36,10 @@ if (!root) throw new Error('AniMori: корень #app не найден в inde
  */
 async function start(): Promise<void> {
   await loadSettings()
+
+  // Тема ставится до первой отрисовки и сразу после настроек: светлое окно,
+  // темнеющее на глазах, читается как поломка, а не как выбор оформления.
+  startAppearance()
 
   // Перехватчики ставятся до первой отрисовки: сбой монтирования — тоже
   // событие для журнала. Раньше настроек нельзя: тумблер журнала не прочтён.
