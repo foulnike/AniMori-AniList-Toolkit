@@ -1,10 +1,14 @@
 <script setup lang="ts">
 // Пункт 3.2: корень приложения. Здесь только выбор экрана по адресу
 // и подписка на его смену; вся разметка рамки — в AppShell.
+//
+// Здесь же живёт окошко человека: его открывают и состав тайтла, и ссылка
+// из любого описания, так что привязывать его к одному экрану нельзя.
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, type Component } from 'vue'
 
 import { refreshAuth, watchAuth } from './auth/session'
 import AppShell from './components/AppShell.vue'
+import { closePerson, shownPerson } from './person-layer'
 import { currentRoute, startRouter } from './router'
 import type { ScreenName } from './router/routes'
 import './styles/theme.css'
@@ -20,6 +24,9 @@ const SCREENS: Record<ScreenName, Component> = {
   settings: defineAsyncComponent(() => import('./screens/SettingsScreen.vue')),
   log: defineAsyncComponent(() => import('./screens/LogScreen.vue')),
 }
+
+// Окошко грузится по надобности: большая часть запусков обходится без него.
+const PersonSheet = defineAsyncComponent(() => import('./components/PersonSheet.vue'))
 
 const screen = computed<Component>(() => SCREENS[currentRoute.value.name])
 
@@ -61,4 +68,8 @@ onBeforeUnmount(() => {
   <AppShell>
     <component :is="screen" />
   </AppShell>
+
+  <!-- Рядом с рамкой, а не внутри неё: блюр рельса создаёт свой контекст
+       наложения, и окошко внутри него прижалось бы к содержимому. -->
+  <PersonSheet v-if="shownPerson" :start="shownPerson" @close="closePerson" />
 </template>
