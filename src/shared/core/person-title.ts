@@ -6,6 +6,11 @@
 // Описание ложится на склад как приехало, с BBcode Шикимори: разбирает его
 // core/rich-text.ts на слое показа. Прежде теги вырезались здесь, и ссылки
 // со спойлерами терялись ещё до кэша — восстанавливать было нечего.
+//
+// Заодно здесь живёт обратный указатель: номер человека у Шикимори -> кто это
+// в наших карточках. Сопоставление всё равно его узнаёт, а ссылкам из описаний
+// нужно ровно обратное направление: человек открытого тайтла разрешается
+// без единого запроса в сеть.
 
 import { CACHE_TIME } from './constants'
 import { dbGet, dbSet } from './db'
@@ -41,8 +46,20 @@ export interface RussianPerson {
   partial?: boolean
 }
 
+/** Человек в наших понятиях: вид карточки и опознанный человек AniList. */
+export interface KnownPerson {
+  kind: PersonKind
+  person: PersonRef
+}
+
 /** Знание этого запуска. `null` значит «спрашивали, перевода нет». */
 const memory = new Map<string, RussianPerson | null>()
+
+/**
+ * Обратный указатель: номер у Шикимори -> кто это у нас. Заполняется попутно:
+ * любое сопоставление и так узнаёт номер, а терять его жалко.
+ */
+const byShiki = new Map<number, KnownPerson>()
 
 /** Чьи ключи уже искали на складе. */
 const asked = new Set<string>()
@@ -56,6 +73,18 @@ function memoryKey(kind: PersonKind, personId: number): string {
 
 function cacheKey(kind: PersonKind, personId: number): string {
   return `${KEY_PREFIX[kind]}${personId}`
+}
+
+/**
+ * Кладёт карточку в память и заодно обратный указатель. Отдельной функцией,
+ * а не двумя строками в пяти местах: забытый указатель не ломает ничего
+ * видимого и обнаружился бы не сразу.
+ */
+function remember(kind: PersonKind, person: PersonRef, card: RussianPerson): void {
+  memory.set(memoryKey(kind, person.personId), card)
+  if (typeof card.shikiId === 'number' && card.shikiId > 0) {
+    byShiki.set(card.shikiId, { kind, person })
+  }
 }
 
 /** Читает карточку со склада. Протухшая запись считается отсутствующей. */
@@ -100,7 +129,7 @@ async function loadOne(
 
   const cached = await readCache(kind, person.personId)
   if (cached) {
-    memory.set(key, cached)
+    remember(kind, person, cached)
     return cached
   }
 
@@ -125,7 +154,7 @@ async function loadOne(
     shikiId: found.data.id,
   }
 
-  memory.set(key, card)
+  remember(kind, person, card)
   await writeCache(kind, person.personId, card)
   return card
 }
@@ -182,7 +211,7 @@ export async function prefetchRussianPeople(
 
     const cached = await readCache(entry.kind, entry.person.personId)
     if (cached) {
-      memory.set(key, cached)
+      remember(entry.kind, entry.person, cached)
       continue
     }
 
@@ -222,7 +251,7 @@ export async function prefetchRussianPeople(
       shikiId: best.id,
       partial: true,
     }
-    memory.set(memoryKey(entry.kind, entry.person.personId), card)
+    remember(entry.kind, entry.person, card)
     await writeCache(entry.kind, entry.person.personId, card)
     added++
   }
@@ -257,7 +286,7 @@ export async function getRussianPersonFull(
       description: textOrNull(details.description),
       shikiId: known.shikiId,
     }
-    memory.set(key, full)
+    remember(kind, person, full)
     await writeCache(kind, person.personId, full)
     return full
   }
@@ -267,15 +296,50 @@ export async function getRussianPersonFull(
 
 /**
  * Что уже известно прямо сейчас, без ожидания.
- * Для отрисовки плитки и шапки окошка: нет перевода — показываем ромадзи.
+ * Для отрисовки плитки и шапки окошка: нет перевода — показываем ромаджи.
  */
 export function peekRussianPerson(kind: PersonKind, personId: number): RussianPerson | null {
   return memory.get(memoryKey(kind, personId)) ?? null
 }
 
+/**
+ * Кто это у нас, если известен только номер Шикимори. Быстрый путь для ссылок
+ * из описания: люди открытого тайтла уже сопоставлены, и сеть им не нужна.
+ */
+export function peekPersonByShiki(shikiId: number): KnownPerson | null {
+  return byShiki.get(shikiId) ?? null
+}
+
+/**
+ * Кладёт готовое соответствие, добытое со стороны. Переход по ссылке из описания
+ * всё равно спрашивает у Шикимори и имя, и описание, а второй раз то же самое
+ * спрашивать незачем: окошко откроется с русским именем сразу.
+ *
+ * Полная карточка не подменяется частичной: описание, уже добытое полным
+ * запросом, терять нельзя.
+ */
+export async function rememberRussianPerson(
+  kind: PersonKind,
+  person: PersonRef,
+  card: RussianPerson,
+): Promise<void> {
+  if (card.russian.trim() === '') return
+
+  const known = memory.get(memoryKey(kind, person.personId))
+  if (known && !known.partial && card.partial === true) {
+    // Указатель всё равно полезен: номер Шикимори мог быть ещё неизвестен.
+    remember(kind, person, known)
+    return
+  }
+
+  remember(kind, person, card)
+  await writeCache(kind, person.personId, card)
+}
+
 /** Забывает знание запуска. Склад не трогается: его чистят из настроек. */
 export function forgetRussianPeople(): void {
   memory.clear()
+  byShiki.clear()
   asked.clear()
   pending.clear()
 }
