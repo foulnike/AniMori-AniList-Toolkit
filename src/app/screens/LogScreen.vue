@@ -140,36 +140,36 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="am-page">
-    <div class="am-bar">
+    <div class="am-log__top">
       <h2 class="am-h2">Журнал</h2>
+      <span class="am-log__num" title="Строк на экране">{{ rows.length }}</span>
       <span class="am-bar__gap" />
-      <span class="am-meta">Записей: {{ rows.length }}</span>
-    </div>
-
-    <div class="am-seg am-log__kinds">
-      <button
-        class="am-seg__btn"
-        :class="{ 'am-seg__btn--on': kind === 'all' }"
-        type="button"
-        @click="pick('all')"
-      >
-        Все
-      </button>
-      <button
-        v-for="one in KINDS"
-        :key="one"
-        class="am-seg__btn"
-        :class="{ 'am-seg__btn--on': kind === one }"
-        type="button"
-        @click="pick(one)"
-      >
-        {{ one }}
-      </button>
-    </div>
-
-    <div class="am-log__tools">
       <button class="am-btn am-btn--soft" type="button" @click="onCopy">Скопировать</button>
       <button class="am-btn am-btn--ghost" type="button" @click="onClear">Очистить</button>
+    </div>
+
+    <div class="am-log__kinds">
+      <div class="am-seg">
+        <button
+          class="am-seg__btn"
+          :class="{ 'am-seg__btn--on': kind === 'all' }"
+          type="button"
+          @click="pick('all')"
+        >
+          Все
+        </button>
+        <button
+          v-for="one in KINDS"
+          :key="one"
+          class="am-seg__btn"
+          :class="{ 'am-seg__btn--on': kind === one }"
+          type="button"
+          @click="pick(one)"
+        >
+          {{ one }}
+        </button>
+      </div>
+
       <span v-if="note" class="am-meta">{{ note }}</span>
     </div>
 
@@ -179,9 +179,9 @@ onBeforeUnmount(() => {
     </div>
 
     <ul v-else class="am-log">
-      <li v-for="entry in rows" :key="entry.id" class="am-panel am-log__row">
+      <li v-for="entry in rows" :key="entry.id" class="am-log__row" :data-kind="entry.type">
         <div class="am-log__head">
-          <span class="am-log__kind" :data-kind="entry.type">{{ entry.type }}</span>
+          <span class="am-log__kind">{{ entry.type }}</span>
           <span class="am-log__time">{{ entry.time }}</span>
           <span class="am-log__text">{{ entry.message }}</span>
           <button
@@ -210,34 +210,96 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.am-log__kinds {
-  margin-bottom: 10px;
+/* Шапка, счётчик и две кнопки в одной полосе: три строки подряд
+   съедали первый экран ради трёх коротких подписей. */
+.am-log__top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 
-.am-log__tools {
+.am-log__num {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--am-dim);
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Семь видов в капсуле: на узком окне ряд прокручивается, а не ломается. */
+.am-log__kinds {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+}
+
+.am-log__kinds .am-seg {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.am-log__kinds .am-seg::-webkit-scrollbar {
+  height: 0;
+}
+
+.am-log__kinds .am-seg__btn {
+  flex: 0 0 auto;
 }
 
 .am-log {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* Строка — не панель со стеклом: сто двадцать размытий за кадр
+   видно глазом. Цвет вида записи живёт одним --am-tint. */
 .am-log__row {
-  padding: 8px 10px;
+  --am-tint: var(--am-faint);
+
+  padding: 8px 12px;
+  background: var(--am-fill-1);
+  border-left: 2px solid var(--am-tint);
+  border-radius: 0 var(--am-r-m) var(--am-r-m) 0;
+  transition: background-color var(--am-fast) var(--am-ease);
+}
+
+.am-log__row:hover {
+  background: var(--am-fill-2);
+}
+
+.am-log__row[data-kind='ERROR'] {
+  --am-tint: var(--am-bad);
+}
+
+.am-log__row[data-kind='WARN'] {
+  --am-tint: var(--am-warn);
+}
+
+.am-log__row[data-kind='DB'] {
+  --am-tint: var(--am-good);
+}
+
+.am-log__row[data-kind='API'] {
+  --am-tint: var(--am-accent);
+}
+
+.am-log__row[data-kind='QUEUE'] {
+  --am-tint: var(--am-accent-2);
 }
 
 .am-log__head {
   display: flex;
-  align-items: baseline;
   gap: 10px;
+  align-items: baseline;
 }
 
 /* Вид записи цветом: глаз находит ошибку в потоке быстрее, чем читает слово. */
@@ -245,25 +307,9 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   min-width: 54px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--am-tint);
   letter-spacing: 0.04em;
-  color: var(--am-faint);
-}
-
-.am-log__kind[data-kind='ERROR'] {
-  color: var(--am-bad);
-}
-
-.am-log__kind[data-kind='WARN'] {
-  color: var(--am-warn);
-}
-
-.am-log__kind[data-kind='DB'] {
-  color: var(--am-good);
-}
-
-.am-log__kind[data-kind='API'] {
-  color: var(--am-accent);
 }
 
 .am-log__time {
@@ -283,18 +329,22 @@ onBeforeUnmount(() => {
 
 .am-log__open {
   flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 /* Подробности переносятся: строка запроса длиннее окна, а горизонтальная
    прокрутка внутри списка ломает чтение остального. */
 .am-log__body {
   margin: 8px 0 0;
-  padding: 8px;
-  border-radius: var(--am-r-s);
-  background: var(--am-bg-2);
+  padding: 10px 12px;
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-s);
   overflow-wrap: anywhere;
 }
 
