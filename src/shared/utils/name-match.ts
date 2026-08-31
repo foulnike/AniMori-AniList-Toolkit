@@ -4,12 +4,22 @@
 // и сканеру дельты.
 //
 // Шкалу баллов нельзя менять без проверки на живых данных:
-//   100 — точное совпадение кандзи      85 — тот же набор токенов ромадзи
-//    90 — кандзи как подстрока          80 — совпадение после сжатия долгих гласных
-//    55 — почти полное пересечение       30 — общая длинная подстрока (слабо)
+//   100 — точное совпадение кандзи      85 — тот же набор токенов ромаджи
+//    90 — кандзи подстрокой, 4+ знака  80 — совпадение после сжатия долгих гласных
+//    70 — кандзи подстрокой, 3 знака   55 — почти полное пересечение
+//    30 — общая длинная подстрока, он же потолок при расхождении кандзи
 //
 // Пороги потребителей: 80 — поиск по имени во всём каталоге, 55 — поиск среди
 // ролей конкретного тайтла (кандидаты уже ограничены, можно мягче).
+//
+// Две оговорки про кандзи, и обе от живых промахов:
+//   Короткая подстрока не довод. Имя из двух знаков лежит внутри половины
+//   чужих имён, и на ролях такой кандидат подменял человека целиком.
+//   Расхождение кандзи — довод против. Если оба имени записаны иероглифами
+//   и не пересекаются вовсе, это разные люди: в японском на одно чтение
+//   приходится десяток написаний. Совпавшее ромаджи тогда обрезается
+//   до слабого предела и до порогов не достаёт. Кана и латиница под это
+//   правило не попадают: катакана против кандзи расходится законно.
 
 export interface NameCandidate {
   name?: string | null
@@ -22,7 +32,13 @@ export interface NameTarget {
   native?: string | null
 }
 
-/** Ромадзи -> нижний регистр без диакритики, апострофов и пунктуации. */
+/** Иероглифы без каны: именно их расхождение говорит о разных людях. */
+const KANJI_RE = /[\u3400-\u4dbf\u4e00-\u9fff]/
+
+/** Потолок при расхождении кандзи: ниже обоих порогов, 55 и 80. */
+const WEAK_CAP = 30
+
+/** Ромаджи -> нижний регистр без диакритики, апострофов и пунктуации. */
 export function amNormRomaji(str: string | null | undefined): string {
   if (!str) return ''
   return str
@@ -56,53 +72,80 @@ export function amNormNative(str: string | null | undefined): string {
   return (str ?? '').replace(/\s+/g, '').trim()
 }
 
-/**
- * Оценивает уверенность совпадения кандидата Shikimori с целью AniList.
- * @returns Балл 0..100 (100 = точный кандзи, 80+ = точный ромадзи).
- */
-export function scoreNameMatch(cand: NameCandidate, target: NameTarget): number {
-  // Кандзи надёжнее ромадзи: транслитераций много, оригинал один.
-  const tNative = amNormNative(target.native)
-  const cNative = amNormNative(cand.japanese)
-  if (tNative && cNative) {
-    if (tNative === cNative) return 100
-    if (cNative.includes(tNative) || tNative.includes(cNative)) return 90
-  }
+/** Есть ли в строке иероглифы: кана и латиница сравниваются ненадёжно. */
+export function amHasKanji(str: string | null | undefined): boolean {
+  return KANJI_RE.test(str ?? '')
+}
 
+/**
+ * Балл по одному ромаджи. Порядок токенов игнорируется: у AniList имя
+ * западным порядком, у Shikimori — японским.
+ */
+function scoreRomaji(cand: NameCandidate, target: NameTarget): number {
   const tTok = amTokens(target.full)
   const cTok = amTokens(cand.name)
-  if (tTok.length && cTok.length) {
-    // Порядок токенов игнорируем: "Hajime Isayama" = "Isayama Hajime".
-    const tSet = [...tTok].sort().join(' ')
-    const cSet = [...cTok].sort().join(' ')
-    if (tSet === cSet) return 85
-    if (amCollapseVowels(tSet) === amCollapseVowels(cSet)) return 80
+  if (tTok.length === 0 || cTok.length === 0) return 0
 
-    // Одно имя может иметь лишний токен (среднее имя, титул) — допускаем ровно один.
-    const tS = new Set(tTok.map(amCollapseVowels))
-    const cS = new Set(cTok.map(amCollapseVowels))
-    const small = tS.size <= cS.size ? tS : cS
-    const big = tS.size <= cS.size ? cS : tS
-    let all = true
-    for (const x of small) {
-      if (!big.has(x)) {
-        all = false
-        break
-      }
-    }
-    if (all && small.size >= 2 && small.size >= big.size - 1) return 55
+  const tSet = [...tTok].sort().join(' ')
+  const cSet = [...cTok].sort().join(' ')
+  if (tSet === cSet) return 85
+  if (amCollapseVowels(tSet) === amCollapseVowels(cSet)) return 80
 
-    // Самый слабый сигнал: ограничение на 5 символов гасит мусор вроде "Ai" в "Aiko".
-    const tJoin = amCollapseVowels(tTok.join(''))
-    const cJoin = amCollapseVowels(cTok.join(''))
-    if (
-      tJoin.length >= 5 &&
-      cJoin.length >= 5 &&
-      (cJoin.includes(tJoin) || tJoin.includes(cJoin))
-    ) {
-      return 30
+  // Одно имя может иметь лишний токен (среднее имя, титул) — допускаем ровно один.
+  const tS = new Set(tTok.map(amCollapseVowels))
+  const cS = new Set(cTok.map(amCollapseVowels))
+  const small = tS.size <= cS.size ? tS : cS
+  const big = tS.size <= cS.size ? cS : tS
+  let all = true
+  for (const x of small) {
+    if (!big.has(x)) {
+      all = false
+      break
     }
+  }
+  if (all && small.size >= 2 && small.size >= big.size - 1) return 55
+
+  // Самый слабый сигнал: ограничение на 5 символов гасит мусор вроде "Ai" в "Aiko".
+  const tJoin = amCollapseVowels(tTok.join(''))
+  const cJoin = amCollapseVowels(cTok.join(''))
+  if (tJoin.length >= 5 && cJoin.length >= 5 && (cJoin.includes(tJoin) || tJoin.includes(cJoin))) {
+    return WEAK_CAP
   }
 
   return 0
+}
+
+/**
+ * Оценивает уверенность совпадения кандидата Shikimori с целью AniList.
+ * @returns Балл 0..100 (100 = точный кандзи, 80+ = точный ромаджи).
+ */
+export function scoreNameMatch(cand: NameCandidate, target: NameTarget): number {
+  // Кандзи надёжнее ромаджи: транслитераций много, оригинал один.
+  const tNative = amNormNative(target.native)
+  const cNative = amNormNative(cand.japanese)
+
+  /** Кандзи хотя бы пересеклись: тогда наказывать за расхождение не за что. */
+  let nativeAgree = false
+
+  if (tNative && cNative) {
+    if (tNative === cNative) return 100
+
+    if (cNative.includes(tNative) || tNative.includes(cNative)) {
+      nativeAgree = true
+
+      // Длина берётся у короткой строки: она и есть подстрока.
+      const short = Math.min(tNative.length, cNative.length)
+      if (short >= 4) return 90
+      if (short === 3) return 70
+    }
+  }
+
+  const romaji = scoreRomaji(cand, target)
+
+  // Оба имени иероглифами и не сошлись — совпавшее чтение ничего не значит.
+  if (!nativeAgree && amHasKanji(tNative) && amHasKanji(cNative)) {
+    return Math.min(romaji, WEAK_CAP)
+  }
+
+  return romaji
 }
