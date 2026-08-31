@@ -4,7 +4,7 @@
 // Модуль один сознательно: веер мелких файлов труднее держать в согласии.
 import { ref, type Ref } from 'vue'
 
-import { partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
+import { notOutYet, partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
@@ -25,6 +25,8 @@ export interface Row {
   repeat: number
   note: string | null
   ongoing: boolean
+  /** Ни одной части ещё не вышло: на постере вместо сезона стоит анонс. */
+  soon: boolean
   own: string | null
   done: number
   cover: string | null
@@ -128,6 +130,7 @@ export function toRow(entry: SnapshotEntry): Row {
     repeat: entry.repeat,
     note: entry.notes,
     ongoing: (look?.airingEpisode ?? null) !== null,
+    soon: notOutYet(look),
     own: ownText(entry, parts),
     done: donePart(entry, parts),
     cover: look?.cover ?? null,
