@@ -110,13 +110,24 @@ const SEASON_WORDS: Readonly<Record<string, string>> = {
   Fall: 'Осень',
 }
 
-/** Статус выпуска тайтла. Не путать с закладками своего списка ниже. */
+/**
+ * Статус выпуска тайтла. Не путать с закладками своего списка ниже.
+ *
+ * Ключи в двух видах нарочно: сервер отдаёт NOT_YET_RELEASED, а старые
+ * записи склада и часть путей карточки уже приводят вид к «Not Yet
+ * Released». Одного вида было мало: анонс показывался латиницей.
+ */
 const RELEASE_WORDS: Readonly<Record<string, string>> = {
   Releasing: 'Выходит',
+  RELEASING: 'Выходит',
   Finished: 'Завершено',
-  'Not Yet Released': 'Анонсировано',
+  FINISHED: 'Завершено',
+  'Not Yet Released': 'Анонс',
+  NOT_YET_RELEASED: 'Анонс',
   Cancelled: 'Отменено',
+  CANCELLED: 'Отменено',
   Hiatus: 'Перерыв',
+  HIATUS: 'Перерыв',
 }
 
 /** Первоисточник тайтла: манга и ранобэ тут именно источники аниме. */
@@ -153,6 +164,17 @@ const RELATION_WORDS: Readonly<Record<string, string>> = {
   CONTAINS: 'Входит в',
   SOURCE: 'Первоисточник',
   OTHER: 'Другое',
+}
+
+/**
+ * Запасная подпись ссылки из описания. Шикимори часто ставит тег сущности
+ * без подписи вовсе: имя подставляет сам сайт. Пока имя едет, в тексте
+ * стоит это слово: пустая ссылка ненажимаема, а адрес в строке нечитаем.
+ */
+const LINK_STUB_WORDS: Readonly<Record<string, string>> = {
+  character: 'персонаж',
+  staff: 'человек',
+  media: 'тайтл',
 }
 
 export interface StatusItem {
@@ -215,6 +237,21 @@ export function seasonWord(season: string | null): string | null {
 /** Статус выпуска тайтла по-русски. */
 export function releaseWord(status: string | null): string | null {
   return lookup(RELEASE_WORDS, status)
+}
+
+/** Короткая метка анонса для постера: на плитке места мало. */
+export function soonWord(): string {
+  return 'Анонс'
+}
+
+/** Подсказка к метке анонса: одно слово объясняет не всё. */
+export function soonHint(): string {
+  return 'Анонс: ни одной части ещё не вышло'
+}
+
+/** Запасная подпись ссылки из описания, пока имя ещё не добралось. */
+export function linkStubWord(kind: string): string {
+  return LINK_STUB_WORDS[kind] ?? 'ссылка'
 }
 
 /** Первоисточник по-русски. */
