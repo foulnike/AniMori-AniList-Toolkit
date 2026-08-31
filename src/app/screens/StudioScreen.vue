@@ -3,7 +3,7 @@
 // Плитка и её сборка общие с поиском (tile-row.ts): вид тайтла везде один.
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { fetchStudioWorks, type MediaBrief } from '@/api/anilist-media'
+import { fetchStudioWorks, STUDIO_PAGE_SIZE, type MediaBrief } from '@/api/anilist-media'
 import { hiddenCount, keepAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
@@ -22,12 +22,21 @@ const HOLD_COUNT = 18
 /** По скольку тайтлов просить русские названия за заход. */
 const TITLE_CHUNK = 20
 
+/** Сколько видимых постеров обязан дать один заход: три полных ряда. */
+const WANT = STUDIO_PAGE_SIZE
+
+/**
+ * Сколько страниц позволено спросить за один заход. Обычно хватает одной,
+ * но у студии с полусотней взрослых работ норма иначе не собирается вовсе,
+ * а бесконечный цикл на медленном источнике хуже неполного ряда.
+ */
+const PAGE_TRIES = 4
+
 const name = ref('')
 const rows = ref<TileRow[]>([])
 const busy = ref(false)
 const trouble = ref('')
 const hasNext = ref(false)
-const page = ref(1)
 
 /** Скрытое отбором 18+ число говорится вслух, а не тихо теряется. */
 const hidden = ref(0)
@@ -35,8 +44,28 @@ const hidden = ref(0)
 /** Литография студии или `null`. Промах штатен: шапка останется текстом. */
 const logo = ref<string | null>(null)
 
-/** Выписки этого показа: по ним плитки перерисовываются с названиями. */
+/**
+ * Всё добытое и принятое в показ, до отбора 18+. По нему считается скрытое
+ * и дедупликация: показать отобранное мало, иначе взрослая работа приедет
+ * второй раз следующей страницей.
+ */
+let raw: MediaBrief[] = []
+
+/** Выписки, которые видно: по ним и рисуются плитки. */
 let briefs: readonly MediaBrief[] = []
+
+/**
+ * Добытое сверх нормы. Страница источника даёт двадцать семь работ целиком,
+ * и когда норма собралась раньше её конца, хвост ждёт следующего нажатия
+ * здесь, а не выбрасывается: заплаченный запрос обиднее лишней памяти.
+ */
+let spare: MediaBrief[] = []
+
+/** Последняя спрошенная страница источника. */
+let lastPage = 0
+
+/** Есть ли у источника страницы дальше. Остаток спрашивать не надо. */
+let sourceMore = true
 
 /** Номера идущих работ: ответ на устаревший вопрос в выдачу не попадает. */
 let run = 0
@@ -53,6 +82,37 @@ function describe(e: unknown): string {
 
 function redraw(): void {
   rows.value = briefs.map(toTileRow)
+}
+
+/** Сколько работ из набора видно после отбора 18+. */
+function shownCount(pool: readonly MediaBrief[]): number {
+  return keepAllowed(pool, (brief) => brief.isAdult).length
+}
+
+/**
+ * Делит добытое на порцию показа и остаток. Считаются только видимые работы:
+ * норма захода — про постеры в сетке, а не про строки ответа сервера.
+ * Взрослые работы едут вместе со своим куском страницы, чтобы счёт скрытого
+ * совпадал с тем, что показано.
+ */
+function splitBatch(pool: readonly MediaBrief[]): { take: MediaBrief[]; rest: MediaBrief[] } {
+  const take: MediaBrief[] = []
+  const rest: MediaBrief[] = []
+  let shown = 0
+
+  for (const brief of pool) {
+    const visible = keepAllowed([brief], (item) => item.isAdult).length === 1
+
+    if (rest.length > 0 || (visible && shown >= WANT)) {
+      rest.push(brief)
+      continue
+    }
+
+    take.push(brief)
+    if (visible) shown++
+  }
+
+  return { take, rest }
 }
 
 /**
@@ -93,19 +153,28 @@ async function fillTitles(targetIds: readonly number[]): Promise<void> {
 }
 
 /**
- * Спрашивает работы студии. С `add` добирает следующую страницу к уже
- * показанному, без него начинает с первой. Устаревшие ответы отброшены.
+ * Спрашивает работы студии. С `add` добирает норму к уже показанному, без него
+ * начинает с первой страницы. Устаревшие ответы отброшены.
+ *
+ * Заход не равен странице источника: он равен норме показа. Пока видимых
+ * работ меньше нормы и у источника есть чем ответить, страницы добираются
+ * подряд, а лишнее из последней остаётся в остатке.
  */
 async function load(add = false): Promise<void> {
   const mine = ++run
   const id = studioId.value
 
   if (!add) {
+    raw = []
     briefs = []
+    spare = []
+    lastPage = 0
+    sourceMore = true
     rows.value = []
     name.value = ''
     logo.value = null
     hidden.value = 0
+    hasNext.value = false
   }
 
   if (id === 0) {
@@ -116,30 +185,52 @@ async function load(add = false): Promise<void> {
   busy.value = true
   trouble.value = ''
 
-  const wanted = add ? page.value + 1 : 1
-  const known = add ? briefs : []
+  // Заход начинается с прошлого остатка: он уже добыт и оплачен.
+  const pool: MediaBrief[] = [...spare]
+  spare = []
+
+  let tries = 0
+  let failed = false
 
   try {
-    const found = await fetchStudioWorks(id, wanted, known)
-    if (mine !== run) return
+    while (shownCount(pool) < WANT && sourceMore && tries < PAGE_TRIES) {
+      // Известным считается и показанное, и добранное в этом заходе: иначе
+      // дедупликация источника пропустит повтор внутри одного нажатия.
+      const found = await fetchStudioWorks(id, lastPage + 1, [...raw, ...pool])
+      if (mine !== run) return
 
-    if (found === null) {
+      tries++
+
+      if (found === null) {
+        failed = true
+        break
+      }
+
+      lastPage++
+      name.value = found.name
+      sourceMore = found.hasNext
+      pool.push(...found.items)
+
+      if (!add && tries === 1) void fillLogo(mine, found.name)
+    }
+
+    if (failed && pool.length === 0) {
       trouble.value = 'Каталог не ответил. Попробуйте ещё раз через минуту.'
       return
     }
 
     // Обложки уже в ответе: кладём их в общую память даром для списков и главной.
-    for (const brief of found.items) rememberBrief(brief)
+    for (const brief of pool) rememberBrief(brief)
 
-    const fresh = add ? [...briefs, ...found.items] : found.items
-    hidden.value = hiddenCount(fresh, (brief) => brief.isAdult)
-    briefs = keepAllowed(fresh, (brief) => brief.isAdult)
-    page.value = wanted
-    hasNext.value = found.hasNext && found.known > 0
-    name.value = found.name
+    const { take, rest } = splitBatch(pool)
+    spare = rest
+    raw = [...raw, ...take]
+
+    hidden.value = hiddenCount(raw, (brief) => brief.isAdult)
+    briefs = keepAllowed(raw, (brief) => brief.isAdult)
+    hasNext.value = sourceMore || spare.length > 0
     redraw()
-    if (!add) void fillLogo(mine, found.name)
-    await fillTitles([...new Set(found.items.map((item) => item.mediaId))])
+    await fillTitles([...new Set(take.map((item) => item.mediaId))])
   } catch (e) {
     if (mine !== run) return
     trouble.value = describe(e)
@@ -148,7 +239,7 @@ async function load(add = false): Promise<void> {
   }
 }
 
-/** Добор следующей страницы. */
+/** Добор следующей порции. */
 function onMore(): void {
   void load(true)
 }
