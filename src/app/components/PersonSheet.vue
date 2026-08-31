@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Окошко персонажа или автора поверх основного интерфейса (пункт 3.9б).
-// Русские имя и описание докидываются фоном из person-title.ts (пункт 3.9а).
+// Русские имя и описание докидываются фоном из person-title.ts (пункт 3.9а),
+// а названия работ — из media-title.ts: у AniList они только латиницей.
 // Сэйю открывается в том же окне со стеком назад: башня затемнений не нужна.
 //
 // Показанного человека может подменить слой окошка (app/person-layer.ts):
@@ -17,6 +18,7 @@ import {
 } from '@/api/anilist-person'
 import { fetchStaffWorks, type StaffWork } from '@/api/anilist-staff-works'
 import { keepAllowed } from '@/core/adult'
+import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import {
   getRussianPerson,
   getRussianPersonFull,
@@ -37,6 +39,9 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 /** Длина описания, после которой оно складывается под кнопку. */
 const DESC_LIMIT = 600
 
+/** По скольку работ спрашиваем названия за раз: полка редко длиннее пачки. */
+const WORK_CHUNK = 10
+
 /** Сэйю из карточки персонажа. */
 type VoiceActor = NonNullable<CharacterCard['media']>['edges'][number]['voiceActors'][number]
 
@@ -56,6 +61,9 @@ const expanded = ref(false)
 
 /** Главные работы автора: полка постеров под описанием. */
 const works = ref<StaffWork[]>([])
+
+/** Русские названия работ по номерам тайтлов: подставляются по готовности. */
+const ruWorks = shallowReactive(new Map<number, string>())
 
 /** Коробка окна: при переходе к сэйю её прокрутка возвращается наверх. */
 const box = ref<HTMLElement | null>(null)
@@ -99,6 +107,11 @@ function longDesc(): boolean {
 /** Видимые работы: отбор 18+ живёт на слое показа, а не в запросе. */
 function shownWorks(): readonly StaffWork[] {
   return keepAllowed(works.value, (work) => work.isAdult)
+}
+
+/** Название работы: русское, когда фон уже добыл, иначе как пришло. */
+function workName(work: StaffWork): string {
+  return ruWorks.get(work.mediaId) ?? work.name
 }
 
 function fullName(): string {
@@ -202,6 +215,36 @@ function onKey(e: KeyboardEvent): void {
 }
 
 /**
+ * Русские названия работ. Полка приезжает латиницей: у AniList у тайтла
+ * есть только romaji и english, и полка работ оставалась единственным
+ * местом окна, где название не по-русски.
+ *
+ * Сначала подставляется известное без сети (датасет и склад имён),
+ * дальше идут пачки: четырнадцать поодиночке сожгли бы темп шикимори.
+ */
+async function beginWorkNames(mine: number, list: readonly StaffWork[]): Promise<void> {
+  const ids = list.map((work) => work.mediaId)
+
+  for (const id of ids) {
+    const known = peekRussianName(id)
+    if (known) ruWorks.set(id, known)
+  }
+
+  for (let from = 0; from < ids.length; from += WORK_CHUNK) {
+    if (!alive || mine !== run) return
+
+    const chunk = ids.slice(from, from + WORK_CHUNK)
+    await prefetchRussianNames(chunk)
+    if (!alive || mine !== run) return
+
+    for (const id of chunk) {
+      const found = peekRussianName(id)
+      if (found) ruWorks.set(id, found)
+    }
+  }
+}
+
+/**
  * Русские имя и описание: окно их не держит, докидываются по готовности.
  * Гарда тёзок тут нет: списка тайтлов человека под рукой нет, а пара
  * имя + кандзи даёт точный балл и без него. Главному лицу спрашивается
@@ -237,6 +280,7 @@ async function load(target: PersonTarget): Promise<void> {
   charCard.value = null
   staffCard.value = null
   works.value = []
+  ruWorks.clear()
   ruVoices.clear()
   expanded.value = false
   busy.value = true
@@ -251,7 +295,13 @@ async function load(target: PersonTarget): Promise<void> {
     // Полка работ идёт своим доходом: карточка её не ждёт, а без работ она живая.
     void fetchStaffWorks(target.personId)
       .then((list) => {
-        if (alive && mine === run) works.value = list
+        if (!alive || mine !== run) return
+        works.value = list
+
+        // Названия догоняют полку: постеры видны сразу, имена меняются по ходу.
+        void beginWorkNames(mine, list).catch((e) => {
+          Logger('WARN', 'Карточка персоны: русские названия работ не доехали', e)
+        })
       })
       .catch((e) => {
         Logger('WARN', 'Карточка персоны: работы не загрузились', e)
@@ -426,23 +476,23 @@ onBeforeUnmount(() => {
               <button
                 v-for="work in shownWorks()"
                 :key="work.mediaId"
+                v-tip="work.role ? `${workName(work)} · ${work.role}` : workName(work)"
                 class="am-ps-work"
                 type="button"
-                :title="work.role ? `${work.name} · ${work.role}` : work.name"
                 @click="openWork(work.mediaId)"
               >
                 <img
                   v-if="work.cover"
                   class="am-ps-work__art"
                   :src="work.cover"
-                  :alt="work.name"
+                  :alt="workName(work)"
                   loading="lazy"
                   decoding="async"
                 />
                 <span v-else class="am-ps-work__art am-ps-work__art--empty" aria-hidden="true">
-                  {{ work.name.slice(0, 1) }}
+                  {{ workName(work).slice(0, 1) }}
                 </span>
-                <span class="am-ps-work__name">{{ work.name }}</span>
+                <span class="am-ps-work__name">{{ workName(work) }}</span>
                 <span v-if="work.year" class="am-ps-work__year">{{ work.year }}</span>
               </button>
             </div>
@@ -455,9 +505,9 @@ onBeforeUnmount(() => {
               <button
                 v-for="va in voiceActors()"
                 :key="va.id"
+                v-tip="`Карточка: ${vaName(va)}`"
                 class="am-ps-va"
                 type="button"
-                :title="`Карточка: ${va.name.full}`"
                 @click="openVoice(va)"
               >
                 <img
