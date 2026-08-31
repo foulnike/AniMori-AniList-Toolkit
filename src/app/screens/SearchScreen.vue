@@ -185,20 +185,19 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="am-page">
-    <div class="am-bar">
-      <label class="am-search am-search--wide">
-        <span class="am-search__mark" aria-hidden="true">⌕</span>
-        <input
-          v-model="word"
-          class="am-input"
-          type="search"
-          placeholder="Название на любом языке"
-          @input="onType"
-        />
-      </label>
-    </div>
-
-    <p v-if="total !== null" class="am-meta">Найдено {{ total }}</p>
+    <label class="am-hunt">
+      <span class="am-hunt__mark" aria-hidden="true">⌕</span>
+      <input
+        v-model="word"
+        class="am-hunt__field"
+        type="search"
+        placeholder="Название на любом языке"
+        @input="onType"
+      />
+      <span v-if="total !== null" class="am-hunt__num" title="Найдено в каталоге">
+        {{ total }}
+      </span>
+    </label>
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
@@ -249,8 +248,101 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.am-search--wide {
-  min-width: 320px;
+/* Поле поиска — главный предмет экрана, а не одна из контролок в ряду.
+   Обёртка — label: клик по капсуле целиком ставит курсор в поле. */
+.am-hunt {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: clamp(48px, 5vw, 60px);
+  padding: 0 clamp(16px, 1.6vw, 24px);
+  cursor: text;
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  box-shadow: inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
+  transition:
+    border-color var(--am-mid) var(--am-ease),
+    box-shadow var(--am-mid) var(--am-ease);
+}
+
+/* Свечение вместо обводки поверх капсулы: два кольца одно в другом
+   выглядели браком рисования. */
+.am-hunt:focus-within {
+  border-color: rgb(var(--am-accent-rgb) / 0.6);
+  box-shadow:
+    inset 0 1px 0 var(--am-edge),
+    var(--am-sh-glow);
+}
+
+.am-hunt__mark {
+  font-size: 18px;
+  color: var(--am-faint);
+  transition: color var(--am-mid) var(--am-ease);
+}
+
+.am-hunt:focus-within .am-hunt__mark {
+  color: var(--am-accent);
+}
+
+/* Своё поле без рамки и фона: рамка живёт на капсуле выше. */
+.am-hunt__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: clamp(14px, 1.1vw, 16px);
+  color: var(--am-text);
+  background: none;
+  border: 0;
+}
+
+.am-hunt__field::placeholder {
+  color: var(--am-faint);
+}
+
+.am-hunt__field:focus {
+  outline: none;
+}
+
+/* Крестик очистки у type=search рисуется темным квадратом на светлой теме:
+   приводим его к цвету текста. */
+.am-hunt__field::-webkit-search-cancel-button {
+  cursor: pointer;
+  filter: grayscale(1) opacity(0.6);
+}
+
+/* Счётчик внутри поля: отдельная строка ради одного числа сдвигала
+   всю выдачу вниз. */
+.am-hunt__num {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--am-dim);
+  background: var(--am-fill-2);
+  border-radius: var(--am-r-cap);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Заглушка — элемент сетки, а общий .am-hold в слое тем сам сетка:
+   внутри .am-grid его надо вернуть в колонку. */
+.am-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.am-hold__art {
+  display: block;
+  aspect-ratio: 2 / 3;
+}
+
+.am-hold__line {
+  display: block;
+  width: 72%;
+  height: 12px;
+  border-radius: var(--am-r-s);
 }
 
 .am-more {
