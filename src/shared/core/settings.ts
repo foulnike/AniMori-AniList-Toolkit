@@ -8,6 +8,16 @@ export type TitleSource = 'shikimori' | 'anime365' | 'off' | 'none'
 export type AccentPreset =
   'site' | 'sakura' | 'mono' | 'catppuccin' | 'nord' | 'dracula' | 'matcha' | 'sunset' | 'custom'
 
+/**
+ * Оформление окна. Слово «тема» здесь уже занято музыкальными темами
+ * (`enableThemes`, `api/animethemes.ts`), поэтому ключ называется оформлением:
+ * два смысла одного слова в одном модуле читаются неверно.
+ *
+ * `amoled` — не «тёмная погуще»: там чёрный ноль, потому что на OLED он не
+ * светится вовсе, а полутон панелей выдал бы серую рамку вокруг окна.
+ */
+export type AppearanceName = 'dark' | 'light' | 'amoled'
+
 export interface AniMoriSettings {
   translateInterface: boolean
   titlePrimary: TitleSource
@@ -31,6 +41,8 @@ export interface AniMoriSettings {
    * равны теме сайта: разбор живёт в core/accent.ts.
    */
   accentCustom: string
+  /** Оформление окна: тёмное, светлое или AMOLED. */
+  appearance: AppearanceName
   /**
    * Блокировать всплывающие окна плеера. Kodik крутится в кросс-доменном
    * фрейме, поэтому работает только перехват on_new_window в Tauri.
@@ -98,6 +110,7 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   enableLogger: true,
   accentPreset: 'site',
   accentCustom: '',
+  appearance: 'dark',
   blockPlayerPopups: false,
   hideAds: false,
   showAdult: false,
@@ -131,6 +144,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     enableLogger,
     accentPreset,
     accentCustom,
+    appearance,
     blockPlayerPopups,
     hideAds,
     showAdult,
@@ -156,6 +170,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('set_logger', DEFAULT_SETTINGS.enableLogger),
     storage.get<AccentPreset>('am_accent', DEFAULT_SETTINGS.accentPreset),
     storage.get('am_accent_custom', DEFAULT_SETTINGS.accentCustom),
+    storage.get<AppearanceName>('am_appearance', DEFAULT_SETTINGS.appearance),
     storage.get('set_block_popups', DEFAULT_SETTINGS.blockPlayerPopups),
     storage.get('set_hide_ads', DEFAULT_SETTINGS.hideAds),
     storage.get('set_adult', DEFAULT_SETTINGS.showAdult),
@@ -187,6 +202,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     enableLogger,
     accentPreset,
     accentCustom,
+    appearance,
     blockPlayerPopups,
     hideAds,
     showAdult,
