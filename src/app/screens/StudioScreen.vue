@@ -30,6 +30,9 @@ const page = ref(1)
 /** Скрытое отбором 18+ число говорится вслух, а не тихо теряется. */
 const hidden = ref(0)
 
+/** Первая буква имени для монограммы: логотипов у большинства студий нет. */
+const mono = computed<string>(() => name.value.trim().slice(0, 1).toUpperCase())
+
 /** Выписки этого показа: по ним плитки перерисовываются с названиями. */
 let briefs: readonly MediaBrief[] = []
 
@@ -167,12 +170,16 @@ watch(studioId, () => {
     </div>
 
     <template v-else>
-      <div v-if="name" class="am-bar">
-        <h2 class="am-h2">{{ name }}</h2>
-        <span class="am-bar__gap" />
-      </div>
+      <header v-if="name" class="am-studio">
+        <span class="am-studio__mono" aria-hidden="true">{{ mono }}</span>
 
-      <p v-if="hidden > 0" class="am-meta">Скрыто с меткой 18+: {{ hidden }}</p>
+        <div class="am-studio__text">
+          <h2 class="am-studio__name">{{ name }}</h2>
+          <p v-if="hidden > 0" class="am-meta">Скрыто с меткой 18+: {{ hidden }}</p>
+        </div>
+      </header>
+
+      <p v-else-if="hidden > 0" class="am-meta">Скрыто с меткой 18+: {{ hidden }}</p>
 
       <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
@@ -217,8 +224,74 @@ watch(studioId, () => {
 </template>
 
 <style scoped>
+/* Шапка студии: имя с монограммой вместо голого заголовка в ряду. */
+.am-studio {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-leaf);
+  box-shadow: inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
+}
+
+/* Монограмма формы капли: окружность рядом с круглыми аватарами
+   людей читалась бы как ещё один человек. */
+.am-studio__mono {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--am-text);
+  background: linear-gradient(
+    140deg,
+    rgb(var(--am-accent-rgb) / 0.34),
+    rgb(var(--am-accent-2-rgb) / 0.22)
+  );
+  border: 1px solid rgb(var(--am-accent-rgb) / 0.28);
+  border-radius: var(--am-r-drop);
+}
+
+.am-studio__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.am-studio__name {
+  margin: 0;
+  font-size: clamp(18px, 1.9vw, 25px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
 .am-studio-grid {
   grid-template-columns: repeat(auto-fit, minmax(var(--am-tile), 1fr));
+}
+
+/* Заглушка — элемент сетки, а общий .am-hold в слое тем сам сетка. */
+.am-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.am-hold__art {
+  display: block;
+  aspect-ratio: 2 / 3;
+}
+
+.am-hold__line {
+  display: block;
+  width: 72%;
+  height: 12px;
+  border-radius: var(--am-r-s);
 }
 
 .am-more {
