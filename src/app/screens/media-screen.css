@@ -278,8 +278,11 @@
 }
 
 /* Доска карточки: описание, колонка записи, франшиза и люди на одних
-   областях. На узком окне франшиза — полка на полный ряд, люди ниже. */
+   областях. На узком окне франшиза — полка на полный ряд, люди ниже.
+   position: relative здесь не для красоты: на широком окне виджет
+   франшизы становится абсолютным и опирается на свою область доски. */
 .am-board {
+  position: relative;
   display: grid;
   grid-template-areas:
     "about mine"
@@ -650,58 +653,59 @@
   color: var(--am-faint);
 }
 
-/* Широкое окно: франшиза — третья колонка доски. Длинная владеет правым
-   краем на две строки (люди подтягиваются под описание, пустоты нет),
-   короткая занимает только свой ряд, и люди идут во всю ширину. */
+/* Широкое окно: франшиза — третья колонка доски, люди всегда рядом ниже
+   во всю ширину. Раньше области зависели от длины хронологии
+   (классы --fran-long и --fran-short), и карточка перестраивалась целиком
+   от одного лишнего сиквела. Теперь раскладка одна, а решает её
+   сама разметка через :has(), а не класс от логики. */
 @media (min-width: 1700px) {
-  /* Франшизы у тайтла нет вовсе (блока в разметке нет, класса --fran-*
-     тоже): правый край доски отдаётся людям, иначе на широком окне
-     справа от записи оставалась пустота в полэкрана. */
-  .am-board:not(.am-board--fran-long):not(.am-board--fran-short) {
+  /* Франшизы у тайтла нет вовсе (блока в разметке нет): правый край
+     доски отдаётся людям, иначе справа от записи оставалась пустота
+     в полэкрана. */
+  .am-board:not(:has(.am-fran)) {
     grid-template-areas: "about mine folk";
     grid-template-columns: minmax(0, 84ch) 380px minmax(320px, 1fr);
     justify-content: stretch;
   }
 
-  .am-board--fran-long,
-  .am-board--fran-short {
-    grid-template-columns: minmax(0, 84ch) 380px minmax(280px, 1fr);
-    justify-content: stretch;
-  }
-
-  .am-board--fran-long {
-    grid-template-areas:
-      "about mine fran"
-      "folk folk fran";
-  }
-
-  .am-board--fran-short {
+  /* Нижняя граница первого ряда есть не зря: высоту виджету задаёт
+     описание, а у короткого описания в три строки франшиза иначе
+     сжалась бы в полоску с прокруткой на десяток тайтлов. */
+  .am-board:has(.am-fran) {
     grid-template-areas:
       "about mine fran"
       "folk folk folk";
+    grid-template-columns: minmax(0, 84ch) 380px minmax(280px, 1fr);
+    grid-template-rows: minmax(300px, auto) auto;
+    justify-content: stretch;
   }
 
-  .am-board--fran-long .am-fran {
-    align-self: stretch;
+  /* Виджет вынут из потока сетки: абсолютный элемент внутри
+     relative-доски лежит ровно в своей области, но её высоту не растит.
+     Поэтому длина виджета всегда одна и та же — ровно по описанию,
+     сколько бы тайтлов в хронологии ни было. */
+  .am-fran {
+    position: absolute;
+    inset: 0;
+    grid-area: fran;
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .am-board--fran-long .am-fran .am-rail,
-  .am-board--fran-short .am-fran .am-rail {
+  /* Строками, а не полкой: постеры в узкой колонке вставали по трое
+     в ряд. Не влезшие тайтлы прокручиваются внутри виджета. */
+  .am-fran .am-rail {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: 2px;
+    min-height: 0;
     padding: 0;
     overflow-x: hidden;
     overflow-y: auto;
   }
 
-  .am-board--fran-long .am-fran .am-rail {
-    flex: 1;
-    min-height: 0;
-  }
-
-  .am-board--fran-long .am-part,
-  .am-board--fran-short .am-part {
+  .am-part {
     width: auto;
   }
 
@@ -709,8 +713,7 @@
      половине высоты, и постер внутри читался прямоугольником в полукруге.
      14 снаружи минус 5 отступа дают ровно 10 внутри — радиус постера,
      и кривые сходятся. */
-  .am-board--fran-long .am-part__hit,
-  .am-board--fran-short .am-part__hit {
+  .am-part__hit {
     flex-direction: row;
     gap: 10px;
     align-items: center;
@@ -722,8 +725,7 @@
       box-shadow var(--am-fast) var(--am-ease);
   }
 
-  .am-board--fran-long .am-part__art,
-  .am-board--fran-short .am-part__art {
+  .am-part__art {
     flex: none;
     width: 32px;
     margin-bottom: 0;
@@ -731,57 +733,47 @@
   }
 
   /* Заглушка без постера: 26 пикселей буквы в 32 пикселя квадратика не влезали. */
-  .am-board--fran-long .am-part__art--empty,
-  .am-board--fran-short .am-part__art--empty {
+  .am-part__art--empty {
     font-size: 13px;
   }
 
   /* На строке подъём постера не нужен: ховерит вся строка. */
-  .am-board--fran-long .am-part__hit:hover .am-part__art,
-  .am-board--fran-long .am-part__hit:focus-visible .am-part__art,
-  .am-board--fran-short .am-part__hit:hover .am-part__art,
-  .am-board--fran-short .am-part__hit:focus-visible .am-part__art {
+  .am-part__hit:hover .am-part__art,
+  .am-part__hit:focus-visible .am-part__art {
     border-color: var(--am-line-soft);
     border-radius: var(--am-r-s);
     transform: none;
   }
 
-  .am-board--fran-long .am-part__hit:hover,
-  .am-board--fran-long .am-part__hit:focus-visible,
-  .am-board--fran-short .am-part__hit:hover,
-  .am-board--fran-short .am-part__hit:focus-visible {
+  .am-part__hit:hover,
+  .am-part__hit:focus-visible {
     background: var(--am-fill-2);
   }
 
-  .am-board--fran-long .am-part__hit--still:hover,
-  .am-board--fran-short .am-part__hit--still:hover {
+  .am-part__hit--still:hover {
     background: none;
   }
 
   /* Текущая строка: акцентная подложка и тонкая кромка по всему контуру.
      Полоса inset 2px 0 0 слева обрезалась скруглением в огрызок, а рамка
      сдвинула бы соседние строки на пиксель. */
-  .am-board--fran-long .am-part__hit--here,
-  .am-board--fran-short .am-part__hit--here {
+  .am-part__hit--here {
     background: rgb(var(--am-accent-rgb) / 0.1);
     box-shadow: inset 0 0 0 1px rgb(var(--am-accent-rgb) / 0.34);
   }
 
-  .am-board--fran-long .am-part__hit--here .am-part__art,
-  .am-board--fran-short .am-part__hit--here .am-part__art {
+  .am-part__hit--here .am-part__art {
     border-color: rgb(var(--am-accent-rgb) / 0.6);
     box-shadow: none;
   }
 
-  .am-board--fran-long .am-part__year,
-  .am-board--fran-short .am-part__year {
+  .am-part__year {
     flex: none;
     width: 38px;
     font-size: 12px;
   }
 
-  .am-board--fran-long .am-part__name,
-  .am-board--fran-short .am-part__name {
+  .am-part__name {
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -790,18 +782,15 @@
     white-space: nowrap;
   }
 
-  .am-board--fran-long .am-part__status,
-  .am-board--fran-long .am-part__here,
-  .am-board--fran-short .am-part__status,
-  .am-board--fran-short .am-part__here {
+  .am-part__status,
+  .am-part__here {
     flex: none;
     margin-left: auto;
   }
 
   /* Метка справа — пилюля: голый акцентный текст сливался с названием
      в той же строке, а подложка держит его как отдельный знак. */
-  .am-board--fran-long .am-part__here,
-  .am-board--fran-short .am-part__here {
+  .am-part__here {
     padding: 3px 9px;
     font-size: 11px;
     line-height: 1.2;
@@ -810,8 +799,7 @@
     border-radius: var(--am-r-cap);
   }
 
-  .am-board--fran-long .am-part__status,
-  .am-board--fran-short .am-part__status {
+  .am-part__status {
     padding: 3px 9px;
     font-size: 11px;
     line-height: 1.2;
