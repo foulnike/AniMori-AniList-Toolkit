@@ -133,7 +133,7 @@ const hasTags = computed(
       title="Не интересует"
       @click="emit('hide')"
     >
-      ✕
+      <span aria-hidden="true">✕</span>
     </button>
   </li>
 </template>
@@ -394,26 +394,36 @@ const hasTags = computed(
 
 /* Крестик «не интересует»: виден под курсором и фокусом, а не всегда.
    Сидит слева: в правом углу он закрывал оценку каталога и точку
-   идущего сезона — ровно то, по чему выбирают тайтл в витрине. */
+   идущего сезона — ровно то, по чему выбирают тайтл в витрине.
+   Показ идёт прозрачностью, а не переключением display: с none на inline-flex
+   браузер успевал показать символ по базовой линии — крестик сидел
+   на полпикселя ниже центра. */
 .am-tile__hide {
   position: absolute;
   top: 8px;
   left: 8px;
   z-index: 2;
-  display: none;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   width: 28px;
   height: 28px;
   padding: 0;
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   color: var(--am-on-art);
+  visibility: hidden;
   cursor: pointer;
   background: color-mix(in srgb, var(--am-veil) 78%, transparent);
   border: 1px solid color-mix(in srgb, var(--am-on-art) 16%, transparent);
   border-radius: var(--am-r-cap);
+  opacity: 0;
   backdrop-filter: blur(8px);
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    visibility var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease);
 }
 
 /* Цель нажатия расширена до 44 пикселей невидимой окантовкой. */
@@ -425,6 +435,47 @@ const hasTags = computed(
 
 .am-tile:hover .am-tile__hide,
 .am-tile:focus-within .am-tile__hide {
-  display: inline-flex;
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Форма такая же, как у кнопок закрытия в окнах: круг в покое,
+   лепесток под курсором. */
+.am-tile__hide:hover,
+.am-tile__hide:focus-visible {
+  background: color-mix(in srgb, var(--am-veil) 92%, transparent);
+  border-color: color-mix(in srgb, var(--am-on-art) 30%, transparent);
+  border-radius: var(--am-r-drop);
+}
+
+/* Символ поднимается вместе с формой, центровку держит родитель. */
+.am-tile__hide > span {
+  display: block;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-tile__hide:hover > span,
+.am-tile__hide:focus-visible > span {
+  transform: translateY(-1px);
+}
+
+/* Спокойное движение: системная просьба сильнее наших красот. */
+@media (prefers-reduced-motion: reduce) {
+  .am-tile__hit:hover .am-tile__art,
+  .am-tile__hit:focus-visible .am-tile__art,
+  .am-tile--hidable:hover .am-tile__tags,
+  .am-tile--hidable:focus-within .am-tile__tags,
+  .am-tile__hide:hover > span,
+  .am-tile__hide:focus-visible > span {
+    transform: none;
+  }
+
+  .am-tile__hit:hover .am-tile__sheen {
+    transform: translateX(-130%);
+  }
+
+  .am-tile__live {
+    animation: none;
+  }
 }
 </style>
