@@ -11,8 +11,8 @@
 
 .am-wait__hero {
   display: block;
-  height: 280px;
-  border-radius: var(--am-r-xl);
+  height: clamp(240px, 26vh, 340px);
+  border-radius: var(--am-r-leaf);
 }
 
 .am-wait__line {
@@ -26,47 +26,66 @@
   width: 34%;
 }
 
-/* Герой карточки: баннер фоном, текст поверх тёмной завеси. */
+/* Герой карточки: баннер фоном, текст поверх тёмной завеси.
+   Цвет текста поверх баннера не тематический: завеса под ним тёмная
+   и в светлой теме. Объявлен один раз, дальше только var(). */
 .am-hero {
+  --am-on-art: #eef3fb;
+
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-xl);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-leaf);
   box-shadow: var(--am-sh-2);
 }
 
+/* Баннер гаснет маской к низу: резкий край картинки выдавал карточку
+   за коллаж из двух кусков. */
 .am-hero__art {
   position: absolute;
   inset: 0;
   background-position: center 22%;
   background-size: cover;
-  filter: saturate(1.05);
+  filter: saturate(1.06);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 46%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 46%, transparent 100%);
 }
 
 .am-hero__veil {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(6, 9, 15, 0.35) 0%, rgba(6, 9, 15, 0.86) 62%, var(--am-bg-2) 100%),
-    linear-gradient(90deg, rgba(6, 9, 15, 0.8) 0%, rgba(6, 9, 15, 0.25) 60%);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--am-veil) 30%, transparent) 0%,
+      color-mix(in srgb, var(--am-veil) 78%, transparent) 58%,
+      var(--am-bg-2) 100%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--am-veil) 72%, transparent) 0%,
+      transparent 62%
+    );
 }
 
 .am-hero__body {
   position: relative;
   display: flex;
-  gap: 26px;
+  gap: clamp(18px, 2vw, 30px);
   align-items: flex-end;
-  padding: 78px 30px 26px;
+  padding: clamp(64px, 9vw, 116px) clamp(20px, 2vw, 34px) clamp(20px, 1.6vw, 28px);
 }
 
+/* Постер той же формы, что плитка в сетках: переход из списка в карточку
+   читается продолжением, а не другим приложением. */
 .am-hero__cover {
   flex: none;
-  width: 208px;
+  width: clamp(150px, 13vw, 226px);
   aspect-ratio: 2 / 3;
   object-fit: cover;
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-l);
-  box-shadow: 0 26px 54px rgba(2, 5, 10, 0.72);
+  border: 1px solid color-mix(in srgb, var(--am-on-art) 16%, transparent);
+  border-radius: var(--am-r-leaf);
+  box-shadow: 0 26px 60px color-mix(in srgb, var(--am-veil) 80%, transparent);
 }
 
 .am-hero__cover--empty {
@@ -74,8 +93,8 @@
   align-items: center;
   justify-content: center;
   font-size: 42px;
-  color: rgba(255, 255, 255, 0.3);
-  background: linear-gradient(160deg, #1b2534, #0f151e);
+  color: color-mix(in srgb, var(--am-on-art) 30%, transparent);
+  background: linear-gradient(160deg, var(--am-panel-2), var(--am-bg-2));
 }
 
 .am-hero__text {
@@ -88,17 +107,18 @@
 
 .am-hero__title {
   margin: 0;
-  font-size: 30px;
+  font-size: clamp(24px, 2.4vw, 36px);
   font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.6);
+  line-height: 1.12;
+  letter-spacing: -0.022em;
+  color: var(--am-on-art);
+  text-shadow: 0 2px 18px color-mix(in srgb, var(--am-veil) 70%, transparent);
 }
 
 .am-hero__sub {
   margin: 0;
   font-size: 13.5px;
-  color: var(--am-dim);
+  color: color-mix(in srgb, var(--am-on-art) 62%, transparent);
 }
 
 .am-pills {
@@ -110,44 +130,35 @@
   list-style: none;
 }
 
+/* Пилюли героя — стекло поверх баннера: плотная заливка на светлой
+   картинке читалась заплатками. */
 .am-pill {
   padding: 4px 11px;
   font-size: 12px;
   font-weight: 550;
-  color: #e6edf8;
-  background: rgba(255, 255, 255, 0.09);
-  border: 1px solid var(--am-line-soft);
-  border-radius: 999px;
+  color: var(--am-on-art);
+  background: color-mix(in srgb, var(--am-veil) 46%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-on-art) 14%, transparent);
+  border-radius: var(--am-r-cap);
+  backdrop-filter: blur(10px) saturate(1.2);
 }
 
 .am-pill--soft {
-  color: var(--am-dim);
-  background: rgba(255, 255, 255, 0.04);
+  color: color-mix(in srgb, var(--am-on-art) 74%, transparent);
+  background: color-mix(in srgb, var(--am-veil) 30%, transparent);
 }
 
 .am-pill--adult {
-  color: #ffd9d9;
-  background: rgba(255, 90, 90, 0.24);
-  border-color: rgba(255, 90, 90, 0.4);
+  color: var(--am-on-art);
+  background: color-mix(in srgb, var(--am-bad) 34%, transparent);
+  border-color: color-mix(in srgb, var(--am-bad) 52%, transparent);
 }
 
 /* Своя оценка — немая пилюля у заголовка: её ищут там, а не в сайдбаре. */
 .am-pill--mine {
-  color: #cfe6ff;
-  background: rgba(88, 166, 255, 0.16);
-  border-color: rgba(88, 166, 255, 0.4);
-}
-
-/* Рейтинг площадок: имя площадки тусклое, значение яркое. */
-.am-pill--rate {
-  color: var(--am-text);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.am-pill__src {
-  margin-right: 6px;
-  font-weight: 500;
-  color: var(--am-faint);
+  color: var(--am-on-art);
+  background: rgb(var(--am-accent-rgb) / 0.3);
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
 }
 
 /* Студии — пилюли героя: это мета тайтла, а не часть записи. */
@@ -156,29 +167,114 @@
   gap: 7px;
   align-items: center;
   font: inherit;
-  color: var(--am-text);
+  color: var(--am-on-art);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.06);
   transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
 }
 
 .am-pill--studio:hover,
 .am-pill--studio:focus-visible {
-  background: var(--am-hover);
+  background: color-mix(in srgb, var(--am-veil) 68%, transparent);
   border-color: var(--am-accent);
+  transform: translateY(-1px);
 }
 
 /* Основная студия с акцентным краем: она и отвечает за постановку. */
 .am-pill--studio-main {
-  border-color: rgba(88, 166, 255, 0.45);
+  border-color: rgb(var(--am-accent-rgb) / 0.55);
 }
 
 .am-pill__logo {
   height: 14px;
   max-width: 26px;
   object-fit: contain;
+}
+
+/* Ряд действий у постера: плеер и закладка. Держать главное действие
+   в правой колонке было ошибкой: на широком окне оно оказывалось
+   в полуметре от названия. */
+.am-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.am-acts__play,
+.am-acts__save {
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+  min-height: var(--am-touch);
+  padding: 0 20px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  border-radius: var(--am-r-cap);
+  cursor: pointer;
+  transition:
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    box-shadow var(--am-mid) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+/* Плеер пока заглушка: кнопка выключена и видно, что это задел.
+   Занятое место дешевле перестройки героя потом. */
+.am-acts__play {
+  color: var(--am-on-art);
+  background: linear-gradient(
+    100deg,
+    rgb(var(--am-accent-rgb) / 0.42),
+    rgb(var(--am-accent-2-rgb) / 0.34)
+  );
+  border: 1px solid rgb(var(--am-accent-rgb) / 0.5);
+  box-shadow: 0 12px 30px rgb(var(--am-accent-rgb) / 0.24);
+  backdrop-filter: blur(10px);
+}
+
+.am-acts__play:disabled {
+  cursor: default;
+  opacity: 0.62;
+  box-shadow: none;
+}
+
+/* Подпись «скоро» вместо подсказки: без неё выключенная кнопка
+   читается поломкой, а не заделом. */
+.am-acts__soon {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--am-on-art) 78%, transparent);
+  background: color-mix(in srgb, var(--am-veil) 52%, transparent);
+  border-radius: var(--am-r-cap);
+}
+
+.am-acts__save {
+  color: var(--am-on-art);
+  background: color-mix(in srgb, var(--am-veil) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-on-art) 18%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.am-acts__save:hover {
+  background: color-mix(in srgb, var(--am-veil) 70%, transparent);
+  border-color: var(--am-accent);
+  transform: translateY(-1px);
+}
+
+.am-acts__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--am-accent);
+  border-radius: var(--am-r-cap);
+  box-shadow: 0 0 10px rgb(var(--am-accent-rgb) / 0.7);
 }
 
 /* Доска карточки: описание, колонка записи, франшиза и люди на одних
@@ -190,16 +286,21 @@
     "fran fran"
     "folk folk";
   grid-template-columns: minmax(0, 84ch) 380px;
-  gap: 18px;
+  gap: var(--am-gap);
   align-items: start;
   justify-content: start;
+  margin-top: var(--am-gap);
 }
 
 .am-split__main {
   grid-area: about;
 }
 
+/* Колонка записи липнет к верху: при описании на два экрана своя оценка
+   и счёт частей уезжали за край окна. */
 .am-split__side {
+  position: sticky;
+  top: 76px;
   grid-area: mine;
 }
 
@@ -207,7 +308,7 @@
 .am-split__side {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--am-gap);
   min-width: 0;
 }
 
@@ -215,7 +316,7 @@
   display: flex;
   grid-area: folk;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--am-gap);
   min-width: 0;
 }
 
@@ -225,7 +326,7 @@
   max-width: 78ch;
   margin: 0;
   line-height: 1.65;
-  color: #d7e0ee;
+  color: color-mix(in srgb, var(--am-text) 88%, transparent);
   white-space: pre-line;
 }
 
@@ -265,62 +366,53 @@
   padding-top: 14px;
 }
 
-/* Колонка свойств записи без коробки; flex обязателен: без него gap не работает. */
+/* Запись — панель, а не воздух: без рамок свои цифры сливались
+   с общим фоном и терялись рядом с описанием. */
 .am-mine {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 6px 4px;
+  gap: 16px;
 }
 
-/* Тихая кнопка закладки: залитая акцентом плаха перекрикивала героя. */
-.am-mine__pick {
+.am-mine__head {
   display: flex;
+  gap: 12px;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 44px;
-  padding: 6px 14px;
+  justify-content: space-between;
+}
+
+.am-mine__head .am-h3 {
+  margin: 0;
+}
+
+.am-mine__edit {
+  min-height: 30px;
+  padding: 0 13px;
   font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--am-text);
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--am-line);
-  border-radius: var(--am-r-m);
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-
-.am-mine__pick:hover {
-  background: var(--am-hover);
-  border-color: rgba(88, 166, 255, 0.45);
-}
-
-.am-mine__pick--empty {
-  color: var(--am-accent);
-}
-
-.am-mine__dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  background: var(--am-accent);
-  border-radius: 50%;
-  box-shadow: 0 0 8px rgba(88, 166, 255, 0.6);
-}
-
-.am-mine__hint {
-  margin-left: auto;
   font-size: 12.5px;
-  font-weight: 500;
-  color: var(--am-faint);
+  font-weight: 600;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease);
 }
 
-.am-mine__pick:hover .am-mine__hint {
+.am-mine__edit:hover {
   color: var(--am-accent);
+  background: var(--am-fill-2);
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
+}
+
+/* Тайтл не в списках: говорим прямо, а не показываем пустую панель. */
+.am-mine__none {
+  margin: 0;
+  font-size: 13px;
+  color: var(--am-faint);
 }
 
 .am-mine__prow {
@@ -338,6 +430,7 @@
 .am-mine__pval {
   font-size: 13px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Полоса записи плотнее общей: здесь она главный счётчик, а не фон. */
@@ -357,7 +450,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 9px 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--am-line-soft);
 }
 
 .am-mine__rname {
@@ -377,14 +470,15 @@
   padding: 10px 14px;
   font-size: 13.5px;
   line-height: 1.5;
-  color: #d7e0ee;
+  color: color-mix(in srgb, var(--am-text) 88%, transparent);
   white-space: pre-line;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--am-fill-1);
   border-left: 2px solid var(--am-accent);
-  border-radius: 0 var(--am-r-s) var(--am-r-s) 0;
+  border-radius: 0 var(--am-r-m) var(--am-r-m) 0;
 }
 
-/* Расхождение с сервером — точка предупреждения: молчание читалось потерей данных. */
+/* Расхождение с сервером — точка предупреждения: молчание читалось
+   потерей данных. */
 .am-mine__drift {
   display: flex;
   gap: 8px;
@@ -400,7 +494,52 @@
   height: 6px;
   content: '';
   background: var(--am-warn);
-  border-radius: 50%;
+  border-radius: var(--am-r-cap);
+}
+
+/* Оценки площадок табличкой в колонке: четырём пилюлям в герое они шумели,
+   а столбиком цифры сравниваются глазом. */
+.am-rates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.am-rates .am-h3 {
+  margin: 0;
+}
+
+.am-rates__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.am-rates__row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 2px;
+  border-top: 1px solid var(--am-line-soft);
+}
+
+.am-rates__row:first-child {
+  border-top: 0;
+}
+
+.am-rates__src {
+  font-size: 13px;
+  color: var(--am-faint);
+}
+
+.am-rates__val {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--am-warn);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Франшиза — полкой постеров на полный ряд доски: хронология длинная,
@@ -445,13 +584,17 @@
   background: var(--am-panel-2);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-m);
-  transition: transform 0.16s ease;
+  transition:
+    transform var(--am-mid) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-slow) var(--am-ease);
 }
 
 .am-part__hit:hover .am-part__art,
 .am-part__hit:focus-visible .am-part__art {
-  transform: translateY(-2px);
   border-color: var(--am-accent);
+  border-radius: var(--am-r-drop);
+  transform: translateY(-3px);
 }
 
 .am-part__art--empty {
@@ -468,19 +611,21 @@
 }
 
 .am-part__hit--still:hover .am-part__art {
-  transform: none;
   border-color: var(--am-line-soft);
+  border-radius: var(--am-r-m);
+  transform: none;
 }
 
 /* Текущий тайтл подсвечен явно: ореол постера и акцентная метка. */
 .am-part__hit--here .am-part__art {
   border-color: var(--am-accent);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.22);
+  box-shadow: 0 0 0 3px rgb(var(--am-accent-rgb) / 0.22);
 }
 
 .am-part__year {
   font-size: 11.5px;
   color: var(--am-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .am-part__name {
@@ -557,9 +702,9 @@
     flex-direction: row;
     gap: 10px;
     align-items: center;
-    min-height: 44px;
+    min-height: var(--am-touch);
     padding: 4px 8px;
-    border-radius: var(--am-r-s);
+    border-radius: var(--am-r-cap);
   }
 
   .am-board--fran-long .am-part__art,
@@ -575,15 +720,16 @@
   .am-board--fran-long .am-part__hit:focus-visible .am-part__art,
   .am-board--fran-short .am-part__hit:hover .am-part__art,
   .am-board--fran-short .am-part__hit:focus-visible .am-part__art {
-    transform: none;
     border-color: var(--am-line-soft);
+    border-radius: var(--am-r-s);
+    transform: none;
   }
 
   .am-board--fran-long .am-part__hit:hover,
   .am-board--fran-long .am-part__hit:focus-visible,
   .am-board--fran-short .am-part__hit:hover,
   .am-board--fran-short .am-part__hit:focus-visible {
-    background: var(--am-hover);
+    background: var(--am-fill-2);
   }
 
   .am-board--fran-long .am-part__hit--still:hover,
@@ -594,7 +740,7 @@
   /* Текущая строка: акцентная кромка слева вдобавок к фону. */
   .am-board--fran-long .am-part__hit--here,
   .am-board--fran-short .am-part__hit--here {
-    background: rgba(88, 166, 255, 0.08);
+    background: rgb(var(--am-accent-rgb) / 0.1);
     box-shadow: inset 2px 0 0 var(--am-accent);
   }
 
@@ -639,16 +785,22 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .am-hero__body {
-    gap: 18px;
-    padding: 60px 20px 20px;
+  /* В одну колонку липкая запись не нужна: она и так сразу под описанием. */
+  .am-split__side {
+    position: static;
   }
 
   .am-hero__cover {
-    width: 148px;
+    width: clamp(132px, 30vw, 168px);
   }
+}
 
-  .am-hero__title {
-    font-size: 24px;
+/* Спокойное движение: системная просьба сильнее наших красот. */
+@media (prefers-reduced-motion: reduce) {
+  .am-part__hit:hover .am-part__art,
+  .am-part__hit:focus-visible .am-part__art,
+  .am-pill--studio:hover,
+  .am-acts__save:hover {
+    transform: none;
   }
 }
