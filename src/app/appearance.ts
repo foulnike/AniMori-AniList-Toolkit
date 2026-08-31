@@ -1,50 +1,53 @@
-// Оформление окна: тёмное, светлое, AMOLED. Значение хранит ядро
-// (ключ am_appearance), здесь только применение к <html> и смена по клику.
+// Выбор темы оформления: тёмная, светлая, AMOLED.
 //
-// Подписи тем лежат рядом с выбором, как SCREEN_TITLES в router/routes.ts:
-// в labels.ts живут слова предметной области — виды, статусы, жанры.
-
+// Тема живёт атрибутом data-am-skin на корне документа, а не классом
+// на компоненте: фон окна, скроллбары и выделение текста задаются
+// выше любого экрана, и при классе на корне приложения они остались бы
+// тёмными на светлой теме.
+//
+// Подписи тем лежат здесь, а не в labels.ts: там слова предметной области
+// — виды, статусы, жанры. Прецедент соседства подписей с выбором уже есть:
+// SCREEN_TITLES живёт в router/routes.ts.
 import { ref } from 'vue'
 
-import { saveSetting, settings, type AppearanceName } from '@/core/settings'
+import { type AppearanceName, saveSetting, settings } from '@/core/settings'
 
-export interface AppearanceOption {
+interface AppearanceOption {
   name: AppearanceName
   title: string
-  /** Знак для кнопки переключателя: лишнего текста в шапке быть не должно. */
+  /** Знак для переключателя в шапке: три слова там шумели бы громче заголовка. */
   mark: string
 }
 
-/** Порядок такой же, как в переключателе: светлее → темнее. */
 export const APPEARANCES: ReadonlyArray<AppearanceOption> = [
-  { name: 'light', title: 'Светлая тема', mark: '☀' },
-  { name: 'dark', title: 'Тёмная тема', mark: '◐' },
-  { name: 'amoled', title: 'Тема AMOLED', mark: '●' },
+  { name: 'dark', title: 'Тёмная', mark: '◐' },
+  { name: 'light', title: 'Светлая', mark: '☀' },
+  { name: 'amoled', title: 'AMOLED', mark: '⬤' },
 ]
 
-/**
- * Выбранная тема для разметки: настройки ядра — обычный объект,
- * и подсветка активной кнопки без ссылки на реактивное значение не перерисовалась бы.
- */
+/** Тема для разметки: читается переключателем и экраном настроек. */
 export const appearance = ref<AppearanceName>(settings.appearance)
 
 function applyAppearance(name: AppearanceName): void {
   document.documentElement.dataset.amSkin = name
 }
 
-/** Поднять тему из настроек. Зовётся из start() до монтирования окна. */
+/**
+ * Ставит сохранённую тему на документ. Зовётся из main.ts сразу после
+ * чтения настроек и до первой отрисовки: смена фона на глазах
+ * читается поломкой.
+ */
 export function startAppearance(): void {
   appearance.value = settings.appearance
   applyAppearance(settings.appearance)
 }
 
 /**
- * Сменить тему. Атрибут меняется сразу, а запись идёт своим ходом:
- * ожидание хранилища перед перекраской читалось бы как подвисание кнопки.
+ * Меняет тему и запоминает выбор. Разметка перекрашивается сразу,
+ * запись в хранилище её не ждёт: тема меняется по свету в комнате,
+ * и ждать диск ради этого нечего.
  */
 export function setAppearance(name: AppearanceName): void {
-  if (appearance.value === name) return
-
   appearance.value = name
   applyAppearance(name)
   void saveSetting('appearance', 'am_appearance', name)
