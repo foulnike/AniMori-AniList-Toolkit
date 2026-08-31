@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
         placeholder="Название на любом языке"
         @input="onType"
       />
-      <span v-if="total !== null" class="am-hunt__num" title="Найдено в каталоге">
+      <span v-if="total !== null" v-tip="'Найдено в каталоге'" class="am-hunt__num">
         {{ total }}
       </span>
     </label>
@@ -234,6 +234,7 @@ onBeforeUnmount(() => {
         :repeat="row.repeat"
         :note="row.note"
         :done="row.done"
+        :soon="row.soon"
         :adult="row.adult"
         @open="open(row.mediaId)"
       />
