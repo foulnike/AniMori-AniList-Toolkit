@@ -3,6 +3,7 @@
 
 import type { MediaBrief } from '@/api/anilist-media'
 import { getEntry } from '@/core/collection'
+import { SOON_STATUS } from '@/core/media-looks'
 import { peekRussianName } from '@/core/media-title'
 
 import { formatWord, partsShort, statusWord } from './labels'
@@ -20,6 +21,7 @@ export interface TileRow {
   repeat: number
   note: string | null
   done: number
+  soon: boolean
   adult: boolean
 }
 
@@ -45,6 +47,15 @@ function briefFacts(brief: MediaBrief): string {
 }
 
 /**
+ * Тайтл ещё не вышел. Знак берётся из ответа каталога, а не из года: у анонсов
+ * год бывает известен задолго до выхода, и по нему анонс не отличить от
+ * вышедшего в тот же сезон.
+ */
+function notOut(brief: MediaBrief): boolean {
+  return brief.status === SOON_STATUS
+}
+
+/**
  * Своя закладка: сначала местный список, и только потом ответ сервера.
  * Без входа ownEntry пуст всегда, а свой список у нас есть и так (пункт 3.14).
  */
@@ -63,13 +74,18 @@ function ownSeen(brief: MediaBrief): number {
   return brief.ownEntry?.progress ?? 0
 }
 
-/** Строка счёта на постере: свой прогресс, а без него — размер тайтла. */
+/**
+ * Строка счёта на постере: свой прогресс, а без него — размер тайтла.
+ * У анонса размер молчит: «0 эп.» и «12 эп.» у невышедшего тайтла означают
+ * не одно и то же, а плитка их показывала одинаково.
+ */
 function ownText(brief: MediaBrief): string | null {
   const parts = partsCount(brief)
   const seen = ownSeen(brief)
   const short = partsShort()
 
   if (seen > 0) return parts === null ? `${seen} ${short}` : `${seen} / ${parts} ${short}`
+  if (notOut(brief)) return null
   return parts === null ? null : `${parts} ${short}`
 }
 
@@ -110,6 +126,7 @@ export function toTileRow(brief: MediaBrief): TileRow {
     repeat: mine?.repeat ?? 0,
     note: mine?.notes ?? null,
     done: donePart(brief),
+    soon: notOut(brief),
     adult: brief.isAdult,
   }
 }
