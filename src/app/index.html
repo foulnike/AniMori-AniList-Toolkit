@@ -1,5 +1,8 @@
 <!doctype html>
-<html lang="ru">
+<!-- Тема стоит в разметке дефолтом: настройки читаются асинхронно, и без неё
+     первый кадр был бы белым. startAppearance() из main.ts перепишет атрибут,
+     когда выбор человека прочитан, и делает это до первой отрисовки. -->
+<html lang="ru" data-am-skin="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
