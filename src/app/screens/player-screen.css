@@ -1,52 +1,77 @@
-/* Экран просмотра. Кадр главный, всё остальное лежит на нём или рядом. */
+/*
+ * Стили экрана просмотра. Подключаются через <style scoped src>, поэтому
+ * всё здесь живёт только внутри PlayerScreen.vue и ездит вместе с узлом,
+ * когда театр переезжает в body.
+ *
+ * Два вида одного экрана. Внутри страницы — кадр 16:9 и колонка со списками
+ * справа. В театре — чёрный прямоугольник на всё окно, шапка и панель
+ * накладками на градиентных затемнениях, списки — ящиком по кнопке.
+ *
+ * Поверх видео токены темы почти не используются намеренно: кадр одинаково
+ * чёрный во всех трёх темах, и светлая панель на нём читалась бы плохо.
+ * Токены остаются там, где часть интерфейса живёт на странице: шапка и списки.
+ */
+
 .am-play {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(248px, 21vw, 356px);
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: var(--am-gap);
   align-items: start;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1180px) {
   .am-play {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 .am-play__main {
-  display: grid;
-  gap: 12px;
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+  gap: 14px;
 }
+
+/* Шапка */
 
 .am-play__head {
   display: flex;
-  align-items: center;
-  gap: 12px;
   min-width: 0;
-  transition:
-    opacity var(--am-mid) var(--am-ease),
-    transform var(--am-mid) var(--am-ease);
+  align-items: center;
+  gap: 14px;
 }
 
 .am-play__back {
-  display: inline-flex;
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  height: var(--am-ctl);
-  padding: 0 14px;
+  gap: 6px;
+  padding: 8px 14px 8px 10px;
   border: 1px solid var(--am-edge);
   border-radius: var(--am-r-cap);
-  background: var(--am-glass);
+  background: var(--am-fill-1);
   color: var(--am-text);
+  font: inherit;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition:
     background var(--am-fast) var(--am-ease),
-    transform var(--am-fast) var(--am-ease);
+    border-color var(--am-fast) var(--am-ease);
 }
 
 .am-play__back:hover {
   background: var(--am-fill-2);
+  border-color: var(--am-line-soft);
+}
+
+.am-play__back .am-play__ico {
+  width: 18px;
+  height: 18px;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-play__back:hover .am-play__ico {
   transform: translateX(-2px);
 }
 
@@ -56,30 +81,32 @@
 
 .am-play__name {
   margin: 0;
-  font-size: 17px;
-  font-weight: 620;
-  line-height: 1.25;
-  color: var(--am-text);
   overflow: hidden;
+  color: var(--am-text);
+  font-size: clamp(17px, 1.5vw, 21px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .am-play__sub {
   margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--am-dim);
   overflow: hidden;
+  color: var(--am-dim);
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Полотно чёрное во всех темах: видео не должно спорить с фоном. */
+/* Кадр */
+
 .am-play__stage {
   position: relative;
+  overflow: hidden;
+  width: 100%;
   aspect-ratio: 16 / 9;
   border-radius: var(--am-r-l);
-  overflow: hidden;
   background: #000;
   box-shadow: var(--am-sh-2);
 }
@@ -92,414 +119,623 @@
   object-fit: contain;
 }
 
-/* Кадр сам — большая кнопка паузы, как всюду. */
+/* Весь кадр — одна большая кнопка пуска, как везде. */
 .am-play__tap {
   position: absolute;
-  inset: 0;
   z-index: 1;
   border: 0;
   background: transparent;
+  inset: 0;
   cursor: pointer;
 }
 
-.am-play__tap:focus-visible {
-  outline: 2px solid rgb(var(--am-accent-rgb));
-  outline-offset: -4px;
+.am-play--wide.am-play--calm .am-play__tap {
+  cursor: none;
 }
 
 .am-play__hold {
   position: absolute;
-  left: 50%;
   top: 50%;
+  left: 50%;
   z-index: 2;
   display: grid;
-  place-items: center;
-  width: 84px;
-  height: 84px;
-  border-radius: var(--am-r-blob);
-  background: rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(var(--am-blur));
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.44);
   color: #fff;
-  font-size: 30px;
-  transform: translate(-50%, -50%);
+  animation: am-play-in var(--am-mid) var(--am-ease) both;
+  backdrop-filter: blur(var(--am-blur));
+  place-items: center;
   pointer-events: none;
+  transform: translate(-50%, -50%);
 }
+
+.am-play__hold .am-play__ico {
+  width: 40px;
+  height: 40px;
+}
+
+/* Колесо посреди серии: сеть не поспевает, но всё ещё жива. */
+.am-play__wait {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  border: 3px solid rgb(255 255 255 / 0.22);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: am-play-turn 0.9s linear infinite;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+/* Заслонка */
 
 .am-play__veil {
   position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
+  background: rgb(6 8 12 / 0.74);
+  gap: 14px;
+  inset: 0;
   text-align: center;
-  background: var(--am-veil);
 }
 
 .am-play__blur {
   position: absolute;
-  inset: 0;
   background-position: center;
   background-size: cover;
-  filter: blur(26px) saturate(1.1);
+  filter: blur(28px) saturate(1.1);
+  inset: -8%;
   opacity: 0.34;
+  transform: scale(1.06);
 }
 
 .am-play__spin {
+  position: relative;
   width: 34px;
   height: 34px;
-  border: 2px solid var(--am-line-soft);
-  border-top-color: rgb(var(--am-accent-rgb));
-  border-radius: var(--am-r-blob);
-  animation: am-play-spin 0.9s linear infinite;
-}
-
-@keyframes am-play-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  border: 3px solid rgb(255 255 255 / 0.22);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: am-play-turn 0.9s linear infinite;
 }
 
 .am-play__word {
   position: relative;
+  max-width: 460px;
   margin: 0;
-  max-width: 34ch;
-  font-size: 13px;
   color: #fff;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .am-play__act {
   position: relative;
-  height: var(--am-ctl);
-  padding: 0 16px;
-  border: 1px solid var(--am-edge);
+  padding: 10px 18px;
+  border: 0;
   border-radius: var(--am-r-cap);
-  background: var(--am-glass-2);
+  background: rgb(var(--am-accent-rgb) / 0.9);
   color: #fff;
+  font: inherit;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background var(--am-fast) var(--am-ease);
 }
 
 .am-play__act:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgb(var(--am-accent-rgb) / 1);
 }
 
+/* Пропуск заставки и титров — над панелью справа, как принято. */
 .am-play__skip {
   position: absolute;
   right: 18px;
   bottom: 92px;
   z-index: 4;
-  height: 36px;
-  padding: 0 16px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 10px 16px;
+  border: 1px solid rgb(255 255 255 / 0.2);
   border-radius: var(--am-r-cap);
-  background: rgba(0, 0, 0, 0.56);
-  backdrop-filter: blur(var(--am-blur));
+  background: rgb(10 12 17 / 0.82);
   color: #fff;
+  font: inherit;
   font-size: 13px;
+  font-weight: 600;
+  animation: am-play-in var(--am-fast) var(--am-ease) both;
+  backdrop-filter: blur(var(--am-blur));
   cursor: pointer;
 }
 
 .am-play__skip:hover {
-  background: rgba(0, 0, 0, 0.72);
+  background: rgb(18 22 30 / 0.92);
 }
 
-/* Панель лежит на кадре и уезжает вниз по тишине. */
+/* Панель */
+
 .am-play__deck {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
+  z-index: 4;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0));
+  flex-direction: column;
+  padding: 40px 12px 10px;
+  background: linear-gradient(
+    to top,
+    rgb(0 0 0 / 0.86) 0%,
+    rgb(0 0 0 / 0.58) 44%,
+    rgb(0 0 0 / 0) 100%
+  );
+  gap: 4px;
+  inset: auto 0 0;
   transition:
     opacity var(--am-mid) var(--am-ease),
     transform var(--am-mid) var(--am-ease);
 }
 
-.am-play--calm .am-play__deck {
+.am-play--calm .am-play__deck,
+.am-play--wide.am-play--calm .am-play__head {
   opacity: 0;
-  transform: translateY(110%);
   pointer-events: none;
+  transform: translateY(10px);
 }
 
-.am-play--calm .am-play__head {
-  opacity: 0;
+/* Полоса времени */
+
+.am-play__seek {
+  position: relative;
+  display: flex;
+  height: 18px;
+  align-items: center;
 }
 
-.am-play__key {
-  display: inline-grid;
-  place-items: center;
-  min-width: var(--am-ctl);
-  height: var(--am-ctl);
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--am-r-cap);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background var(--am-fast) var(--am-ease),
-    transform var(--am-fast) var(--am-ease);
-}
-
-.am-play__key--word {
-  padding: 0 16px;
-  font-size: 13px;
-}
-
-.am-play__key:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.am-play__key:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.am-play__note {
-  font-size: 16px;
-}
-
-.am-play__note--off {
-  opacity: 0.5;
-  text-decoration: line-through;
-}
-
-.am-play__clock {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.86);
-}
-
-/* Полоса времени: дорожка, буфер, пройденное и головка. */
 .am-play__line {
   position: relative;
-  flex: 1 1 220px;
-  min-width: 140px;
-  height: 20px;
-  display: flex;
-  align-items: center;
+  height: 4px;
+  flex: 1 1 auto;
+  border-radius: var(--am-r-cap);
+  background: rgb(255 255 255 / 0.24);
   cursor: pointer;
   touch-action: none;
+  transition: height var(--am-fast) var(--am-ease);
 }
 
-.am-play__line::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 4px;
-  border-radius: var(--am-r-cap);
-  background: rgba(255, 255, 255, 0.24);
-  transition: height var(--am-fast) var(--am-ease);
+.am-play__seek:hover .am-play__line,
+.am-play__line:focus-visible {
+  height: 6px;
+}
+
+.am-play__line:focus-visible {
+  outline: 2px solid rgb(var(--am-accent-rgb) / 0.9);
+  outline-offset: 4px;
 }
 
 .am-play__buf,
 .am-play__fill {
   position: absolute;
+  top: 0;
+  bottom: 0;
   left: 0;
-  height: 4px;
-  border-radius: var(--am-r-cap);
-  transition: height var(--am-fast) var(--am-ease);
+  border-radius: inherit;
 }
 
 .am-play__buf {
-  background: rgba(255, 255, 255, 0.34);
+  background: rgb(255 255 255 / 0.26);
 }
 
 .am-play__fill {
-  background: rgb(var(--am-accent-rgb));
+  background: rgb(var(--am-accent-rgb) / 1);
 }
 
 .am-play__knob {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  border-radius: var(--am-r-blob);
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   background: #fff;
-  box-shadow: var(--am-sh-1);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
+  transform: translate(-50%, -50%);
+  transition: width var(--am-fast) var(--am-ease), height var(--am-fast) var(--am-ease);
+}
+
+.am-play__seek:hover .am-play__knob {
+  width: 14px;
+  height: 14px;
+}
+
+/* Подпись времени под указателем: без неё перемотка — гадание. */
+.am-play__bubble {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  padding: 4px 8px;
+  border-radius: var(--am-r-s);
+  background: rgb(8 10 14 / 0.94);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
   transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* Ряд кнопок */
+
+.am-play__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.am-play__clip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.am-play__clip--end {
+  margin-left: auto;
+}
+
+/*
+ * Кнопка — квадрат со сеткой внутри: знак стоит ровно в центре всегда,
+ * потому что у него фиксированный размер и нет базовой линии.
+ * По наведению поднимается знак, а не кнопка — тот же приём, что в рельсе.
+ */
+.am-play__key {
+  position: relative;
+  display: grid;
+  width: var(--am-ctl);
+  height: var(--am-ctl);
+  border: 0;
+  border-radius: var(--am-r-m);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  place-items: center;
   transition:
-    width var(--am-fast) var(--am-ease),
-    height var(--am-fast) var(--am-ease);
+    background var(--am-fast) var(--am-ease),
+    opacity var(--am-fast) var(--am-ease);
 }
 
-.am-play__line:hover::before,
-.am-play__line:focus-visible::before,
-.am-play__line:hover .am-play__buf,
-.am-play__line:focus-visible .am-play__buf,
-.am-play__line:hover .am-play__fill,
-.am-play__line:focus-visible .am-play__fill {
-  height: 6px;
+.am-play__key:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.14);
 }
 
-.am-play__line:hover .am-play__knob,
-.am-play__line:focus-visible .am-play__knob {
-  width: 16px;
-  height: 16px;
+.am-play__key:disabled {
+  cursor: default;
+  opacity: 0.34;
 }
 
-.am-play__line:focus-visible,
-.am-play__vol:focus-visible,
-.am-play__key:focus-visible,
-.am-play__q:focus-visible,
-.am-play__item:focus-visible,
-.am-play__back:focus-visible,
-.am-play__act:focus-visible,
-.am-play__skip:focus-visible {
-  outline: 2px solid rgb(var(--am-accent-rgb));
-  outline-offset: 3px;
+.am-play__key:focus-visible {
+  outline: 2px solid rgb(var(--am-accent-rgb) / 0.9);
+  outline-offset: 2px;
+}
+
+.am-play__key--on {
+  background: rgb(var(--am-accent-rgb) / 0.28);
+}
+
+.am-play__ico {
+  display: block;
+  width: 22px;
+  height: 22px;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-play__key:hover:not(:disabled) .am-play__ico {
+  transform: translateY(-1px);
+}
+
+.am-play__key--main {
+  width: 48px;
+  height: 48px;
+}
+
+.am-play__key--main .am-play__ico {
+  width: 26px;
+  height: 26px;
+}
+
+.am-play__key--word {
+  width: auto;
+  min-width: 56px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Подсказка живёт внутри театра, а не в body: общая плашка v-tip в родном
+ * полном экране осталась бы под кадром и просто не показалась.
+ */
+.am-play__key[data-tip]::after,
+.am-play__back[data-tip]::after {
+  position: absolute;
+  z-index: 6;
+  padding: 5px 9px;
+  border-radius: var(--am-r-s);
+  background: rgb(8 10 14 / 0.94);
+  color: #fff;
+  content: attr(data-tip);
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+  white-space: nowrap;
+}
+
+.am-play__key[data-tip]::after {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, 4px);
+}
+
+.am-play__back[data-tip]::after {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, -4px);
+}
+
+.am-play__key[data-tip]:hover:not(:disabled)::after,
+.am-play__key[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.am-play__back[data-tip]:hover::after,
+.am-play__back[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* У крайней правой кнопки пузырёк прижимается к краю: кадр его срезает. */
+.am-play__clip--end > .am-play__key:last-child[data-tip]::after {
+  right: 0;
+  left: auto;
+  transform: translate(0, 4px);
+}
+
+.am-play__clip--end > .am-play__key:last-child[data-tip]:hover::after,
+.am-play__clip--end > .am-play__key:last-child[data-tip]:focus-visible::after {
+  transform: translate(0, 0);
+}
+
+/* Громкость: полоса раскрывается по наведению и по фокусу с пульта. */
+
+.am-play__sound {
+  display: flex;
+  align-items: center;
 }
 
 .am-play__vol {
   position: relative;
-  flex: 0 0 88px;
-  height: 20px;
-  display: flex;
-  align-items: center;
+  width: 0;
+  height: 16px;
   cursor: pointer;
+  opacity: 0;
   touch-action: none;
+  transition:
+    width var(--am-mid) var(--am-ease),
+    opacity var(--am-fast) var(--am-ease),
+    margin var(--am-mid) var(--am-ease);
+}
+
+.am-play__sound:hover .am-play__vol,
+.am-play__sound:focus-within .am-play__vol {
+  width: 74px;
+  margin: 0 8px 0 4px;
+  opacity: 1;
 }
 
 .am-play__vol::before {
-  content: '';
   position: absolute;
-  left: 0;
+  top: 50%;
   right: 0;
+  left: 0;
   height: 4px;
   border-radius: var(--am-r-cap);
-  background: rgba(255, 255, 255, 0.24);
+  background: rgb(255 255 255 / 0.26);
+  content: '';
+  transform: translateY(-50%);
 }
 
 .am-play__vol-fill {
   position: absolute;
+  top: 50%;
   left: 0;
   height: 4px;
   border-radius: var(--am-r-cap);
-  background: rgba(255, 255, 255, 0.86);
+  background: #fff;
+  transform: translateY(-50%);
 }
 
-.am-play__group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.am-play__vol-knob {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
 }
 
-.am-play__q {
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--am-r-cap);
-  background: rgba(255, 255, 255, 0.08);
+.am-play__vol:focus-visible {
+  outline: 2px solid rgb(var(--am-accent-rgb) / 0.9);
+  outline-offset: 3px;
+}
+
+.am-play__clock {
+  margin-left: 8px;
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.am-play__clock-all {
+  color: rgb(255 255 255 / 0.6);
+}
+
+/* Выбор качества */
+
+.am-play__pick {
+  position: relative;
+  display: flex;
+}
+
+.am-play__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 6;
+  min-width: 136px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: var(--am-r-m);
+  background: rgb(10 12 17 / 0.96);
+  box-shadow: var(--am-sh-2);
+  animation: am-play-pop var(--am-fast) var(--am-ease) both;
+  list-style: none;
+}
+
+.am-play__opt {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--am-r-s);
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
   cursor: pointer;
+  gap: 8px;
+  text-align: left;
 }
 
-.am-play__q--on {
-  border-color: rgba(var(--am-accent-rgb), 0.72);
-  background: rgba(var(--am-accent-rgb), 0.28);
+.am-play__opt:hover {
+  background: rgb(255 255 255 / 0.12);
 }
 
-/* Боковая колонка: озвучки и серии одной и той же строкой. */
-.am-play__side {
+.am-play__opt--on {
+  color: rgb(var(--am-accent-rgb) / 1);
+  font-weight: 600;
+}
+
+.am-play__opt-tick {
   display: grid;
-  gap: var(--am-gap);
+  width: 16px;
+  height: 16px;
+  place-items: center;
+}
+
+.am-play__opt-tick .am-play__ico {
+  width: 16px;
+  height: 16px;
+}
+
+/* Списки */
+
+.am-play__side {
+  display: flex;
   min-width: 0;
-  transition:
-    opacity var(--am-mid) var(--am-ease),
-    transform var(--am-mid) var(--am-ease);
+  flex-direction: column;
+  gap: 12px;
 }
 
 .am-play__box {
-  padding: 14px;
+  padding: 12px;
   border: 1px solid var(--am-edge);
   border-radius: var(--am-r-l);
-  background: var(--am-panel-2);
+  background: var(--am-glass);
   backdrop-filter: blur(var(--am-blur));
 }
 
 .am-play__h {
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  color: var(--am-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--am-faint);
 }
 
 .am-play__list {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  max-height: 320px;
+  flex-direction: column;
   margin: 0;
   padding: 0;
-  list-style: none;
-  max-height: min(52vh, 560px);
   overflow-y: auto;
-  scrollbar-width: thin;
+  gap: 2px;
+  list-style: none;
   scrollbar-color: var(--am-scroll) transparent;
-}
-
-.am-play__list:hover {
-  scrollbar-color: var(--am-scroll-on) transparent;
+  scrollbar-width: thin;
 }
 
 .am-play__item {
   display: flex;
-  align-items: center;
-  gap: 8px;
   width: 100%;
+  align-items: center;
   padding: 8px 10px;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--am-r-m);
-  background: var(--am-fill-1);
+  background: transparent;
   color: var(--am-text);
+  font: inherit;
   font-size: 13px;
-  text-align: left;
   cursor: pointer;
-  transition:
-    background var(--am-fast) var(--am-ease),
-    border-color var(--am-fast) var(--am-ease);
+  gap: 8px;
+  text-align: left;
+  transition: background var(--am-fast) var(--am-ease);
 }
 
 .am-play__item:hover {
-  background: var(--am-fill-2);
+  background: var(--am-fill-1);
+}
+
+.am-play__item:focus-visible {
+  outline: 2px solid rgb(var(--am-accent-rgb) / 0.9);
+  outline-offset: -2px;
 }
 
 .am-play__item--on {
-  border-color: rgba(var(--am-accent-rgb), 0.5);
-  background: rgba(var(--am-accent-rgb), 0.14);
+  background: rgb(var(--am-accent-rgb) / 0.16);
+  color: var(--am-text);
+  font-weight: 600;
 }
 
 .am-play__num {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
   min-width: 26px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: var(--am-r-cap);
-  background: var(--am-fill-3);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
   color: var(--am-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.am-play__item--on .am-play__num {
+  color: rgb(var(--am-accent-rgb) / 1);
 }
 
 .am-play__word-cut {
+  overflow: hidden;
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -507,186 +743,245 @@
 .am-play__src,
 .am-play__time {
   flex: 0 0 auto;
-  font-size: 11px;
   color: var(--am-faint);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .am-play__none {
   margin: 0;
-  font-size: 12px;
+  padding: 6px 2px;
   color: var(--am-faint);
+  font-size: 13px;
 }
 
-/* Театр: кадр во всё окно, всё остальное всплывает над ним. */
+/*
+ * Театр. Узел лежит прямо в body, поэтому его не зажимает ни один чужой
+ * контекст наложения. z-index нужен только как запасной путь: если родной
+ * полный экран не дали, театр всё равно перекрывает окно целиком.
+ */
 .am-play--wide {
   position: fixed;
-  inset: 0;
-  z-index: 60;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  padding: 0;
+  z-index: 90;
+  display: block;
   background: #000;
+  gap: 0;
+  inset: 0;
 }
 
 .am-play--wide .am-play__main {
-  display: block;
-  height: 100vh;
+  height: 100%;
+  gap: 0;
 }
 
 .am-play--wide .am-play__stage {
-  height: 100vh;
-  aspect-ratio: auto;
+  height: 100%;
   border-radius: 0;
+  aspect-ratio: auto;
   box-shadow: none;
 }
 
 .am-play--wide .am-play__head {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 4;
-  padding: 16px 24px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  z-index: 5;
+  padding: 18px 24px 40px;
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.7) 0%, rgb(0 0 0 / 0) 100%);
+  inset: 0 0 auto;
+  transition:
+    opacity var(--am-mid) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
+}
+
+.am-play--wide .am-play__back {
+  border-color: rgb(255 255 255 / 0.18);
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+}
+
+.am-play--wide .am-play__back:hover {
+  background: rgb(255 255 255 / 0.2);
 }
 
 .am-play--wide .am-play__name,
 .am-play--wide .am-play__sub {
   color: #fff;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
 }
 
-.am-play--wide .am-play__back {
-  height: 46px;
-  padding: 0 18px;
-  border-color: rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  font-size: 15px;
+.am-play--wide .am-play__sub {
+  color: rgb(255 255 255 / 0.72);
 }
 
-.am-play--wide.am-play--calm .am-play__head {
-  transform: translateY(-100%);
-  pointer-events: none;
-}
-
-/* Крупный масштаб включается вместе с полным экраном: с дивана видно. */
 .am-play--wide .am-play__deck {
-  gap: 14px;
-  padding: 22px 28px;
+  padding: 64px 28px 22px;
+  gap: 6px;
 }
 
-.am-play--wide .am-play__key {
-  min-width: 52px;
-  height: 52px;
-  font-size: 19px;
-}
-
-.am-play--wide .am-play__key--word {
-  padding: 0 22px;
-  font-size: 15px;
-}
-
-.am-play--wide .am-play__clock {
-  font-size: 15px;
+.am-play--wide .am-play__seek {
+  height: 22px;
 }
 
 .am-play--wide .am-play__line {
-  height: 28px;
+  height: 5px;
 }
 
-.am-play--wide .am-play__line::before,
-.am-play--wide .am-play__buf,
-.am-play--wide .am-play__fill {
-  height: 6px;
+.am-play--wide .am-play__seek:hover .am-play__line {
+  height: 8px;
 }
 
-.am-play--wide .am-play__knob {
-  width: 18px;
-  height: 18px;
+.am-play--wide .am-play__key {
+  width: 46px;
+  height: 46px;
 }
 
-.am-play--wide .am-play__vol {
-  flex: 0 0 128px;
-  height: 28px;
+.am-play--wide .am-play__ico {
+  width: 24px;
+  height: 24px;
 }
 
-.am-play--wide .am-play__q {
-  height: 40px;
-  padding: 0 18px;
+.am-play--wide .am-play__key--main {
+  width: 56px;
+  height: 56px;
+}
+
+.am-play--wide .am-play__key--main .am-play__ico {
+  width: 30px;
+  height: 30px;
+}
+
+.am-play--wide .am-play__key--word {
+  width: auto;
   font-size: 14px;
 }
 
-.am-play--wide .am-play__skip {
-  right: 28px;
-  bottom: 132px;
-  height: 48px;
-  padding: 0 22px;
-  font-size: 15px;
+.am-play--wide .am-play__clock {
+  font-size: 14px;
 }
 
-/* Списки нужны и в театре: иначе с пульта не выбрать серию. */
+/* Ящик со списками выезжает справа и закрывается той же кнопкой. */
 .am-play--wide .am-play__side {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 4;
-  width: clamp(280px, 24vw, 400px);
-  padding: 88px 22px 132px;
+  z-index: 6;
+  width: min(390px, 84vw);
+  padding: 78px 18px 108px;
   overflow-y: auto;
-  align-content: start;
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0));
-  scrollbar-width: thin;
-  scrollbar-color: var(--am-scroll) transparent;
+  background: linear-gradient(to left, rgb(4 6 10 / 0.97) 76%, rgb(4 6 10 / 0.74) 100%);
+  animation: am-play-slide var(--am-mid) var(--am-ease) both;
+  inset: 0 0 0 auto;
 }
 
 .am-play--wide .am-play__box {
-  border-color: rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.42);
-}
-
-.am-play--wide .am-play__item {
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  font-size: 15px;
-}
-
-.am-play--wide .am-play__item:hover {
-  background: rgba(255, 255, 255, 0.16);
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.04);
 }
 
 .am-play--wide .am-play__list {
   max-height: none;
-  overflow: visible;
 }
 
-.am-play--wide.am-play--calm .am-play__side {
-  opacity: 0;
-  transform: translateX(8%);
-  pointer-events: none;
+.am-play--wide .am-play__item {
+  color: rgb(255 255 255 / 0.9);
 }
 
-/* В театре курсор уходит вместе с панелью. */
-.am-play--wide.am-play--calm {
-  cursor: none;
+.am-play--wide .am-play__item:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.am-play--wide .am-play__h {
+  color: rgb(255 255 255 / 0.56);
+}
+
+/*
+ * Родной полный экран. Без ::backdrop браузер подкладывает под кадр белый
+ * прямоугольник, и он виден по краям на не совпадающих пропорциях.
+ */
+.am-play:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+
+.am-play::backdrop {
+  background: #000;
+}
+
+@media (max-width: 620px) {
+  .am-play__back-word {
+    display: none;
+  }
+
+  .am-play__back {
+    padding: 8px 10px;
+  }
+
+  .am-play__clock {
+    font-size: 12px;
+  }
+}
+
+@keyframes am-play-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes am-play-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes am-play-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes am-play-slide {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .am-play__spin {
-    animation-duration: 2.4s;
+  .am-play__deck,
+  .am-play__key,
+  .am-play__ico,
+  .am-play__line,
+  .am-play__knob,
+  .am-play__vol,
+  .am-play__item,
+  .am-play__back {
+    transition: none;
   }
 
-  .am-play__deck,
-  .am-play__head,
+  .am-play__hold,
+  .am-play__menu,
   .am-play__side,
-  .am-play__key,
-  .am-play__back,
-  .am-play__item,
-  .am-play__knob,
-  .am-play__line::before,
-  .am-play__buf,
-  .am-play__fill {
-    transition: none;
+  .am-play__skip {
+    animation: none;
+  }
+
+  .am-play__spin,
+  .am-play__wait {
+    animation-duration: 2.4s;
   }
 }
