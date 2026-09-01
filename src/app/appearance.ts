@@ -17,12 +17,18 @@ interface AppearanceOption {
   title: string
   /** Знак для переключателя в шапке: три слова там шумели бы громче заголовка. */
   mark: string
+  /**
+   * Подсказка под наведением: одним словом названия не объяснить, чем темы
+   * отличаются. Поле обязательное: у необязательного разметка получала бы
+   * `string | undefined`, и у новой темы подсказка молча пропадала бы.
+   */
+  hint: string
 }
 
 export const APPEARANCES: ReadonlyArray<AppearanceOption> = [
-  { name: 'dark', title: 'Тёмная', mark: '◐' },
-  { name: 'light', title: 'Светлая', mark: '☀' },
-  { name: 'amoled', title: 'AMOLED', mark: '⬤' },
+  { name: 'dark', title: 'Тёмная', mark: '◐', hint: 'Тёмная: обычный вид приложения' },
+  { name: 'light', title: 'Светлая', mark: '☀', hint: 'Светлая: для дневного света' },
+  { name: 'amoled', title: 'AMOLED', mark: '⬤', hint: 'AMOLED: чёрный фон, экономит заряд' },
 ]
 
 /** Тема для разметки: читается переключателем и экраном настроек. */
