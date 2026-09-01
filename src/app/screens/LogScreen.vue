@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
   <section class="am-page">
     <div class="am-log__top">
       <h2 class="am-h2">Журнал</h2>
-      <span class="am-log__num" title="Строк на экране">{{ rows.length }}</span>
+      <span v-tip="'Строк на экране'" class="am-log__num">{{ rows.length }}</span>
       <span class="am-bar__gap" />
       <button class="am-btn am-btn--soft" type="button" @click="onCopy">Скопировать</button>
       <button class="am-btn am-btn--ghost" type="button" @click="onClear">Очистить</button>
