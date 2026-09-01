@@ -6,7 +6,8 @@
 // в api/video-sources.ts, и ни одной правки здесь.
 //
 // Ссылки не кэшируются нигде: у Kodik они живут часы, и отдавать
-// протухшую вместо отказа хуже, чем спросить заново.
+// протухшую вместо отказа хуже, чем спросить заново. А вот выбор человека —
+// озвучка, серия, качество — живёт в player-keep и переживает закрытие окна.
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
@@ -24,7 +25,9 @@ import {
 } from '@/core/video'
 import { Logger } from '@/utils/logger'
 
-import { navigate } from '../router'
+import { goBack, navigate, peekPrevious } from '../router'
+
+import { peekPick, rememberPick, whenWatchReady } from './player-keep'
 
 /** Озвучка в выборке: источник и его ключ едут вместе с подписью. */
 export interface VoiceRow {
@@ -69,37 +72,8 @@ export interface PlayerView {
   openCard: () => void
 }
 
-/** Что человек выбрал в этот запуск: возврат к тайтлу не начинает с нуля. */
-interface Choice {
-  voiceKey: string
-  episode: number
-  height: number
-}
-
-const choices = new Map<number, Choice>()
-
-/** Где остановились, в секундах. Ключ — тайтл, озвучка и серия. */
-const spots = new Map<string, number>()
-
 /** Начальное качество: выше 720 без спроса не берём — канал бывает узким. */
 const DEFAULT_HEIGHT = 720
-
-export function spotKey(mediaId: number, voiceKey: string, episode: number): string {
-  return `${mediaId}|${voiceKey}|${episode}`
-}
-
-/** Запоминает место остановки. Первые секунды не считаются за просмотр. */
-export function rememberSpot(key: string, seconds: number): void {
-  if (seconds < 10) {
-    spots.delete(key)
-    return
-  }
-  spots.set(key, seconds)
-}
-
-export function peekSpot(key: string): number {
-  return spots.get(key) ?? 0
-}
 
 /** Строка серии для полки и заголовка. */
 export function episodeLabel(item: VideoEpisode): string {
@@ -279,13 +253,7 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
   }
 
   function remember(): void {
-    if (mediaId.value === 0 || voiceKey.value === '') return
-
-    choices.set(mediaId.value, {
-      voiceKey: voiceKey.value,
-      episode: episode.value,
-      height: height.value,
-    })
+    rememberPick(mediaId.value, voiceKey.value, episode.value, height.value)
   }
 
   /** Полный заход: карточка, источники, серии, ссылки. */
@@ -340,11 +308,15 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
         return
       }
 
-      // Выбор этого запуска главнее первой строки выборки.
-      const seen = choices.get(id)
+      // Прошлый выбор главнее первой строки выборки. Ждём хранилище здесь,
+      // а не на входе: к этой строке оно давно ответило пока шла сеть.
+      await whenWatchReady()
+      if (mine !== run) return
+
+      const seen = peekPick(id)
       const kept = rows.find((r) => r.key === seen?.voiceKey)
       voiceKey.value = kept?.key ?? rows[0]?.key ?? ''
-      if (seen) height.value = seen.height
+      if (seen !== null && seen.height > 0) height.value = seen.height
 
       await openVoice(mine, seen?.episode ?? 1)
     } catch (e) {
@@ -398,8 +370,28 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
     void resolve(++run)
   }
 
+  /**
+   * Уход на карточку тайтла.
+   *
+   * Пришли с неё — делаем шаг назад, а не шаг вперёд на тот же адрес:
+   * иначе в истории копится «карточка → плеер → карточка», и кнопка «назад»
+   * возвращает в плеер, из которого только что вышли.
+   *
+   * Пришли иначе (ссылка, продолжение с главной) — меняем запись плеера
+   * на карточку: плеер — конечная точка, и возвращаться в него кнопкой
+   * «назад» человек не просит.
+   */
   function openCard(): void {
-    if (mediaId.value > 0) navigate('media', { id: String(mediaId.value) })
+    const id = mediaId.value
+    if (id === 0) return
+
+    const back = peekPrevious()
+    if (back !== null && back.name === 'media' && back.params.id === String(id)) {
+      goBack()
+      return
+    }
+
+    navigate('media', { id: String(id) }, { replace: true })
   }
 
   return {
