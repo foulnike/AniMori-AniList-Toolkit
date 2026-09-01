@@ -187,7 +187,7 @@ onBeforeUnmount(() => {
           <h3 class="am-sheet__name">{{ title }}</h3>
         </div>
 
-        <button class="am-sheet__close" type="button" title="Закрыть" @click="onClose">
+        <button v-tip="'Закрыть'" class="am-sheet__close" type="button" @click="onClose">
           <span aria-hidden="true">×</span>
         </button>
       </header>
@@ -212,11 +212,11 @@ onBeforeUnmount(() => {
         <section class="am-field am-field--wide">
           <span class="am-field__name">Оценка</span>
           <div class="am-step-row">
-            <button class="am-step" type="button" title="Меньше" @click="bumpScore(-SCORE_STEP)">
+            <button v-tip="'Меньше'" class="am-step" type="button" @click="bumpScore(-SCORE_STEP)">
               −
             </button>
             <span class="am-step__value">{{ markText(score10) }}</span>
-            <button class="am-step" type="button" title="Больше" @click="bumpScore(SCORE_STEP)">
+            <button v-tip="'Больше'" class="am-step" type="button" @click="bumpScore(SCORE_STEP)">
               +
             </button>
           </div>
@@ -239,11 +239,13 @@ onBeforeUnmount(() => {
         <section class="am-field">
           <span class="am-field__name">{{ partsName }}</span>
           <div class="am-step-row">
-            <button class="am-step" type="button" title="Меньше" @click="bumpProgress(-1)">
+            <button v-tip="'Меньше'" class="am-step" type="button" @click="bumpProgress(-1)">
               −
             </button>
             <span class="am-step__value">{{ partsText }}</span>
-            <button class="am-step" type="button" title="Больше" @click="bumpProgress(1)">+</button>
+            <button v-tip="'Больше'" class="am-step" type="button" @click="bumpProgress(1)">
+              +
+            </button>
           </div>
 
           <span class="am-line">
@@ -254,9 +256,11 @@ onBeforeUnmount(() => {
         <section class="am-field">
           <span class="am-field__name">Пересмотры</span>
           <div class="am-step-row">
-            <button class="am-step" type="button" title="Меньше" @click="bumpRepeat(-1)">−</button>
+            <button v-tip="'Меньше'" class="am-step" type="button" @click="bumpRepeat(-1)">
+              −
+            </button>
             <span class="am-step__value">{{ repeat }}</span>
-            <button class="am-step" type="button" title="Больше" @click="bumpRepeat(1)">+</button>
+            <button v-tip="'Больше'" class="am-step" type="button" @click="bumpRepeat(1)">+</button>
           </div>
         </section>
 
@@ -270,9 +274,9 @@ onBeforeUnmount(() => {
               @change="onStarted"
             />
             <button
+              v-tip="'Поставить сегодняшний день'"
               class="am-btn am-btn--ghost am-date__now"
               type="button"
-              title="Поставить сегодняшний день"
               @click="emit('startedAt', today())"
             >
               Сегодня
@@ -290,9 +294,9 @@ onBeforeUnmount(() => {
               @change="onCompleted"
             />
             <button
+              v-tip="'Поставить сегодняшний день'"
               class="am-btn am-btn--ghost am-date__now"
               type="button"
-              title="Поставить сегодняшний день"
               @click="emit('completedAt', today())"
             >
               Сегодня
