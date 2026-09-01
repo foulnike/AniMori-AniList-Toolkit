@@ -205,8 +205,14 @@ function formBody(fields: Record<string, string>): string {
     .join('&')
 }
 
+/**
+ * Значение var со страницы. Пустая строка — законное значение, а не отсутствие:
+ * страница, открытая без ссылающейся стороны, кладёт var ref = "" и подпись
+ * ставит ровно на пустой строке. Поэтому [^"']* : с плюсом «пусто» неотличимо
+ * от «переменной нет вовсе», и цепочка обрывалась на ровном месте.
+ */
 function pickVar(html: string, name: string): string | null {
-  const found = new RegExp(`var\\s+${name}\\s*=\\s*["']([^"']+)["']`).exec(html)
+  const found = new RegExp(`var\\s+${name}\\s*=\\s*["']([^"']*)["']`).exec(html)
   return found?.[1] ?? null
 }
 
@@ -218,12 +224,16 @@ function pickInfo(html: string, name: string): string | null {
 /**
  * Собирает подписи со страницы. Признаки видео берутся из vInfo, а если его
  * переименуют — из самого адреса страницы: он те же три значения и несёт.
+ *
+ * Обязательны только подписи и признаки. Сами domain, pd и ref вправе быть
+ * пустыми: страница подписывает то, что в себя положила, пустую строку в том
+ * числе, и /ftor такую пару принимает.
  */
 function readPage(html: string, pageUrl: string): PageFields | null {
   const path = /\/(video|seria|serial)\/(\d+)\/([0-9a-z]+)/i.exec(pageUrl)
 
   const fields: PageFields = {
-    d: pickVar(html, 'domain') ?? '',
+    d: pickVar(html, 'domain') ?? pickVar(html, 'd') ?? '',
     dSign: pickVar(html, 'd_sign') ?? '',
     pd: pickVar(html, 'pd') ?? '',
     pdSign: pickVar(html, 'pd_sign') ?? '',
@@ -234,12 +244,13 @@ function readPage(html: string, pageUrl: string): PageFields | null {
     hash: pickInfo(html, 'hash') ?? path?.[3] ?? '',
   }
 
-  const empty = Object.entries(fields)
-    .filter(([, value]) => value === '')
-    .map(([key]) => key)
+  const needed: Array<keyof PageFields> = ['dSign', 'pdSign', 'refSign', 'type', 'id', 'hash']
+  const empty = needed.filter((key) => fields[key] === '')
 
   if (empty.length > 0) {
-    Logger('ERROR', `Kodik: на странице серии нет полей: ${empty.join(', ')}`)
+    Logger('ERROR', `Kodik: на странице серии нет полей: ${empty.join(', ')}`, {
+      length: html.length,
+    })
     return null
   }
 
@@ -500,7 +511,17 @@ async function askFtor(pageUrl: string, fields: PageFields): Promise<VideoTrack[
   if (res === null) return []
 
   const found = parseJson<FtorResponse>(res.text, 'ссылки')
-  return toTracks(found?.links)
+  const tracks = toTracks(found?.links)
+
+  // Отказ подписи и пустой ответ извне выглядят одинаково: пишем различимое.
+  if (tracks.length === 0) {
+    Logger('WARN', 'Kodik: /ftor ответил без пригодных адресов', {
+      length: res.text.length,
+      keys: Object.keys(found?.links ?? {}),
+    })
+  }
+
+  return tracks
 }
 
 /** Источник целиком. В реестр он попадает из api/video-sources.ts, а не отсюда. */
