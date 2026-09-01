@@ -342,7 +342,9 @@
   background: #fff;
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
   transform: translate(-50%, -50%);
-  transition: width var(--am-fast) var(--am-ease), height var(--am-fast) var(--am-ease);
+  transition:
+    width var(--am-fast) var(--am-ease),
+    height var(--am-fast) var(--am-ease);
 }
 
 .am-play__seek:hover .am-play__knob {
@@ -491,11 +493,7 @@
 }
 
 .am-play__key[data-tip]:hover:not(:disabled)::after,
-.am-play__key[data-tip]:focus-visible::after {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
+.am-play__key[data-tip]:focus-visible::after,
 .am-play__back[data-tip]:hover::after,
 .am-play__back[data-tip]:focus-visible::after {
   opacity: 1;
@@ -802,14 +800,14 @@
   background: rgb(255 255 255 / 0.2);
 }
 
-.am-play--wide .am-play__name,
-.am-play--wide .am-play__sub {
+.am-play--wide .am-play__name {
   color: #fff;
   text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
 }
 
 .am-play--wide .am-play__sub {
   color: rgb(255 255 255 / 0.72);
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
 }
 
 .am-play--wide .am-play__deck {
@@ -858,16 +856,26 @@
   font-size: 14px;
 }
 
-/* Ящик со списками выезжает справа и закрывается той же кнопкой. */
+/* В театре панель выше, и кнопка пропуска садится на ряд кнопок. */
+.am-play--wide .am-play__skip {
+  right: 30px;
+  bottom: 148px;
+}
+
+/*
+ * Ящик со списками выезжает справа и заканчивается над панелью: иначе он
+ * накрывал бы правый кластер вместе с той самой кнопкой, которой его
+ * только что открыли. Панель при открытом ящике не уезжает в тишину.
+ */
 .am-play--wide .am-play__side {
   position: absolute;
-  z-index: 6;
+  z-index: 3;
   width: min(390px, 84vw);
-  padding: 78px 18px 108px;
+  padding: 78px 18px 24px;
   overflow-y: auto;
   background: linear-gradient(to left, rgb(4 6 10 / 0.97) 76%, rgb(4 6 10 / 0.74) 100%);
   animation: am-play-slide var(--am-mid) var(--am-ease) both;
-  inset: 0 0 0 auto;
+  inset: 0 0 128px auto;
 }
 
 .am-play--wide .am-play__box {
