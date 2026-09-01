@@ -17,7 +17,7 @@ import EntrySheet from '../components/EntrySheet.vue'
 import PeopleBox from '../components/PeopleBox.vue'
 import RichText from '../components/RichText.vue'
 import { genreWord } from '../labels'
-import { currentRoute } from '../router'
+import { currentRoute, navigate } from '../router'
 
 import { scoreText, useMediaCard } from './media-card'
 
@@ -73,9 +73,11 @@ const {
   onPickNotes,
 } = useMediaCard(mediaId)
 
-// Плеер ещё не сделан, но место под него в герое уже занято:
-// иначе главное действие пришлось бы втискивать в готовую разметку.
-const PLAYER_HINT = 'Плеер ещё не подключён: место под него зарезервировано'
+// Просмотр — отдельный экран со своим адресом, а не окно поверх карточки:
+// его можно обновить, а тяжёлая карточка не висит в памяти под видео.
+function openPlayer(): void {
+  if (mediaId.value > 0) navigate('player', { id: String(mediaId.value) })
+}
 
 onMounted(() => {
   void load()
@@ -163,15 +165,15 @@ watch(mediaId, () => {
               </ul>
 
               <div class="am-acts">
-                <!-- Подсказка на обойме, а не на кнопке: до выключенной кнопки
-                     события мыши не доходят, и подсказка молчала бы вовсе. -->
-                <span v-tip="PLAYER_HINT" class="am-acts__hold">
-                  <button class="am-acts__play" type="button" disabled>
-                    <span aria-hidden="true">▶</span>
-                    <span>Смотреть</span>
-                    <span class="am-acts__soon">скоро</span>
-                  </button>
-                </span>
+                <button
+                  v-tip="'Источники спрашиваются при открытии плеера'"
+                  class="am-acts__play"
+                  type="button"
+                  @click="openPlayer"
+                >
+                  <span aria-hidden="true">▶</span>
+                  <span>Смотреть</span>
+                </button>
 
                 <button class="am-acts__save" type="button" @click="sheetOpen = true">
                   <span v-if="listed" class="am-acts__dot" aria-hidden="true" />
