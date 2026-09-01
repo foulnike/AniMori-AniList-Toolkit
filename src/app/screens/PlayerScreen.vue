@@ -6,13 +6,13 @@
 // темой и не проходится пультом. Своя умеет и то и другое, а заодно показывает
 // край буфера. Клавиши и пульт разбирает player-input.ts.
 //
-// Полный экран собран из трёх шагов, и каждый закрывает свою дыру.
-// Театр переезжает в body: внутри рамки приложения он оставался в чужих
-// контекстах наложения — рельс со стеклом, шапка и подложка окна просвечивали
-// сквозь кадр. Кадр просит родной полный экран: его верхний слой не перекрыть
-// ничем со страницы, включая наши подсказки из body и окошко человека.
-// И окно оболочки уходит в полный экран через мост: родной полный экран
-// растягивает кадр на окно, а не на монитор. Раньше был только третий шаг.
+// Полный экран собран из трёх шагов, и каждый закрывает свою дыру. Театр
+// переезжает в body: внутри рамки приложения он оставался в чужих контекстах
+// наложения, и рельс, шапка и подложка окна просвечивали сквозь кадр. Кадр
+// просит родной полный экран: его верхний слой не перекрыть ничем со страницы,
+// включая наши подсказки из body и окошко человека. Окно оболочки уходит
+// в полный экран через мост: родной растягивает кадр на окно, а не на монитор.
+// Раньше был только третий шаг.
 //
 // Ссылка меняется в трёх случаях: другая серия, другая озвучка, другое
 // качество. Первые два начинают с запомненного места, третий — с текущей
@@ -48,41 +48,31 @@ import {
 import { episodeLabel, peekSpot, rememberSpot, spotKey, usePlayer } from './player-view'
 
 /**
- * Знак кнопки — картинка в квадрате 24×24, а не символ шрифта.
+ * Знак кнопки — рисунок в квадрате 24×24, а не символ шрифта.
  *
- * Символами панель и была: ▶, ❚❚, ↺, ⤢, ♪. У каждого своя ширина, свой наплыв
- * над базовой линией и свой рисунок в разных шрифтах — оттого знаки и стояли
- * в кнопках вкривь, каждый по-своему. Картинка занимает квадрат целиком
- * и центрируется сеткой кнопки, шрифт на неё больше не влияет.
+ * Символами панель и была: ▶, ❚❚, ↺, ⤢, ♪. У каждого своя ширина и свой наплыв
+ * над базовой линией, оттого знаки и стояли в кнопках вкривь, каждый по-своему.
+ * Рисунок занимает квадрат целиком и центрируется сеткой кнопки.
  *
  * Два пути вместо одного: d — залитая фигура, line — обводка. Половина знаков
- * состоит из обоих сразу, у звука это залитый рупор и обведённые волны.
+ * состоит из обоих сразу: у звука залитый рупор и обведённые волны.
  */
 const Icon: FunctionalComponent<{ d?: string; line?: string }> = (props) =>
-  h(
-    'svg',
-    {
-      class: 'am-play__ico',
-      viewBox: '0 0 24 24',
-      'aria-hidden': 'true',
-      focusable: 'false',
-    },
-    [
-      props.d === undefined ? null : h('path', { d: props.d, fill: 'currentColor' }),
-      props.line === undefined
-        ? null
-        : h('path', {
-            d: props.line,
-            fill: 'none',
-            stroke: 'currentColor',
-            'stroke-width': '2',
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          }),
-    ],
-  )
+  h('svg', { class: 'am-play__ico', viewBox: '0 0 24 24', 'aria-hidden': 'true' }, [
+    props.d === undefined ? null : h('path', { d: props.d, fill: 'currentColor' }),
+    props.line === undefined
+      ? null
+      : h('path', {
+          d: props.line,
+          fill: 'none',
+          stroke: 'currentColor',
+          'stroke-width': '2',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        }),
+  ])
 
-/** Залитые знаки панели. Все нарисованы симметрично относительно центра. */
+/** Залитые знаки. Все нарисованы симметрично относительно центра квадрата. */
 const SIGN = {
   play: 'M8 5v14l11-7z',
   pause: 'M6 5h4v14H6zm8 0h4v14h-4z',
@@ -94,7 +84,7 @@ const SIGN = {
   againHead: 'M12 1.2l3.4 2.8L12 6.8z',
 } as const
 
-/** Обведённые знаки: тонкие фигуры залитыми читаются пятном. */
+/** Обведённые знаки: тонкие фигуры заливкой читаются пятном. */
 const LINE = {
   waves: 'M15.2 9.2a4 4 0 0 1 0 5.6M18 6.8a7.6 7.6 0 0 1 0 10.4',
   cross: 'M15.6 9.6l4.8 4.8m0-4.8-4.8 4.8',
@@ -105,6 +95,16 @@ const LINE = {
   rows: 'M4 7h16M4 12h16M4 17h10',
   left: 'M15 5l-7 7 7 7',
 } as const
+
+/** Кнопка панели: подпись, знак и что делать. Разметка из этого списка одна. */
+interface Key {
+  tip: string
+  sign?: string
+  line?: string
+  main?: boolean
+  off?: boolean
+  run: () => void
+}
 
 const videoEl = ref<HTMLVideoElement | null>(null)
 const rootEl = ref<HTMLElement | null>(null)
@@ -120,7 +120,7 @@ const playing = ref(false)
 const volume = ref(peekVolume())
 const muted = ref(false)
 
-/** Кадр во весь экран: наш театр, родной полный экран и окно ходят вместе. */
+/** Кадр во весь экран: театр, верхний слой окна и полный экран оболочки. */
 const wide = ref(false)
 
 /** Панель уехала: несколько секунд тишины и только во время игры. */
@@ -135,7 +135,7 @@ const pickOpen = ref(false)
 /** Открыт ящик со списками: в театре они прячутся до нажатия. */
 const listOpen = ref(false)
 
-/** Кадр ждёт данные посреди серии: сеть встала, но ошибки ещё нет. */
+/** Кадр встал посреди серии: сеть не поспевает, но ошибки ещё нет. */
 const stalled = ref(false)
 
 /** Доля полосы под указателем, -1 — указателя на ней нет. */
@@ -449,8 +449,8 @@ function onLineDown(event: PointerEvent): void {
 
 /**
  * Пролёт мыши над полосой показывает время под указателем, нажатая кнопка —
- * ещё и перематывает. Одно событие на оба дела: разводить их значит считать
- * одну и ту же долю дважды за движение.
+ * ещё и перематывает. Одно событие на оба дела: врозь они считали бы одну
+ * и ту же долю дважды за движение.
  */
 function onLineMove(event: PointerEvent): void {
   const share = shareOfPointer(event)
@@ -527,14 +527,13 @@ function sleep(): void {
 
   // Фокус не остаётся на спрятанной кнопке: уйти с неё пультом уже нельзя.
   const here = document.activeElement
-  const inDeck = here instanceof HTMLElement && here.closest('.am-play__deck') !== null
-  if (inDeck) here.blur()
+  if (here instanceof HTMLElement && here.closest('.am-play__deck') !== null) here.blur()
 }
 
 /**
- * Родной полный экран кадра. Просим его у самого театра, а не у тега <video>:
- * у тега вместе с кадром уехала бы и наша панель, а WebView2 нарисовал бы
- * поверх свою — некрашеную и непроходимую пультом.
+ * Родной полный экран. Просим его у театра, а не у тега <video>: у тега вместе
+ * с кадром уехала бы наша панель, а WebView2 нарисовал бы поверх свою —
+ * некрашеную и непроходимую пультом.
  */
 async function wantNativeWide(next: boolean): Promise<void> {
   const root = rootEl.value
@@ -558,9 +557,9 @@ async function wantWindowWide(next: boolean): Promise<void> {
 }
 
 /**
- * Три шага в один: класс театра, верхний слой окна и полный экран оболочки.
- * Порядок обязателен — сначала Vue переносит узел в body, и только потом
- * этот узел просит верхний слой: перенос уже поднятого узла его сбрасывает.
+ * Три шага в одном. Порядок обязателен: сначала Vue переносит узел в body,
+ * и только потом этот узел просит верхний слой — перенос уже поднятого узла
+ * его сбрасывает.
  */
 async function setWide(next: boolean): Promise<void> {
   wide.value = next
@@ -624,6 +623,30 @@ function doExit(): void {
 
   openCard()
 }
+
+/** Левый кластер: серии, перемотка и пуск. Порядок тот же, что у всех плееров. */
+const leftKeys = computed<Key[]>(() => [
+  { tip: 'Предыдущая серия', sign: SIGN.prev, off: prevNumber.value === 0, run: doPrev },
+  { tip: 'Назад 10 секунд', sign: SIGN.rewind, run: () => nudge(-STEP_SEC) },
+  {
+    tip: playing.value ? 'Пауза' : 'Смотреть',
+    sign: playing.value ? SIGN.pause : SIGN.play,
+    main: true,
+    run: doToggle,
+  },
+  { tip: 'Вперёд 10 секунд', sign: SIGN.ahead, run: () => nudge(STEP_SEC) },
+  { tip: 'Следующая серия', sign: SIGN.next, off: !hasNext.value, run: nextEpisode },
+])
+
+/** Правый кластер: ссылка и полный экран. Полный экран всегда последний. */
+const rightKeys = computed<Key[]>(() => [
+  { tip: 'Взять ссылку заново', sign: SIGN.againHead, line: LINE.again, run: refresh },
+  {
+    tip: wide.value ? 'Свернуть кадр' : 'Во весь экран',
+    line: wide.value ? LINE.small : LINE.full,
+    run: doFullscreen,
+  },
+])
 
 /** Одно место, где желание превращается в действие. */
 function act(intent: PlayerIntent): void {
@@ -740,7 +763,7 @@ watch(
 )
 
 // Прокрутка страницы под театром: колесо мыши уводило бы её вслепую,
-// а вернувшись из полного экрана, человек оказывался бы не там, где ушёл.
+// и, выйдя из полного экрана, человек оказывался бы не там, где ушёл.
 watch(wide, (on) => {
   document.body.style.overflow = on ? 'hidden' : ''
 })
@@ -872,23 +895,173 @@ onBeforeUnmount(() => {
                   class="am-play__bubble"
                   :style="{ left: hoverShare + '%' }"
                   aria-hidden="true"
+                  >{{ hoverText }}</span
                 >
-                  {{ hoverText }}
-                </span>
               </div>
 
               <div class="am-play__row">
                 <div class="am-play__clip">
                   <button
-                    class="am-play__key am-play__key--thin"
+                    v-for="key in leftKeys"
+                    :key="key.tip"
+                    class="am-play__key"
+                    :class="{ 'am-play__key--main': key.main === true }"
                     type="button"
-                    data-tip="Предыдущая серия"
-                    aria-label="Предыдущая серия"
-                    :disabled="prevNumber === 0"
-                    @click="doPrev"
+                    :data-tip="key.tip"
+                    :aria-label="key.tip"
+                    :disabled="key.off === true"
+                    @click="key.run()"
                   >
-                    <Icon :d="SIGN.prev" />
+                    <Icon :d="key.sign" :line="key.line" />
+                  </button>
+
+                  <!-- Ползунок громкости раскрывается по наведению: постоянная
+                       полоса рядом с кнопкой звука занимала место молча. -->
+                  <div class="am-play__sound">
+                    <button
+                      class="am-play__key"
+                      type="button"
+                      :data-tip="muted ? 'Включить звук' : 'Заглушить'"
+                      :aria-label="muted ? 'Включить звук' : 'Заглушить'"
+                      @click="toggleMute"
+                    >
+                      <Icon :d="SIGN.sound" :line="muted ? LINE.cross : LINE.waves" />
+                    </button>
+
+                    <div
+                      class="am-play__vol"
+                      tabindex="0"
+                      role="slider"
+                      aria-label="Громкость"
+                      :aria-valuemin="0"
+                      :aria-valuemax="100"
+                      :aria-valuenow="volumeShare"
+                      @pointerdown="onVolumeDown"
+                      @pointermove="onVolumeMove"
+                      @keydown="onVolumeKey"
+                    >
+                      <span class="am-play__vol-fill" :style="{ width: volumeShare + '%' }" />
+                      <span class="am-play__vol-knob" :style="{ left: volumeShare + '%' }" />
+                    </div>
+                  </div>
+
+                  <span class="am-play__clock">
+                    {{ clockText(at) }}
+                    <span class="am-play__clock-all">/ {{ clockText(total) }}</span>
+                  </span>
+                </div>
+
+                <div class="am-play__clip am-play__clip--end">
+                  <div v-if="qualities.length > 0" class="am-play__pick">
+                    <ul v-if="pickOpen" class="am-play__menu">
+                      <li v-for="quality in qualities" :key="quality.height">
+                        <button
+                          class="am-play__opt"
+                          :class="{ 'am-play__opt--on': quality.on }"
+                          type="button"
+                          @click="takeHeight(quality.height)"
+                        >
+                          <span class="am-play__opt-tick">
+                            <Icon v-if="quality.on" :line="LINE.tick" />
+                          </span>
+                          <span>{{ quality.label }}</span>
+                        </button>
+                      </li>
+                    </ul>
+
+                    <button
+                      class="am-play__key am-play__key--word"
+                      type="button"
+                      data-tip="Качество"
+                      :aria-expanded="pickOpen"
+                      @click="pickOpen = !pickOpen"
+                    >
+                      {{ qualityNow }}
+                    </button>
+                  </div>
+
+                  <button
+                    v-if="wide"
+                    class="am-play__key"
+                    :class="{ 'am-play__key--on': listOpen }"
+                    type="button"
+                    data-tip="Серии и озвучки"
+                    aria-label="Серии и озвучки"
+                    :aria-pressed="listOpen"
+                    @click="listOpen = !listOpen"
+                  >
+                    <Icon :line="LINE.rows" />
                   </button>
 
                   <button
-                    class="am-play__key am-play__key--thin"
+                    v-for="key in rightKeys"
+                    :key="key.tip"
+                    class="am-play__key"
+                    type="button"
+                    :data-tip="key.tip"
+                    :aria-label="key.tip"
+                    @click="key.run()"
+                  >
+                    <Icon :d="key.sign" :line="key.line" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- В театре списки живут ящиком по кнопке, а не поверх кадра: висеть
+             на видео всю серию им незачем. Вне театра это обычная колонка. -->
+        <aside v-if="!wide || listOpen" class="am-play__side">
+          <div class="am-play__box">
+            <h3 class="am-play__h">Озвучка</h3>
+
+            <ul v-if="voices.length > 0" class="am-play__list" data-zone="voices">
+              <li v-for="voice in voices" :key="voice.key">
+                <button
+                  class="am-play__item"
+                  :class="{ 'am-play__item--on': voice.key === voiceKey }"
+                  type="button"
+                  @click="pickVoice(voice.key)"
+                >
+                  <span class="am-play__word-cut">{{ voice.label }}</span>
+                  <span class="am-play__src">{{ voice.sourceLabel }}</span>
+                  <span v-if="voice.episodes > 0" class="am-play__time">
+                    серий: {{ voice.episodes }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+
+            <p v-else class="am-play__none">Озвучек нет.</p>
+          </div>
+
+          <div class="am-play__box">
+            <h3 class="am-play__h">Серии</h3>
+
+            <ul v-if="episodes.length > 0" class="am-play__list" data-zone="episodes">
+              <li v-for="item in episodes" :key="item.number">
+                <button
+                  class="am-play__item"
+                  :class="{ 'am-play__item--on': item.number === episode }"
+                  type="button"
+                  @click="pickEpisode(item.number)"
+                >
+                  <span class="am-play__num">{{ item.number }}</span>
+                  <span class="am-play__word-cut">{{ item.title ?? 'Серия' }}</span>
+                  <span v-if="timeText(item.durationSec)" class="am-play__time">
+                    {{ timeText(item.durationSec) }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+
+            <p v-else class="am-play__none">Серий пока нет.</p>
+          </div>
+        </aside>
+      </div>
+    </Teleport>
+  </section>
+</template>
+
+<style scoped src="./player-screen.css"></style>
