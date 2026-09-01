@@ -203,13 +203,6 @@
   margin-top: 12px;
 }
 
-/* Обойма выключенной кнопки. События мыши до disabled-элемента не доходят,
-   и наша подсказка на нём молчала бы, поэтому она висит на обойме.
-   Габарит ряда от этого не меняется: обойма повторяет форму кнопки. */
-.am-acts__hold {
-  display: inline-flex;
-}
-
 .am-acts__play,
 .am-acts__save {
   display: inline-flex;
@@ -229,8 +222,8 @@
     transform var(--am-fast) var(--am-ease);
 }
 
-/* Плеер пока заглушка: кнопка выключена и видно, что это задел.
-   Занятое место дешевле перестройки героя потом. */
+/* Главное действие карточки: акцентное стекло с ореолом. Ведёт
+   на экран просмотра; источники спрашиваются уже там. */
 .am-acts__play {
   color: var(--am-on-art);
   background: linear-gradient(
@@ -243,23 +236,11 @@
   backdrop-filter: blur(10px);
 }
 
-.am-acts__play:disabled {
-  cursor: default;
-  opacity: 0.62;
-  box-shadow: none;
-}
-
-/* Подпись «скоро» вместо подсказки: без неё выключенная кнопка
-   читается поломкой, а не заделом. */
-.am-acts__soon {
-  padding: 2px 8px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--am-on-art) 78%, transparent);
-  background: color-mix(in srgb, var(--am-veil) 52%, transparent);
-  border-radius: var(--am-r-cap);
+.am-acts__play:hover,
+.am-acts__play:focus-visible {
+  border-color: var(--am-accent);
+  box-shadow: 0 16px 38px rgb(var(--am-accent-rgb) / 0.34);
+  transform: translateY(-1px);
 }
 
 .am-acts__save {
@@ -841,6 +822,8 @@
   .am-part__hit:hover .am-part__art,
   .am-part__hit:focus-visible .am-part__art,
   .am-pill--studio:hover,
+  .am-acts__play:hover,
+  .am-acts__play:focus-visible,
   .am-acts__save:hover {
     transform: none;
   }
