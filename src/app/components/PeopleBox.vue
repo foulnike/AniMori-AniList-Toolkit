@@ -96,6 +96,18 @@ function displayName(kind: PersonKind, person: PersonRef): string {
   return russian.get(personKey(kind, person.personId))?.russian ?? person.name
 }
 
+/**
+ * Подсказка плитки: родное имя и латиница двумя строками. Когда подпись
+ * уже по-русски, латиница — единственный способ сверить человека с источником,
+ * а своя подсказка держит перенос строки, чего системная не умела.
+ */
+function personHint(kind: PersonKind, person: PersonRef): string {
+  const shown = displayName(kind, person)
+  const lines = [person.native, person.name === shown ? null : person.name]
+
+  return lines.filter((line): line is string => typeof line === 'string' && line !== '').join('\n')
+}
+
 async function load(): Promise<void> {
   const mine = ++run
 
@@ -213,9 +225,9 @@ watch(
       <div class="am-rail">
         <article v-for="person in folk" :key="person.personId" class="am-face">
           <button
+            v-tip="personHint('character', person)"
             class="am-face__hit"
             type="button"
-            :title="person.native ?? person.name"
             @click="onShow('character', person)"
           >
             <span class="am-face__frame">
@@ -242,9 +254,9 @@ watch(
           <!-- Озвучка своей целью: это второй человек, и окно у него своё. -->
           <button
             v-if="person.voice"
+            v-tip="personHint('staff', person.voice)"
             class="am-face__voice"
             type="button"
-            :title="person.voice.native ?? person.voice.name"
             @click="onShow('staff', person.voice)"
           >
             {{ displayName('staff', person.voice) }}
@@ -271,9 +283,9 @@ watch(
         <button
           v-for="person in shownCrew"
           :key="`${person.personId}-${person.role ?? ''}`"
+          v-tip="personHint('staff', person)"
           class="am-mate"
           type="button"
-          :title="person.native ?? person.name"
           @click="onShow('staff', person)"
         >
           <img
