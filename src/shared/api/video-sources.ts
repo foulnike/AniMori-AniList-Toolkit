@@ -8,6 +8,7 @@
 
 import { registerVideoSource } from '../core/video'
 import { anilibertySource } from './aniliberty'
+import { kodikSource } from './kodik'
 
 /** Реестр общий на весь запуск, поэтому сборка идёт ровно один раз. */
 let done = false
@@ -20,6 +21,7 @@ export function setupVideoSources(): void {
   if (done) return
 
   registerVideoSource(anilibertySource)
+  registerVideoSource(kodikSource)
 
   done = true
 }
