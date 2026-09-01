@@ -21,6 +21,8 @@ const SCREENS: Record<ScreenName, Component> = {
   search: defineAsyncComponent(() => import('./screens/SearchScreen.vue')),
   media: defineAsyncComponent(() => import('./screens/MediaScreen.vue')),
   studio: defineAsyncComponent(() => import('./screens/StudioScreen.vue')),
+  // Плеер тянет за собой hls.js: отложенная загрузка здесь не украшение.
+  player: defineAsyncComponent(() => import('./screens/PlayerScreen.vue')),
   settings: defineAsyncComponent(() => import('./screens/SettingsScreen.vue')),
   log: defineAsyncComponent(() => import('./screens/LogScreen.vue')),
 }
