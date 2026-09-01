@@ -1,0 +1,383 @@
+/* Экран просмотра. Цвета, радиусы и тени — только токенами: тем три,
+   и AMOLED гасит подсветку до чёрного именно через них.
+
+   Раскладка: слева полотно и панель под ним, справа озвучки и серии.
+   На узком окне колонка уезжает под видео: втискивать кадр в треть ширины
+   бессмысленно. */
+
+.am-play {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(248px, 21vw, 356px);
+  gap: var(--am-gap);
+  align-items: start;
+  width: 100%;
+  max-width: var(--am-page-max);
+  margin: 0 auto;
+}
+
+@media (max-width: 1080px) {
+  .am-play {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Левая половина целиком: шапка, полотно, панель. */
+.am-play__main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.am-play__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.am-play__back {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  height: var(--am-ctl);
+  padding: 0 14px;
+  color: inherit;
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-cap);
+  transition: background var(--am-fast) var(--am-ease);
+}
+
+.am-play__back:hover {
+  background: var(--am-fill-2);
+}
+
+.am-play__title {
+  min-width: 0;
+}
+
+.am-play__name {
+  margin: 0;
+  overflow: hidden;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am-play__sub {
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--am-dim, inherit);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.65;
+}
+
+/* Полотно. Цвет подложки чёрный во всех темах: летербокс должен
+   сливаться с кадром, а не светиться по краям. */
+.am-play__stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-l);
+  box-shadow: var(--am-sh-2);
+}
+
+.am-play__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* Заглушка над полотном: обложка размыта и пригашена, поверх её слова. */
+.am-play__veil {
+  position: absolute;
+  display: grid;
+  gap: 10px;
+  place-content: center;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  background: var(--am-veil);
+  inset: 0;
+}
+
+.am-play__blur {
+  position: absolute;
+  background-position: center;
+  background-size: cover;
+  filter: blur(28px) saturate(1.1);
+  opacity: 0.35;
+  inset: -30px;
+}
+
+.am-play__word {
+  position: relative;
+  max-width: 34ch;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.am-play__spin {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--am-fill-2);
+  border-top-color: var(--am-accent);
+  border-radius: 50%;
+  animation: am-play-spin 0.9s linear infinite;
+}
+
+@keyframes am-play-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-play__spin {
+    animation-duration: 3s;
+  }
+}
+
+/* Пропуск заставки: плавает над кадром справа внизу, как везде. */
+.am-play__skip {
+  position: absolute;
+  right: 18px;
+  bottom: 66px;
+  padding: 10px 18px;
+  font-size: 14px;
+  color: inherit;
+  cursor: pointer;
+  background: var(--am-glass-2);
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-cap);
+  backdrop-filter: blur(var(--am-blur));
+  transition:
+    transform var(--am-fast) var(--am-ease),
+    background var(--am-fast) var(--am-ease);
+}
+
+.am-play__skip:hover {
+  background: var(--am-fill-2);
+  transform: translateY(-1px);
+}
+
+/* Панель под видео: качество, переспрос, следующая серия. */
+.am-play__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-l);
+  backdrop-filter: blur(var(--am-blur));
+}
+
+.am-play__group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.am-play__cap {
+  margin-right: 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.am-play__q {
+  min-width: 54px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid transparent;
+  border-radius: var(--am-r-cap);
+  transition:
+    background var(--am-fast) var(--am-ease),
+    color var(--am-fast) var(--am-ease);
+}
+
+.am-play__q:hover {
+  background: var(--am-fill-2);
+}
+
+.am-play__q--on {
+  color: #fff;
+  background: var(--am-accent);
+  border-color: transparent;
+}
+
+.am-play__act {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-cap);
+  transition: background var(--am-fast) var(--am-ease);
+}
+
+.am-play__act:hover:not([disabled]) {
+  background: var(--am-fill-2);
+}
+
+.am-play__act[disabled] {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.am-play__space {
+  flex: 1 1 auto;
+}
+
+/* Правая колонка: озвучки и серии. Липнет, чтобы на фуллскрине
+   прокрутка сезона не увозила кадр. */
+.am-play__side {
+  position: sticky;
+  top: var(--am-gap);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.am-play__box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-l);
+  backdrop-filter: blur(var(--am-blur));
+}
+
+.am-play__h {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.am-play__voices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.am-play__voice {
+  max-width: 100%;
+  height: 30px;
+  padding: 0 12px;
+  overflow: hidden;
+  font-size: 13px;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid transparent;
+  border-radius: var(--am-r-cap);
+  transition: background var(--am-fast) var(--am-ease);
+}
+
+.am-play__voice:hover {
+  background: var(--am-fill-2);
+}
+
+.am-play__voice--on {
+  color: #fff;
+  background: var(--am-accent);
+}
+
+/* Серии столбцом: названия серий бывают длинные, и сетка квадратиками
+   превращает их в голые номера без смысла. */
+.am-play__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(52vh, 560px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.am-play__item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--am-r-m);
+  transition: background var(--am-fast) var(--am-ease);
+}
+
+.am-play__item:hover {
+  background: var(--am-fill-1);
+}
+
+.am-play__item--on {
+  background: var(--am-accent-soft);
+  border-color: var(--am-edge);
+}
+
+.am-play__num {
+  flex: none;
+  min-width: 26px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  opacity: 0.55;
+}
+
+.am-play__word-cut {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am-play__time {
+  flex: none;
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.45;
+}
+
+/* Отказ и пустота: теми же средствами, что и на остальных экранах. */
+.am-play__none {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.6;
+}
