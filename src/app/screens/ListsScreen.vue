@@ -20,7 +20,14 @@ import PickBox from '../components/PickBox.vue'
 import { statusList } from '../labels'
 import { navigate } from '../router'
 
-import { keptSort, keptStatus, keptView, keptWord, type SortName, type ViewName } from './lists-keep'
+import {
+  keptSort,
+  keptStatus,
+  keptView,
+  keptWord,
+  type SortName,
+  type ViewName,
+} from './lists-keep'
 import { sortEntries, toRow, useRowWarm, type Row } from './lists-row'
 
 /**

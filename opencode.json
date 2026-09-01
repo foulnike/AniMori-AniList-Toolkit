@@ -22,13 +22,7 @@
     }
   },
   "watcher": {
-    "ignore": [
-      "node_modules/**",
-      "dist/**",
-      "src-tauri/target/**",
-      ".git/**",
-      ".idea/**"
-    ]
+    "ignore": ["node_modules/**", "dist/**", "src-tauri/target/**", ".git/**", ".idea/**"]
   },
   "tool_output": {
     "max_lines": 300,

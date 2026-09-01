@@ -271,7 +271,9 @@ function toTracks(raw: AniEpisode): VideoTrack[] {
   return tracks
 }
 
-function toSkip(raw: AniSkip | null | undefined): { startSec: number; stopSec: number } | undefined {
+function toSkip(
+  raw: AniSkip | null | undefined,
+): { startSec: number; stopSec: number } | undefined {
   const start = raw?.start
   const stop = raw?.stop
   if (typeof start !== 'number' || typeof stop !== 'number' || stop <= start) return undefined
@@ -309,11 +311,7 @@ export const anilibertySource: VideoSource = {
     }))
   },
 
-  async resolve(
-    _req: VideoRequest,
-    voiceId: string,
-    episode: number,
-  ): Promise<VideoStream | null> {
+  async resolve(_req: VideoRequest, voiceId: string, episode: number): Promise<VideoStream | null> {
     const release = await loadRelease(voiceId)
     const raw = playableEpisodes(release).find((e) => e.ordinal === episode)
     if (!raw) {

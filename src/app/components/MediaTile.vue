@@ -80,12 +80,7 @@ const repeatHint = computed(() => `Повторных проходов: ${props.
 
 /** Есть ли вообще что показывать в левом верхнем углу. */
 const hasTags = computed(
-  () =>
-    props.mark !== null ||
-    props.adult ||
-    props.soon ||
-    props.repeat > 0 ||
-    props.note !== null,
+  () => props.mark !== null || props.adult || props.soon || props.repeat > 0 || props.note !== null,
 )
 </script>
 
@@ -202,7 +197,9 @@ const hasTags = computed(
 .am-tile__hit:focus-visible .am-tile__art {
   border-color: color-mix(in srgb, var(--am-accent) 55%, transparent);
   border-radius: var(--am-r-drop);
-  box-shadow: var(--am-sh-2), 0 20px 46px rgb(var(--am-accent-rgb) / 0.26);
+  box-shadow:
+    var(--am-sh-2),
+    0 20px 46px rgb(var(--am-accent-rgb) / 0.26);
   transform: translateY(-6px) scale(1.015);
 }
 

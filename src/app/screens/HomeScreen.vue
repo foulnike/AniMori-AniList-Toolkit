@@ -470,7 +470,9 @@ watch(homeGenre, () => {
   background: var(--am-glass);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-leaf);
-  box-shadow: var(--am-sh-2), inset 0 1px 0 var(--am-edge);
+  box-shadow:
+    var(--am-sh-2),
+    inset 0 1px 0 var(--am-edge);
   backdrop-filter: blur(var(--am-blur-strong)) saturate(1.5);
 }
 

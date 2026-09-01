@@ -52,7 +52,9 @@ async function start(): Promise<void> {
 
   // Подпись v-tip регистрируется на всё приложение: её просят метки плиток,
   // кнопки шапок и полки карточек — импорт в каждый файл был бы шумом.
-  createApp(App).directive('tip', tip).mount(root as HTMLElement)
+  createApp(App)
+    .directive('tip', tip)
+    .mount(root as HTMLElement)
 
   // Отправщику нужна поднятая коллекция: до неё в памяти править нечего.
   // Ошибка подъёма окно не роняет — список просто останется пустым до

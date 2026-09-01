@@ -535,11 +535,7 @@ export const kodikSource: VideoSource = {
     }))
   },
 
-  async resolve(
-    req: VideoRequest,
-    voiceId: string,
-    episode: number,
-  ): Promise<VideoStream | null> {
+  async resolve(req: VideoRequest, voiceId: string, episode: number): Promise<VideoStream | null> {
     const id = req.shikimoriId
     if (id === null || id <= 0) return null
 

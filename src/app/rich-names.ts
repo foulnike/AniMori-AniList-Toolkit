@@ -128,9 +128,7 @@ export function warmRichLink(aim: RichAim): void {
   }
 
   const task =
-    aim.kind === 'person'
-      ? warmPerson(aim.who, aim.shikiId, key)
-      : warmMedia(aim.malId, key)
+    aim.kind === 'person' ? warmPerson(aim.who, aim.shikiId, key) : warmMedia(aim.malId, key)
 
   void task.catch((e: unknown) => {
     asked.delete(key)

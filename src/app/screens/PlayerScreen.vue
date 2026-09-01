@@ -203,18 +203,19 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="am-play__stage">
-          <video ref="videoEl" class="am-play__frame" controls playsinline preload="metadata"></video>
+          <video
+            ref="videoEl"
+            class="am-play__frame"
+            controls
+            playsinline
+            preload="metadata"
+          ></video>
 
           <div v-if="veil" class="am-play__veil">
             <span v-if="cover" class="am-play__blur" :style="coverStyle" aria-hidden="true" />
             <span v-if="busy" class="am-play__spin" aria-hidden="true" />
             <p v-if="veilWord" class="am-play__word">{{ veilWord }}</p>
-            <button
-              v-if="trouble && !busy"
-              class="am-play__act"
-              type="button"
-              @click="refresh"
-            >
+            <button v-if="trouble && !busy" class="am-play__act" type="button" @click="refresh">
               Переспросить
             </button>
           </div>
@@ -263,7 +264,9 @@ onBeforeUnmount(() => {
           <ul v-if="voices.length > 0" class="am-play__voices">
             <li v-for="voice in voices" :key="voice.key">
               <button
-                v-tip="`${voice.sourceLabel}${voice.episodes > 0 ? ` · серий: ${voice.episodes}` : ''}`"
+                v-tip="
+                  `${voice.sourceLabel}${voice.episodes > 0 ? ` · серий: ${voice.episodes}` : ''}`
+                "
                 class="am-play__voice"
                 :class="{ 'am-play__voice--on': voice.key === voiceKey }"
                 type="button"

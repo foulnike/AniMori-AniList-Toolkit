@@ -96,7 +96,6 @@ export async function fetchMalThemes(malId: number | null): Promise<MalThemes | 
 }
 
 async function fetchMalThemesAttempt(malId: number, attempt = 0): Promise<MalThemes | null> {
-
   const cacheKey = `THEMES2_${malId}`
   const cached = await dbGet<MediaCacheRecord<MalThemes>>('mediaCache', cacheKey)
   if (cached && Date.now() - cached.ts < CACHE_TIME) return cached.data
@@ -113,9 +112,9 @@ async function fetchMalThemesAttempt(malId: number, attempt = 0): Promise<MalThe
     res = await Bridge.http.request({
       method: 'GET',
       url:
-         API_BASE +
+        API_BASE +
         '?filter[has]=resources&filter[site]=MyAnimeList' +
-         `&filter[external_id]=${malId}&include=animethemes.song.artists`,
+        `&filter[external_id]=${malId}&include=animethemes.song.artists`,
       timeoutMs: REQUEST_TIMEOUT_MS,
     })
   } catch (e) {

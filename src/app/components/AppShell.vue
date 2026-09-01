@@ -123,7 +123,9 @@ function onReload(): void {
   background: var(--am-glass);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-xl);
-  box-shadow: var(--am-sh-1), inset 0 1px 0 var(--am-edge);
+  box-shadow:
+    var(--am-sh-1),
+    inset 0 1px 0 var(--am-edge);
   backdrop-filter: blur(var(--am-blur-strong)) saturate(1.3);
 }
 
@@ -380,7 +382,9 @@ function onReload(): void {
 .am-skin__btn--on {
   color: var(--am-text);
   background: var(--am-glass-2);
-  box-shadow: var(--am-sh-1), inset 0 1px 0 var(--am-edge);
+  box-shadow:
+    var(--am-sh-1),
+    inset 0 1px 0 var(--am-edge);
 }
 
 /* Круглая кнопка справа: обновляет окно целиком. */
