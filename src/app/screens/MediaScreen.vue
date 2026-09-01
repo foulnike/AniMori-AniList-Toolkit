@@ -127,7 +127,7 @@ watch(mediaId, () => {
               <p v-if="card.native" class="am-hero__sub">{{ card.native }}</p>
 
               <ul class="am-pills">
-                <li v-if="score10 > 0" class="am-pill am-pill--mine" title="Моя оценка">
+                <li v-if="score10 > 0" v-tip="'Моя оценка'" class="am-pill am-pill--mine">
                   ★ {{ scoreText(score10) }}
                 </li>
                 <li v-for="item in facts" :key="item" class="am-pill">{{ item }}</li>
@@ -143,10 +143,10 @@ watch(mediaId, () => {
               <ul v-if="card.studios.length > 0" class="am-pills">
                 <li v-for="studio in card.studios" :key="studio.studioId">
                   <button
+                    v-tip="`Работы студии ${studio.name}`"
                     class="am-pill am-pill--studio"
                     :class="{ 'am-pill--studio-main': studio.main }"
                     type="button"
-                    :title="`Работы студии ${studio.name}`"
                     @click="openStudio(studio.studioId)"
                   >
                     <img
@@ -163,11 +163,15 @@ watch(mediaId, () => {
               </ul>
 
               <div class="am-acts">
-                <button class="am-acts__play" type="button" disabled :title="PLAYER_HINT">
-                  <span aria-hidden="true">▶</span>
-                  <span>Смотреть</span>
-                  <span class="am-acts__soon">скоро</span>
-                </button>
+                <!-- Подсказка на обойме, а не на кнопке: до выключенной кнопки
+                     события мыши не доходят, и подсказка молчала бы вовсе. -->
+                <span v-tip="PLAYER_HINT" class="am-acts__hold">
+                  <button class="am-acts__play" type="button" disabled>
+                    <span aria-hidden="true">▶</span>
+                    <span>Смотреть</span>
+                    <span class="am-acts__soon">скоро</span>
+                  </button>
+                </span>
 
                 <button class="am-acts__save" type="button" @click="sheetOpen = true">
                   <span v-if="listed" class="am-acts__dot" aria-hidden="true" />
@@ -191,9 +195,9 @@ watch(mediaId, () => {
                 <template v-for="(link, at) in aboutLinks" :key="link.key">
                   <span v-if="at > 0" class="am-about__dot" aria-hidden="true">·</span>
                   <a
+                    v-tip="link.hint"
                     class="am-about__link"
                     :href="link.url"
-                    :title="link.hint"
                     @click.prevent="onOpen(link.url)"
                     >{{ link.text }}</a
                   >
@@ -246,8 +250,8 @@ watch(mediaId, () => {
                 <li
                   v-for="rate in ratings"
                   :key="rate.key"
+                  v-tip="`Средняя оценка на ${rate.label}`"
                   class="am-rates__row"
-                  :title="`Средняя оценка на ${rate.label}`"
                 >
                   <span class="am-rates__src">{{ rate.label }}</span>
                   <span class="am-rates__val">★ {{ rate.value }}</span>
@@ -263,9 +267,9 @@ watch(mediaId, () => {
               <article v-for="work in franchiseRows" :key="work.malId ?? work.name" class="am-part">
                 <button
                   v-if="work.mediaId !== null && work.mediaId !== mediaId"
+                  v-tip="franchiseHint(work)"
                   class="am-part__hit"
                   type="button"
-                  :title="franchiseHint(work)"
                   @click="openFranchiseWork(work)"
                 >
                   <img
@@ -287,9 +291,9 @@ watch(mediaId, () => {
                 </button>
                 <div
                   v-else
+                  v-tip="franchiseHint(work)"
                   class="am-part__hit am-part__hit--still"
                   :class="{ 'am-part__hit--here': work.mediaId === mediaId }"
-                  :title="franchiseHint(work)"
                 >
                   <img
                     v-if="work.cover"
