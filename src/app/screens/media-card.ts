@@ -278,16 +278,16 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     )
   })
 
-  /** Описание без разметки: сервер и без HTML оставляет переносы тегом. */
+  /**
+   * Описание как приехало: разметку разбирает RichText, ему нужен исходник.
+   * Прежде теги срезались здесь, и до разбора не доживали ни перекрёстные
+   * ссылки, ни спойлеры, ни начертания — то есть половина смысла текста.
+   */
   const about = computed<string>(() => {
     // Пустая строка от русского источника не гасит английский текст с AniList.
     const ru = russian.value?.description?.trim() ?? ''
     const en = card.value?.description?.trim() ?? ''
-    const text = ru !== '' ? ru : en
-    return text
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .trim()
+    return ru !== '' ? ru : en
   })
 
   /**
