@@ -6,13 +6,16 @@
 // темой и не проходится пультом. Своя умеет и то и другое, а заодно показывает
 // край буфера. Клавиши и пульт разбирает player-input.ts.
 //
-// Полный экран собран из трёх шагов, и каждый закрывает свою дыру. Театр
+// Полный экран собран из двух шагов, и каждый закрывает свою дыру. Театр
 // переезжает в body: внутри рамки приложения он оставался в чужих контекстах
-// наложения, и рельс, шапка и подложка окна просвечивали сквозь кадр. Кадр
-// просит родной полный экран: его верхний слой не перекрыть ничем со страницы,
-// включая наши подсказки из body и окошко человека. Окно оболочки уходит
-// в полный экран через мост: родной растягивает кадр на окно, а не на монитор.
-// Раньше был только третий шаг.
+// наложения, и рельс, шапка и подложка окна просвечивали сквозь кадр. Окно
+// оболочки уходит в полный экран через мост: только он убирает шапку окна
+// и панель задач Windows.
+//
+// Родной полный экран элемента (requestFullscreen) отсюда убран совсем.
+// Оболочка сама разворачивала окно в ответ на него, и следующий шаг видел
+// «уже развёрнуто» и складывал окно обратно: шапка и панель задач оставались
+// на месте. Верхний слой, который он давал, театру в body не нужен.
 //
 // Ссылка меняется в трёх случаях: другая серия, другая озвучка, другое
 // качество. Первые два начинают с запомненного места, третий — с текущей
@@ -36,16 +39,31 @@ import { attachPlayback, type Playback } from './player-hls'
 import {
   CALM_DELAY_MS,
   JUMP_SEC,
+  NORMAL_RATE,
+  RATES,
   STEP_SEC,
   VOLUME_STEP,
   moveFocus,
   type PlayerIntent,
+  peekRate,
   peekVolume,
+  rateLabel,
   readIntent,
+  rememberRate,
   rememberVolume,
+  stepRate,
   toggleWindowFullscreen,
 } from './player-input'
-import { episodeLabel, peekSpot, rememberSpot, spotKey, usePlayer } from './player-view'
+import {
+  flushWatchKeep,
+  forgetSpot,
+  peekShare,
+  peekSpot,
+  rememberSpot,
+  spotKey,
+  whenWatchReady,
+} from './player-keep'
+import { episodeLabel, usePlayer } from './player-view'
 
 /**
  * Знак кнопки — рисунок в квадрате 24×24, а не символ шрифта.
@@ -106,6 +124,9 @@ interface Key {
   run: () => void
 }
 
+/** Сколько держится плашка продолжения. Дальше она мешает смотреть. */
+const RESUME_SHOW_MS = 7000
+
 const videoEl = ref<HTMLVideoElement | null>(null)
 const rootEl = ref<HTMLElement | null>(null)
 
@@ -120,7 +141,10 @@ const playing = ref(false)
 const volume = ref(peekVolume())
 const muted = ref(false)
 
-/** Кадр во весь экран: театр, верхний слой окна и полный экран оболочки. */
+/** Скорость видеоряда. Своя, а не родная полоса: та в WebView2 не красится. */
+const rate = ref(peekRate())
+
+/** Кадр во весь экран: театр в body и полный экран окна оболочки. */
 const wide = ref(false)
 
 /** Панель уехала: несколько секунд тишины и только во время игры. */
@@ -129,8 +153,8 @@ const calm = ref(false)
 /** Указатель на панели: пока он там, тишина не считается. */
 const deckHot = ref(false)
 
-/** Открыт выбор качества. */
-const pickOpen = ref(false)
+/** Какое меню панели открыто. Одно за раз: два перекрывали бы друг друга. */
+const menu = ref<'' | 'quality' | 'rate'>('')
 
 /** Открыт ящик со списками: в театре они прячутся до нажатия. */
 const listOpen = ref(false)
@@ -140,6 +164,9 @@ const stalled = ref(false)
 
 /** Доля полосы под указателем, -1 — указателя на ней нет. */
 const hoverShare = ref(-1)
+
+/** С какой секунды продолжили. Ноль — начали сначала, плашки не будет. */
+const resumeAt = ref(0)
 
 const mediaId = computed<number>(() => {
   const raw = Number(currentRoute.value.params.id ?? '')
@@ -177,6 +204,9 @@ let spot = ''
 
 /** Таймер тишины, после которого панель уезжает с кадра. */
 let calmTimer = 0
+
+/** Таймер плашки продолжения. */
+let resumeTimer = 0
 
 /** Полный экран окна: мост умеет только переключать, поэтому помним сами. */
 let windowWide = false
@@ -248,6 +278,14 @@ const shareAt = computed<number>(() => shareOf(at.value))
 const shareReady = computed<number>(() => shareOf(ready.value))
 const volumeShare = computed<number>(() => (muted.value ? 0 : volume.value * 100))
 
+/**
+ * Доля просмотренного у серии в полке. Считается на каждой перерисовке: метки
+ * лежат обычным объектом, а не ref, зато полоска обновляется вместе с часами.
+ */
+function seenShare(number: number): number {
+  return Math.round(peekShare(spotKey(mediaId.value, voiceKey.value, number)) * 100)
+}
+
 /** Громкость и звук ставим на тег сами: своя панель — свой источник правды. */
 function applySound(): void {
   const el = videoEl.value
@@ -257,12 +295,32 @@ function applySound(): void {
   el.muted = muted.value
 }
 
+/**
+ * Скорость ставим в оба поля. defaultPlaybackRate обязателен: алгоритм загрузки
+ * нового ресурса сбрасывает playbackRate именно к нему, и без этой строки
+ * скорость терялась на каждой смене серии.
+ */
+function applyRate(): void {
+  const el = videoEl.value
+  if (el === null) return
+
+  el.defaultPlaybackRate = rate.value
+  el.playbackRate = rate.value
+}
+
 function setVolume(next: number): void {
   const value = Math.min(1, Math.max(0, Math.round(next * 100) / 100))
   volume.value = value
   muted.value = value === 0
   rememberVolume(value)
   applySound()
+}
+
+function setRate(next: number): void {
+  rate.value = next
+  rememberRate(next)
+  applyRate()
+  wake()
 }
 
 function toggleMute(): void {
@@ -296,15 +354,51 @@ function timeText(seconds: number | undefined): string {
   return `${Math.round(seconds / 60)} мин`
 }
 
+/** Плашка «продолжили с…»: живёт несколько секунд и уходит сама. */
+function showResume(from: number): void {
+  if (resumeTimer !== 0) window.clearTimeout(resumeTimer)
+  resumeTimer = 0
+  resumeAt.value = from > 0 ? Math.floor(from) : 0
+  if (resumeAt.value === 0) return
+
+  resumeTimer = window.setTimeout(() => {
+    resumeTimer = 0
+    resumeAt.value = 0
+  }, RESUME_SHOW_MS)
+}
+
 /** Открывает манифест. Та же серия — продолжаем с текущей секунды. */
 function start(url: string): void {
   const el = videoEl.value
   if (el === null || playback === null) return
 
   const key = spotKey(mediaId.value, voiceKey.value, episode.value)
-  const from = key === spot ? el.currentTime : peekSpot(key)
+  const same = key === spot
+  const from = same ? el.currentTime : peekSpot(key)
   spot = key
   playback.open(url, from)
+  applyRate()
+
+  // Про смену качества плашка молчит: место не менялось, менялась картинка.
+  if (!same) showResume(from)
+}
+
+/** «Сначала»: человек не согласен с меткой. Забываем её, чтобы не спорить. */
+function doRestart(): void {
+  resumeAt.value = 0
+  if (resumeTimer !== 0) {
+    window.clearTimeout(resumeTimer)
+    resumeTimer = 0
+  }
+
+  if (spot !== '') forgetSpot(spot)
+
+  const el = videoEl.value
+  if (el === null) return
+
+  el.currentTime = 0
+  at.value = 0
+  wake()
 }
 
 /** Край буфера вокруг текущей секунды: остальные куски полосе неинтересны. */
@@ -332,7 +426,7 @@ function onTime(): void {
 
   at.value = now
   onProgress()
-  if (spot !== '') rememberSpot(spot, now)
+  if (spot !== '') rememberSpot(spot, now, total.value)
 }
 
 /** Длина у HLS приезжает позже кадра, и бесконечность тоже бывает. */
@@ -342,11 +436,12 @@ function onMeta(): void {
 
   total.value = Number.isFinite(el.duration) ? el.duration : 0
   applySound()
+  applyRate()
 }
 
 /** Конец серии: следующая сама. Смотренное забывается: оно пройдено. */
 function onEnded(): void {
-  if (spot !== '') rememberSpot(spot, 0)
+  if (spot !== '') forgetSpot(spot)
   if (hasNext.value) nextEpisode()
 }
 
@@ -422,10 +517,15 @@ function doPrev(): void {
   if (prevNumber.value > 0) pickEpisode(prevNumber.value)
 }
 
-/** Выбор качества закрывает список сам: меню, которое надо гасить, раздражает. */
+/** Выбор закрывает своё меню сам: меню, которое надо гасить, раздражает. */
 function takeHeight(height: number): void {
-  pickOpen.value = false
+  menu.value = ''
   pickHeight(height)
+}
+
+function takeRate(next: number): void {
+  menu.value = ''
+  setRate(next)
 }
 
 /** Доля ширины, на которую пришёлся указатель. */
@@ -521,33 +621,13 @@ function wake(): void {
 function sleep(): void {
   calmTimer = 0
   if (!playing.value || veil.value) return
-  if (deckHot.value || pickOpen.value || listOpen.value) return
+  if (deckHot.value || menu.value !== '' || listOpen.value) return
 
   calm.value = true
 
   // Фокус не остаётся на спрятанной кнопке: уйти с неё пультом уже нельзя.
   const here = document.activeElement
   if (here instanceof HTMLElement && here.closest('.am-play__deck') !== null) here.blur()
-}
-
-/**
- * Родной полный экран. Просим его у театра, а не у тега <video>: у тега вместе
- * с кадром уехала бы наша панель, а WebView2 нарисовал бы поверх свою —
- * некрашеную и непроходимую пультом.
- */
-async function wantNativeWide(next: boolean): Promise<void> {
-  const root = rootEl.value
-
-  try {
-    if (next) {
-      if (root !== null && document.fullscreenElement === null) await root.requestFullscreen()
-      return
-    }
-
-    if (document.fullscreenElement !== null) await document.exitFullscreen()
-  } catch (e) {
-    Logger('WARN', 'Плеер: окно не дало родной полный экран', e)
-  }
 }
 
 /** Полный экран окна оболочки. Мост умеет переключать, поэтому спрашиваем себя. */
@@ -557,9 +637,9 @@ async function wantWindowWide(next: boolean): Promise<void> {
 }
 
 /**
- * Три шага в одном. Порядок обязателен: сначала Vue переносит узел в body,
- * и только потом этот узел просит верхний слой — перенос уже поднятого узла
- * его сбрасывает.
+ * Два шага в одном. Порядок обязателен: сначала Vue переносит узел в body
+ * и раскладывает театр, и только потом окно меняет размер — иначе разметка
+ * пересчитывается дважды и первый кадр после нажатия дёргается.
  */
 async function setWide(next: boolean): Promise<void> {
   wide.value = next
@@ -567,11 +647,10 @@ async function setWide(next: boolean): Promise<void> {
 
   if (!next) {
     listOpen.value = false
-    pickOpen.value = false
+    menu.value = ''
   }
 
   await nextTick()
-  await wantNativeWide(next)
   await wantWindowWide(next)
 }
 
@@ -579,39 +658,20 @@ function doFullscreen(): void {
   void setWide(!wide.value)
 }
 
-/**
- * Родной полный экран гасится и мимо наших кнопок: Esc, F11, кнопка окна.
- * Без этого слушателя окно оставалось развёрнутым, а рамка приложения
- * возвращалась в кадр поверх видео.
- */
-function onNativeChange(): void {
-  const on = document.fullscreenElement !== null
-  if (on === wide.value) return
-
-  wide.value = on
-  if (!on) {
-    listOpen.value = false
-    pickOpen.value = false
-  }
-
-  wake()
-  void wantWindowWide(on)
-}
-
-/** Нажатие мимо списка качеств закрывает его: так ведёт себя любое меню. */
+/** Нажатие мимо меню закрывает его: так ведёт себя любое меню. */
 function onDown(event: PointerEvent): void {
-  if (!pickOpen.value) return
+  if (menu.value === '') return
 
   const aim = event.target
   if (aim instanceof Element && aim.closest('.am-play__pick') !== null) return
 
-  pickOpen.value = false
+  menu.value = ''
 }
 
 /** «Назад»: сначала закрываем открытое, потом театр и только потом экран. */
 function doExit(): void {
-  if (pickOpen.value || listOpen.value) {
-    pickOpen.value = false
+  if (menu.value !== '' || listOpen.value) {
+    menu.value = ''
     listOpen.value = false
     return
   }
@@ -675,6 +735,12 @@ function act(intent: PlayerIntent): void {
     case 'mute':
       toggleMute()
       return
+    case 'slower':
+      setRate(stepRate(rate.value, -1))
+      return
+    case 'faster':
+      setRate(stepRate(rate.value, 1))
+      return
     case 'prevEpisode':
       doPrev()
       return
@@ -735,11 +801,14 @@ onMounted(() => {
     el.addEventListener('playing', onRolling)
     el.addEventListener('seeked', onRolling)
     applySound()
+    applyRate()
   }
 
   window.addEventListener('keydown', onKey)
   window.addEventListener('pointerdown', onDown)
-  document.addEventListener('fullscreenchange', onNativeChange)
+
+  // Метки нужны и полке серий, и первому кадру: просим их пораньше.
+  void whenWatchReady()
   void load()
 })
 
@@ -752,6 +821,8 @@ watch(mediaId, () => {
   ready.value = 0
   playing.value = false
   stalled.value = false
+  resumeAt.value = 0
+  menu.value = ''
   void load()
 })
 
@@ -771,7 +842,7 @@ watch(wide, (on) => {
 onBeforeUnmount(() => {
   const el = videoEl.value
   if (el !== null) {
-    if (spot !== '') rememberSpot(spot, Math.floor(el.currentTime))
+    if (spot !== '') rememberSpot(spot, Math.floor(el.currentTime), total.value)
     el.removeEventListener('timeupdate', onTime)
     el.removeEventListener('ended', onEnded)
     el.removeEventListener('play', onPlay)
@@ -785,12 +856,14 @@ onBeforeUnmount(() => {
 
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('pointerdown', onDown)
-  document.removeEventListener('fullscreenchange', onNativeChange)
   if (calmTimer !== 0) window.clearTimeout(calmTimer)
+  if (resumeTimer !== 0) window.clearTimeout(resumeTimer)
   document.body.style.overflow = ''
 
+  // Отложенная запись уход с экрана не переживёт: просим записать сейчас.
+  flushWatchKeep()
+
   // Уходим с экрана — возвращаем окно: полный экран был нужен кадру, не спискам.
-  void wantNativeWide(false)
   void wantWindowWide(false)
 
   playback?.close()
@@ -840,11 +913,16 @@ onBeforeUnmount(() => {
               @click="doToggle"
             ></button>
 
-            <span v-if="!veil && !playing" class="am-play__hold" aria-hidden="true">
-              <Icon :d="SIGN.play" />
-            </span>
+            <!-- Центр кадра. Оба знака центрует сетка обёртки, а не сдвиг
+                 трансформацией: кольцу нужен свой поворот, и два разных списка
+                 трансформаций браузер сводил в одну матрицу — знак уезжал. -->
+            <div v-if="!veil" class="am-play__mid" aria-hidden="true">
+              <span v-if="!playing" class="am-play__hold">
+                <Icon :d="SIGN.play" />
+              </span>
 
-            <span v-if="!veil && playing && stalled" class="am-play__wait" aria-hidden="true" />
+              <span v-else-if="stalled" class="am-play__wait" />
+            </div>
 
             <div v-if="veil" class="am-play__veil">
               <span v-if="cover" class="am-play__blur" :style="coverStyle" aria-hidden="true" />
@@ -853,6 +931,12 @@ onBeforeUnmount(() => {
               <button v-if="trouble && !busy" class="am-play__act" type="button" @click="refresh">
                 Переспросить
               </button>
+            </div>
+
+            <!-- Плашка продолжения: сообщает и тут же даёт передумать. -->
+            <div v-if="resumeAt > 0 && !veil" class="am-play__resume">
+              <span>Продолжили с {{ clockText(resumeAt) }}</span>
+              <button class="am-play__resume-key" type="button" @click="doRestart">Сначала</button>
             </div>
 
             <button v-if="skip && !veil" class="am-play__skip" type="button" @click="doSkip">
@@ -952,8 +1036,39 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="am-play__clip am-play__clip--end">
+                  <!-- Скорость списком, а не ползунком: доли вроде 1,15×
+                       на ползунке ловятся только случайно. -->
+                  <div class="am-play__pick">
+                    <ul v-if="menu === 'rate'" class="am-play__menu">
+                      <li v-for="value in RATES" :key="value">
+                        <button
+                          class="am-play__opt"
+                          :class="{ 'am-play__opt--on': value === rate }"
+                          type="button"
+                          @click="takeRate(value)"
+                        >
+                          <span class="am-play__opt-tick">
+                            <Icon v-if="value === rate" :line="LINE.tick" />
+                          </span>
+                          <span>{{ value === NORMAL_RATE ? 'Обычная' : rateLabel(value) }}</span>
+                        </button>
+                      </li>
+                    </ul>
+
+                    <button
+                      class="am-play__key am-play__key--word"
+                      :class="{ 'am-play__key--on': rate !== NORMAL_RATE }"
+                      type="button"
+                      data-tip="Скорость"
+                      :aria-expanded="menu === 'rate'"
+                      @click="menu = menu === 'rate' ? '' : 'rate'"
+                    >
+                      {{ rateLabel(rate) }}
+                    </button>
+                  </div>
+
                   <div v-if="qualities.length > 0" class="am-play__pick">
-                    <ul v-if="pickOpen" class="am-play__menu">
+                    <ul v-if="menu === 'quality'" class="am-play__menu">
                       <li v-for="quality in qualities" :key="quality.height">
                         <button
                           class="am-play__opt"
@@ -973,8 +1088,8 @@ onBeforeUnmount(() => {
                       class="am-play__key am-play__key--word"
                       type="button"
                       data-tip="Качество"
-                      :aria-expanded="pickOpen"
-                      @click="pickOpen = !pickOpen"
+                      :aria-expanded="menu === 'quality'"
+                      @click="menu = menu === 'quality' ? '' : 'quality'"
                     >
                       {{ qualityNow }}
                     </button>
@@ -1051,6 +1166,15 @@ onBeforeUnmount(() => {
                   <span class="am-play__word-cut">{{ item.title ?? 'Серия' }}</span>
                   <span v-if="timeText(item.durationSec)" class="am-play__time">
                     {{ timeText(item.durationSec) }}
+                  </span>
+
+                  <!-- Полоска просмотра: видно, где человек остановился,
+                       не открывая серию. -->
+                  <span v-if="seenShare(item.number) > 0" class="am-play__seen" aria-hidden="true">
+                    <span
+                      class="am-play__seen-fill"
+                      :style="{ width: seenShare(item.number) + '%' }"
+                    />
                   </span>
                 </button>
               </li>
