@@ -1,18 +1,9 @@
-/* Экран просмотра. Цвета, радиусы и тени — только токенами: тем три,
-   и AMOLED гасит подсветку до чёрного именно через них.
-
-   Раскладка: слева полотно и панель под ним, справа озвучки и серии.
-   На узком окне колонка уезжает под видео: втискивать кадр в треть ширины
-   бессмысленно. */
-
+/* Экран просмотра. Кадр главный, всё остальное лежит на нём или рядом. */
 .am-play {
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(248px, 21vw, 356px);
   gap: var(--am-gap);
   align-items: start;
-  width: 100%;
-  max-width: var(--am-page-max);
-  margin: 0 auto;
 }
 
 @media (max-width: 1080px) {
@@ -21,39 +12,42 @@
   }
 }
 
-/* Левая половина целиком: шапка, полотно, панель. */
 .am-play__main {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 12px;
   min-width: 0;
 }
 
 .am-play__head {
   display: flex;
-  gap: 12px;
   align-items: center;
+  gap: 12px;
   min-width: 0;
+  transition:
+    opacity var(--am-mid) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
 }
 
 .am-play__back {
   display: inline-flex;
-  flex: none;
-  gap: 8px;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
   height: var(--am-ctl);
   padding: 0 14px;
-  color: inherit;
-  cursor: pointer;
-  background: var(--am-fill-1);
   border: 1px solid var(--am-edge);
   border-radius: var(--am-r-cap);
-  transition: background var(--am-fast) var(--am-ease);
+  background: var(--am-glass);
+  color: var(--am-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
 }
 
 .am-play__back:hover {
   background: var(--am-fill-2);
+  transform: translateX(-2px);
 }
 
 .am-play__title {
@@ -62,33 +56,31 @@
 
 .am-play__name {
   margin: 0;
+  font-size: 17px;
+  font-weight: 620;
+  line-height: 1.25;
+  color: var(--am-text);
   overflow: hidden;
-  font-size: 19px;
-  font-weight: 650;
-  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .am-play__sub {
   margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--am-dim);
   overflow: hidden;
-  font-size: 13px;
-  color: var(--am-dim, inherit);
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.65;
 }
 
-/* Полотно. Цвет подложки чёрный во всех темах: летербокс должен
-   сливаться с кадром, а не светиться по краям. */
+/* Полотно чёрное во всех темах: видео не должно спорить с фоном. */
 .am-play__stage {
   position: relative;
   aspect-ratio: 16 / 9;
+  border-radius: var(--am-r-l);
   overflow: hidden;
   background: #000;
-  border: 1px solid var(--am-edge);
-  border-radius: var(--am-r-l);
   box-shadow: var(--am-sh-2);
 }
 
@@ -96,46 +88,71 @@
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
   background: #000;
+  object-fit: contain;
 }
 
-/* Заглушка над полотном: обложка размыта и пригашена, поверх её слова. */
+/* Кадр сам — большая кнопка паузы, как всюду. */
+.am-play__tap {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.am-play__tap:focus-visible {
+  outline: 2px solid rgb(var(--am-accent-rgb));
+  outline-offset: -4px;
+}
+
+.am-play__hold {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border-radius: var(--am-r-blob);
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(var(--am-blur));
+  color: #fff;
+  font-size: 30px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 .am-play__veil {
   position: absolute;
+  inset: 0;
+  z-index: 5;
   display: grid;
-  gap: 10px;
-  place-content: center;
   place-items: center;
+  align-content: center;
+  gap: 12px;
   padding: 24px;
   text-align: center;
   background: var(--am-veil);
-  inset: 0;
 }
 
 .am-play__blur {
   position: absolute;
+  inset: 0;
   background-position: center;
   background-size: cover;
-  filter: blur(28px) saturate(1.1);
-  opacity: 0.35;
-  inset: -30px;
-}
-
-.am-play__word {
-  position: relative;
-  max-width: 34ch;
-  font-size: 15px;
-  line-height: 1.45;
+  filter: blur(26px) saturate(1.1);
+  opacity: 0.34;
 }
 
 .am-play__spin {
-  position: relative;
   width: 34px;
   height: 34px;
-  border: 2px solid var(--am-fill-2);
-  border-top-color: var(--am-accent);
-  border-radius: 50%;
+  border: 2px solid var(--am-line-soft);
+  border-top-color: rgb(var(--am-accent-rgb));
+  border-radius: var(--am-r-blob);
   animation: am-play-spin 0.9s linear infinite;
 }
 
@@ -145,239 +162,532 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .am-play__spin {
-    animation-duration: 3s;
-  }
+.am-play__word {
+  position: relative;
+  margin: 0;
+  max-width: 34ch;
+  font-size: 13px;
+  color: #fff;
 }
 
-/* Пропуск заставки: плавает над кадром справа внизу, как везде. */
+.am-play__act {
+  position: relative;
+  height: var(--am-ctl);
+  padding: 0 16px;
+  border: 1px solid var(--am-edge);
+  border-radius: var(--am-r-cap);
+  background: var(--am-glass-2);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.am-play__act:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .am-play__skip {
   position: absolute;
   right: 18px;
-  bottom: 66px;
-  padding: 10px 18px;
-  font-size: 14px;
-  color: inherit;
-  cursor: pointer;
-  background: var(--am-glass-2);
-  border: 1px solid var(--am-edge);
+  bottom: 92px;
+  z-index: 4;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: var(--am-r-cap);
+  background: rgba(0, 0, 0, 0.56);
   backdrop-filter: blur(var(--am-blur));
-  transition:
-    transform var(--am-fast) var(--am-ease),
-    background var(--am-fast) var(--am-ease);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .am-play__skip:hover {
-  background: var(--am-fill-2);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+/* Панель лежит на кадре и уезжает вниз по тишине. */
+.am-play__deck {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0));
+  transition:
+    opacity var(--am-mid) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
+}
+
+.am-play--calm .am-play__deck {
+  opacity: 0;
+  transform: translateY(110%);
+  pointer-events: none;
+}
+
+.am-play--calm .am-play__head {
+  opacity: 0;
+}
+
+.am-play__key {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--am-ctl);
+  height: var(--am-ctl);
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--am-r-cap);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--am-fast) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+.am-play__key--word {
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.am-play__key:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
   transform: translateY(-1px);
 }
 
-/* Панель под видео: качество, переспрос, следующая серия. */
-.am-play__bar {
+.am-play__key:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.am-play__note {
+  font-size: 16px;
+}
+
+.am-play__note--off {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.am-play__clock {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+/* Полоса времени: дорожка, буфер, пройденное и головка. */
+.am-play__line {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 140px;
+  height: 20px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
   align-items: center;
-  padding: 10px 12px;
-  background: var(--am-glass);
-  border: 1px solid var(--am-edge);
-  border-radius: var(--am-r-l);
-  backdrop-filter: blur(var(--am-blur));
+  cursor: pointer;
+  touch-action: none;
+}
+
+.am-play__line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: var(--am-r-cap);
+  background: rgba(255, 255, 255, 0.24);
+  transition: height var(--am-fast) var(--am-ease);
+}
+
+.am-play__buf,
+.am-play__fill {
+  position: absolute;
+  left: 0;
+  height: 4px;
+  border-radius: var(--am-r-cap);
+  transition: height var(--am-fast) var(--am-ease);
+}
+
+.am-play__buf {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.am-play__fill {
+  background: rgb(var(--am-accent-rgb));
+}
+
+.am-play__knob {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--am-r-blob);
+  background: #fff;
+  box-shadow: var(--am-sh-1);
+  transform: translateX(-50%);
+  transition:
+    width var(--am-fast) var(--am-ease),
+    height var(--am-fast) var(--am-ease);
+}
+
+.am-play__line:hover::before,
+.am-play__line:focus-visible::before,
+.am-play__line:hover .am-play__buf,
+.am-play__line:focus-visible .am-play__buf,
+.am-play__line:hover .am-play__fill,
+.am-play__line:focus-visible .am-play__fill {
+  height: 6px;
+}
+
+.am-play__line:hover .am-play__knob,
+.am-play__line:focus-visible .am-play__knob {
+  width: 16px;
+  height: 16px;
+}
+
+.am-play__line:focus-visible,
+.am-play__vol:focus-visible,
+.am-play__key:focus-visible,
+.am-play__q:focus-visible,
+.am-play__item:focus-visible,
+.am-play__back:focus-visible,
+.am-play__act:focus-visible,
+.am-play__skip:focus-visible {
+  outline: 2px solid rgb(var(--am-accent-rgb));
+  outline-offset: 3px;
+}
+
+.am-play__vol {
+  position: relative;
+  flex: 0 0 88px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.am-play__vol::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: var(--am-r-cap);
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.am-play__vol-fill {
+  position: absolute;
+  left: 0;
+  height: 4px;
+  border-radius: var(--am-r-cap);
+  background: rgba(255, 255, 255, 0.86);
 }
 
 .am-play__group {
   display: flex;
-  gap: 6px;
   align-items: center;
-}
-
-.am-play__cap {
-  margin-right: 4px;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.55;
+  gap: 6px;
 }
 
 .am-play__q {
-  min-width: 54px;
-  height: 32px;
+  height: 30px;
   padding: 0 12px;
-  font-size: 13px;
-  color: inherit;
-  cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--am-r-cap);
-  transition:
-    background var(--am-fast) var(--am-ease),
-    color var(--am-fast) var(--am-ease);
-}
-
-.am-play__q:hover {
-  background: var(--am-fill-2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .am-play__q--on {
-  color: #fff;
-  background: var(--am-accent);
-  border-color: transparent;
+  border-color: rgba(var(--am-accent-rgb), 0.72);
+  background: rgba(var(--am-accent-rgb), 0.28);
 }
 
-.am-play__act {
-  height: 32px;
-  padding: 0 14px;
-  font-size: 13px;
-  color: inherit;
-  cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-edge);
-  border-radius: var(--am-r-cap);
-  transition: background var(--am-fast) var(--am-ease);
-}
-
-.am-play__act:hover:not([disabled]) {
-  background: var(--am-fill-2);
-}
-
-.am-play__act[disabled] {
-  cursor: default;
-  opacity: 0.4;
-}
-
-.am-play__space {
-  flex: 1 1 auto;
-}
-
-/* Правая колонка: озвучки и серии. Липнет, чтобы на фуллскрине
-   прокрутка сезона не увозила кадр. */
+/* Боковая колонка: озвучки и серии одной и той же строкой. */
 .am-play__side {
-  position: sticky;
-  top: var(--am-gap);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  gap: var(--am-gap);
   min-width: 0;
+  transition:
+    opacity var(--am-mid) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
 }
 
 .am-play__box {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
   padding: 14px;
-  background: var(--am-glass);
   border: 1px solid var(--am-edge);
   border-radius: var(--am-r-l);
+  background: var(--am-panel-2);
   backdrop-filter: blur(var(--am-blur));
 }
 
 .am-play__h {
-  margin: 0;
-  font-size: 13px;
+  margin: 0 0 10px;
+  font-size: 12px
+  ;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  opacity: 0.6;
+  color: var(--am-faint);
 }
 
-.am-play__voices {
-  display: flex;
-  flex-wrap: wrap;
+.am-play__list {
+  display: grid;
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.am-play__voice {
-  max-width: 100%;
-  height: 30px;
-  padding: 0 12px;
-  overflow: hidden;
-  font-size: 13px;
-  color: inherit;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid transparent;
-  border-radius: var(--am-r-cap);
-  transition: background var(--am-fast) var(--am-ease);
-}
-
-.am-play__voice:hover {
-  background: var(--am-fill-2);
-}
-
-.am-play__voice--on {
-  color: #fff;
-  background: var(--am-accent);
-}
-
-/* Серии столбцом: названия серий бывают длинные, и сетка квадратиками
-   превращает их в голые номера без смысла. */
-.am-play__list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   max-height: min(52vh, 560px);
-  margin: 0;
-  padding: 0;
   overflow-y: auto;
-  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--am-scroll) transparent;
+}
+
+.am-play__list:hover {
+  scrollbar-color: var(--am-scroll-on) transparent;
 }
 
 .am-play__item {
   display: flex;
-  gap: 10px;
   align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 8px 10px;
-  font-size: 13px;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
   border: 1px solid transparent;
   border-radius: var(--am-r-m);
-  transition: background var(--am-fast) var(--am-ease);
+  background: var(--am-fill-1);
+  color: var(--am-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease);
 }
 
 .am-play__item:hover {
-  background: var(--am-fill-1);
+  background: var(--am-fill-2);
 }
 
 .am-play__item--on {
-  background: var(--am-accent-soft);
-  border-color: var(--am-edge);
+  border-color: rgba(var(--am-accent-rgb), 0.5);
+  background: rgba(var(--am-accent-rgb), 0.14);
 }
 
 .am-play__num {
-  flex: none;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--am-r-cap);
+  background: var(--am-fill-3);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  opacity: 0.55;
+  color: var(--am-dim);
 }
 
 .am-play__word-cut {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.am-play__src,
 .am-play__time {
-  flex: none;
-  margin-left: auto;
-  font-size: 12px;
-  opacity: 0.45;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--am-faint);
 }
 
-/* Отказ и пустота: теми же средствами, что и на остальных экранах. */
 .am-play__none {
   margin: 0;
-  font-size: 13px;
-  opacity: 0.6;
+  font-size: 12px;
+  color: var(--am-faint);
+}
+
+/* Театр: кадр во всё окно, всё остальное всплывает над ним. */
+.am-play--wide {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  background: #000;
+}
+
+.am-play--wide .am-play__main {
+  display: block;
+  height: 100vh;
+}
+
+.am-play--wide .am-play__stage {
+  height: 100vh;
+  aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.am-play--wide .am-play__head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 4;
+  padding: 16px 24px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+}
+
+.am-play--wide .am-play__name,
+.am-play--wide .am-play__sub {
+  color: #fff;
+}
+
+.am-play--wide .am-play__back {
+  height: 46px;
+  padding: 0 18px;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 15px;
+}
+
+.am-play--wide.am-play--calm .am-play__head {
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+/* Крупный масштаб включается вместе с полным экраном: с дивана видно. */
+.am-play--wide .am-play__deck {
+  gap: 14px;
+  padding: 22px 28px;
+}
+
+.am-play--wide .am-play__key {
+  min-width: 52px;
+  height: 52px;
+  font-size: 19px;
+}
+
+.am-play--wide .am-play__key--word {
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+.am-play--wide .am-play__clock {
+  font-size: 15px;
+}
+
+.am-play--wide .am-play__line {
+  height: 28px;
+}
+
+.am-play--wide .am-play__line::before,
+.am-play--wide .am-play__buf,
+.am-play--wide .am-play__fill {
+  height: 6px;
+}
+
+.am-play--wide .am-play__knob {
+  width: 18px;
+  height: 18px;
+}
+
+.am-play--wide .am-play__vol {
+  flex: 0 0 128px;
+  height: 28px;
+}
+
+.am-play--wide .am-play__q {
+  height: 40px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+.am-play--wide .am-play__skip {
+  right: 28px;
+  bottom: 132px;
+  height: 48px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+/* Списки нужны и в театре: иначе с пульта не выбрать серию. */
+.am-play--wide .am-play__side {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  width: clamp(280px, 24vw, 400px);
+  padding: 88px 22px 132px;
+  overflow-y: auto;
+  align-content: start;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0));
+  scrollbar-width: thin;
+  scrollbar-color: var(--am-scroll) transparent;
+}
+
+.am-play--wide .am-play__box {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.am-play--wide .am-play__item {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 15px;
+}
+
+.am-play--wide .am-play__item:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.am-play--wide .am-play__list {
+  max-height: none;
+  overflow: visible;
+}
+
+.am-play--wide.am-play--calm .am-play__side {
+  opacity: 0;
+  transform: translateX(8%);
+  pointer-events: none;
+}
+
+/* В театре курсор уходит вместе с панелью. */
+.am-play--wide.am-play--calm {
+  cursor: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-play__spin {
+    animation-duration: 2.4s;
+  }
+
+  .am-play__deck,
+  .am-play__head,
+  .am-play__side,
+  .am-play__key,
+  .am-play__back,
+  .am-play__item,
+  .am-play__knob,
+  .am-play__line::before,
+  .am-play__buf,
+  .am-play__fill {
+    transition: none;
+  }
 }
