@@ -326,6 +326,7 @@ watch(studioId, () => {
           :repeat="row.repeat"
           :note="row.note"
           :done="row.done"
+          :soon="row.soon"
           :adult="row.adult"
           @open="open(row.mediaId)"
         />
