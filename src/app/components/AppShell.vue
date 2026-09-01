@@ -49,10 +49,10 @@ function onReload(): void {
         <button
           v-for="item in MENU"
           :key="item.name"
+          v-tip="item.title"
           class="am-side__item"
           :class="{ 'am-side__item--on': item.name === active }"
           type="button"
-          :title="item.title"
           @click="navigate(item.name)"
         >
           <span class="am-side__icon" aria-hidden="true">{{ item.icon }}</span>
@@ -77,10 +77,10 @@ function onReload(): void {
           <button
             v-for="item in APPEARANCES"
             :key="item.name"
+            v-tip="item.title"
             class="am-skin__btn"
             :class="{ 'am-skin__btn--on': item.name === appearance }"
             type="button"
-            :title="item.title"
             :aria-pressed="item.name === appearance"
             @click="setAppearance(item.name)"
           >
@@ -88,7 +88,7 @@ function onReload(): void {
           </button>
         </div>
 
-        <button class="am-top__icon" type="button" title="Обновить окно" @click="onReload">
+        <button v-tip="'Обновить окно'" class="am-top__icon" type="button" @click="onReload">
           <span aria-hidden="true">⟳</span>
         </button>
       </header>
@@ -328,7 +328,7 @@ function onReload(): void {
   flex: 1;
 }
 
-/* Переключатель тем: три знака в одной капсуле. Подписи живут в title:
+/* Переключатель тем: три знака в одной капсуле. Подписи живут в подсказке:
    три слова в шапке шумели бы громче заголовка экрана. */
 .am-skin {
   display: inline-flex;
