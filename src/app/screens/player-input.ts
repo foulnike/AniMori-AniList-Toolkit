@@ -19,6 +19,8 @@ export type PlayerIntent =
   | 'louder'
   | 'quieter'
   | 'mute'
+  | 'slower'
+  | 'faster'
   | 'prevEpisode'
   | 'nextEpisode'
   | 'skip'
@@ -41,8 +43,20 @@ export const VOLUME_STEP = 0.2
 /** Сколько тишины до того, как панель уедет с кадра. */
 export const CALM_DELAY_MS = 3200
 
-/** Громкость помнится на запуск, как и место остановки. Это не настройка. */
+/**
+ * Скорости воспроизведения. Списком, а не арифметикой: доли вроде 0.25
+ * в двоичных числах копят ошибку, и подпись превращалась бы в 1.7500000000000002.
+ * Выше двух не идём: речь там уже неразборчива, а звук уезжает в писк.
+ */
+export const RATES: ReadonlyArray<number> = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+
+/** Обычная скорость. К ней возвращает нажатие на текущую строку меню. */
+export const NORMAL_RATE = 1
+
+/** Громкость помнится на запуск, как и скорость. Это не настройка. */
 let volumeMark = 1
+
+let rateMark: number = NORMAL_RATE
 
 export function peekVolume(): number {
   return volumeMark
@@ -50,6 +64,43 @@ export function peekVolume(): number {
 
 export function rememberVolume(value: number): void {
   volumeMark = Math.min(1, Math.max(0, value))
+}
+
+export function peekRate(): number {
+  return rateMark
+}
+
+export function rememberRate(value: number): void {
+  const first = RATES[0] ?? NORMAL_RATE
+  const last = RATES[RATES.length - 1] ?? NORMAL_RATE
+  rateMark = Math.min(last, Math.max(first, value))
+}
+
+/**
+ * Следующая скорость в сторону step. Крайние значения упираются, а не замыкаются
+ * в кольцо: прыжок с двойной скорости на четвертную одним нажатием — всегда
+ * промах, а не замысел.
+ */
+export function stepRate(current: number, step: number): number {
+  const at = RATES.indexOf(current)
+
+  // Скорость со стороны (например, из прошлого кадра) — ищем ближайшую.
+  if (at < 0) {
+    const near = RATES.reduce(
+      (best, rate) => (Math.abs(rate - current) < Math.abs(best - current) ? rate : best),
+      NORMAL_RATE,
+    )
+    return near
+  }
+
+  const goal = Math.min(RATES.length - 1, Math.max(0, at + step))
+  return RATES[goal] ?? NORMAL_RATE
+}
+
+/** Подпись скорости: целые без дробного хвоста, знак умножения — не буква x. */
+export function rateLabel(rate: number): string {
+  const text = Number.isInteger(rate) ? String(rate) : String(rate).replace('.', ',')
+  return `${text}\u00d7`
 }
 
 /** Набор текста главнее любых наших клавиш. */
@@ -105,8 +156,23 @@ export function readIntent(event: KeyboardEvent, inList: boolean): PlayerIntent 
     case 'm':
     case 'ь':
       return 'mute'
+    // Скорость двумя парами клавиш: квадратные скобки как в плеерах на ПК,
+    // угловые как в вебе. Кириллица рядом — те же физические клавиши.
+    case '[':
+    case ',':
+    case '<':
+    case 'х':
+    case 'б':
+      return 'slower'
+    case ']':
+    case '.':
+    case '>':
+    case 'ъ':
+    case 'ю':
+      return 'faster'
     case 'f':
     case 'а':
+    case 'F11':
       return 'fullscreen'
     case 's':
     case 'ы':
@@ -213,6 +279,12 @@ export function moveFocus(root: ParentNode, intent: PlayerIntent): boolean {
 /**
  * Полный экран окна. Просим оболочку, а не тег: своя панель должна остаться
  * своей, а родной рамке WebView2 в кадре делать нечего.
+ *
+ * Родной полный экран элемента (requestFullscreen) отвергнут совсем: оболочка
+ * сама разворачивала окно в ответ на него, и следующий же переключатель видел
+ * «уже развёрнуто» и складывал окно обратно — шапка окна и панель задач
+ * оставались на месте.
+ *
  * Возвращает новое состояние окна; в браузере оболочка честно отвечает false.
  */
 export async function toggleWindowFullscreen(): Promise<boolean> {
