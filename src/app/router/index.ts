@@ -10,6 +10,9 @@ import { DEFAULT_ROUTE, SCREEN_NAMES, type Route, type ScreenName } from './rout
 
 const state = ref<Route>(DEFAULT_ROUTE)
 
+/** Экраны, у которых второй кусок адреса — номер сущности. */
+const SCREENS_WITH_ID: ReadonlyArray<ScreenName> = ['media', 'studio', 'player']
+
 // Снаружи адрес только читают; менять его можно только через navigate.
 export const currentRoute: ComputedRef<Route> = computed(() => state.value)
 
@@ -27,7 +30,7 @@ export function parseHash(hash: string): Route {
 
   const params: Record<string, string> = {}
   const tail = parts[1]
-  if ((head === 'media' || head === 'studio') && tail !== undefined) {
+  if (SCREENS_WITH_ID.includes(head) && tail !== undefined) {
     try {
       params.id = decodeURIComponent(tail)
     } catch {
