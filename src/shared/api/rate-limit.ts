@@ -255,3 +255,15 @@ export const anilibertyLimiter = createRateLimiter({
   windowMs: API_WINDOW_MS,
   maxPerWindow: API_MAX_PER_WINDOW,
 })
+
+/**
+ * Kodik: ключ общий на всех, потолок нигде не объявлен. Одна серия стоит
+ * трёх запросов подряд: поиск, страница серии и /ftor. Свой бюджет держится
+ * ради соседей: иначе открытие плеера тормозит перевод имён на другом экране.
+ */
+export const kodikLimiter = createRateLimiter({
+  name: 'Kodik',
+  minIntervalMs: API_MIN_INTERVAL_MS,
+  windowMs: API_WINDOW_MS,
+  maxPerWindow: API_MAX_PER_WINDOW,
+})
