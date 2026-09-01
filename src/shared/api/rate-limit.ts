@@ -243,3 +243,15 @@ export const githubLimiter = createRateLimiter({
   windowMs: API_WINDOW_MS,
   maxPerWindow: API_MAX_PER_WINDOW,
 })
+
+/**
+ * Aniliberty: открытый API без ключа и без объявленного потолка. Темп общий
+ * с остальными и держится из вежливости, а не по документу: открытие плеера
+ * стоит двух запросов подряд, а при переборе названий их бывает больше.
+ */
+export const anilibertyLimiter = createRateLimiter({
+  name: 'Aniliberty',
+  minIntervalMs: API_MIN_INTERVAL_MS,
+  windowMs: API_WINDOW_MS,
+  maxPerWindow: API_MAX_PER_WINDOW,
+})
