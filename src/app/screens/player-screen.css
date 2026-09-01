@@ -10,6 +10,10 @@
  * Поверх видео токены темы почти не используются намеренно: кадр одинаково
  * чёрный во всех трёх темах, и светлая панель на нём читалась бы плохо.
  * Токены остаются там, где часть интерфейса живёт на странице: шапка и списки.
+ *
+ * Центр кадра центруется сеткой, а не сдвигом на половину размера.
+ * Сдвигом было: у колеса ожидания свой поворот в transform, и браузер
+ * интерполировал общую матрицу, плавно уводя круг вправо-вниз.
  */
 
 .am-play {
@@ -133,22 +137,30 @@
   cursor: none;
 }
 
-.am-play__hold {
+/*
+ * Обёртка центра: одна клетка сетки на весь кадр. Знаки стоят ровно
+ * без единого transform, и свой поворот колеса больше ничего не сбивает.
+ */
+.am-play__mid {
   position: absolute;
-  top: 50%;
-  left: 50%;
   z-index: 2;
+  display: grid;
+  inset: 0;
+  place-items: center;
+  pointer-events: none;
+}
+
+.am-play__hold {
   display: grid;
   width: 88px;
   height: 88px;
   border-radius: 50%;
   background: rgb(0 0 0 / 0.44);
   color: #fff;
-  animation: am-play-in var(--am-mid) var(--am-ease) both;
+  animation: am-play-rise var(--am-mid) var(--am-ease) both;
   backdrop-filter: blur(var(--am-blur));
+  grid-area: 1 / 1;
   place-items: center;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
 }
 
 .am-play__hold .am-play__ico {
@@ -158,18 +170,13 @@
 
 /* Колесо посреди серии: сеть не поспевает, но всё ещё жива. */
 .am-play__wait {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 2;
   width: 46px;
   height: 46px;
   border: 3px solid rgb(255 255 255 / 0.22);
   border-top-color: #fff;
   border-radius: 50%;
   animation: am-play-turn 0.9s linear infinite;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
+  grid-area: 1 / 1;
 }
 
 /* Заслонка */
@@ -235,7 +242,11 @@
   background: rgb(var(--am-accent-rgb) / 1);
 }
 
-/* Пропуск заставки и титров — над панелью справа, как принято. */
+/*
+ * Пропуск заставки и титров — над панелью справа, как принято.
+ * Анимация только по прозрачности и вертикали: кнопка прибита к углу,
+ * и кадр с центральным сдвигом оставлял её смещённой навсегда.
+ */
 .am-play__skip {
   position: absolute;
   right: 18px;
@@ -249,13 +260,57 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  animation: am-play-in var(--am-fast) var(--am-ease) both;
+  animation: am-play-pop var(--am-fast) var(--am-ease) both;
   backdrop-filter: blur(var(--am-blur));
   cursor: pointer;
 }
 
 .am-play__skip:hover {
   background: rgb(18 22 30 / 0.92);
+}
+
+/*
+ * Плашка продолжения. Слева, на высоте пропуска: справа они могли бы
+ * появиться вместе и налезть друг на друга на первых секундах заставки.
+ */
+.am-play__resume {
+  position: absolute;
+  bottom: 92px;
+  left: 18px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  padding: 7px 7px 7px 14px;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: var(--am-r-cap);
+  background: rgb(10 12 17 / 0.82);
+  color: #fff;
+  font-size: 13px;
+  animation: am-play-pop var(--am-fast) var(--am-ease) both;
+  backdrop-filter: blur(var(--am-blur));
+  gap: 10px;
+}
+
+.am-play__resume-key {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--am-r-cap);
+  background: rgb(var(--am-accent-rgb) / 0.9);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--am-fast) var(--am-ease);
+}
+
+.am-play__resume-key:hover {
+  background: rgb(var(--am-accent-rgb) / 1);
+}
+
+.am-play__resume-key:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* Панель */
@@ -458,8 +513,8 @@
 }
 
 /*
- * Подсказка живёт внутри театра, а не в body: общая плашка v-tip в родном
- * полном экране осталась бы под кадром и просто не показалась.
+ * Подсказка живёт внутри театра, а не в body: общая плашка v-tip висит
+ * на своём слое страницы и под чёрным кадром просто не показалась бы.
  */
 .am-play__key[data-tip]::after,
 .am-play__back[data-tip]::after {
@@ -588,7 +643,7 @@
   color: rgb(255 255 255 / 0.6);
 }
 
-/* Выбор качества */
+/* Меню панели: качество и скорость живут в одной разметке. */
 
 .am-play__pick {
   position: relative;
@@ -600,15 +655,20 @@
   right: 0;
   bottom: calc(100% + 10px);
   z-index: 6;
+  max-height: 40vh;
   min-width: 136px;
   margin: 0;
   padding: 6px;
+  overflow-y: auto;
   border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: var(--am-r-m);
   background: rgb(10 12 17 / 0.96);
   box-shadow: var(--am-sh-2);
   animation: am-play-pop var(--am-fast) var(--am-ease) both;
   list-style: none;
+  overscroll-behavior: contain;
+  scrollbar-color: rgb(255 255 255 / 0.28) transparent;
+  scrollbar-width: thin;
 }
 
 .am-play__opt {
@@ -688,6 +748,7 @@
 }
 
 .am-play__item {
+  position: relative;
   display: flex;
   width: 100%;
   align-items: center;
@@ -746,6 +807,28 @@
   white-space: nowrap;
 }
 
+/*
+ * Полоска просмотра внизу строки. Тонкая намеренно: это подсказка
+ * на краю глаза, а не вторая полоса времени.
+ */
+.am-play__seen {
+  position: absolute;
+  right: 10px;
+  bottom: 3px;
+  left: 10px;
+  height: 2px;
+  border-radius: var(--am-r-cap);
+  background: var(--am-fill-2);
+  pointer-events: none;
+}
+
+.am-play__seen-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--am-accent-rgb) / 0.85);
+}
+
 .am-play__none {
   margin: 0;
   padding: 6px 2px;
@@ -755,8 +838,8 @@
 
 /*
  * Театр. Узел лежит прямо в body, поэтому его не зажимает ни один чужой
- * контекст наложения. z-index нужен только как запасной путь: если родной
- * полный экран не дали, театр всё равно перекрывает окно целиком.
+ * контекст наложения. Окно разворачивает оболочка, а не браузер:
+ * родной полный экран элемента больше не запрашивается.
  */
 .am-play--wide {
   position: fixed;
@@ -856,35 +939,73 @@
   font-size: 14px;
 }
 
-/* В театре панель выше, и кнопка пропуска садится на ряд кнопок. */
+/* В театре панель выше, и плашки садятся на ряд кнопок. */
 .am-play--wide .am-play__skip {
   right: 30px;
   bottom: 148px;
 }
 
+.am-play--wide .am-play__resume {
+  bottom: 148px;
+  left: 30px;
+}
+
 /*
- * Ящик со списками выезжает справа и заканчивается над панелью: иначе он
- * накрывал бы правый кластер вместе с той самой кнопкой, которой его
- * только что открыли. Панель при открытом ящике не уезжает в тишину.
+ * Ящик со списками — парящая чёлка со всеми четырьмя углами: прибитый
+ * к краям окна он обрывался о панель ровной линией и читался обрезком.
+ * Снизу он заканчивается выше панели: иначе накрывал бы правый кластер
+ * вместе с той самой кнопкой, которой его только что открыли.
  */
 .am-play--wide .am-play__side {
   position: absolute;
   z-index: 3;
   width: min(390px, 84vw);
-  padding: 78px 18px 24px;
+  padding: 10px 12px 14px;
   overflow-y: auto;
-  background: linear-gradient(to left, rgb(4 6 10 / 0.97) 76%, rgb(4 6 10 / 0.74) 100%);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: var(--am-r-xl);
+  background: rgb(8 10 14 / 0.88);
+  box-shadow: var(--am-sh-2);
   animation: am-play-slide var(--am-mid) var(--am-ease) both;
-  inset: 0 0 128px auto;
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.2);
+  gap: 0;
+  inset: 84px 18px 128px auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgb(255 255 255 / 0.28) transparent;
+  scrollbar-width: thin;
 }
 
+/* Внутри чёлки коробки теряют рамки: двойное стекло читается грязью. */
 .am-play--wide .am-play__box {
-  border-color: rgb(255 255 255 / 0.1);
-  background: rgb(255 255 255 / 0.04);
+  flex: 0 0 auto;
+  padding: 4px 2px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.am-play--wide .am-play__box + .am-play__box {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
 }
 
 .am-play--wide .am-play__list {
   max-height: none;
+  overflow: visible;
+}
+
+/* Заголовки липкие: в длинном списке иначе непонятно, что перебираешь. */
+.am-play--wide .am-play__h {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: var(--am-r-s);
+  background: rgb(8 10 14 / 0.92);
+  color: rgb(255 255 255 / 0.56);
 }
 
 .am-play--wide .am-play__item {
@@ -895,22 +1016,8 @@
   background: rgb(255 255 255 / 0.1);
 }
 
-.am-play--wide .am-play__h {
-  color: rgb(255 255 255 / 0.56);
-}
-
-/*
- * Родной полный экран. Без ::backdrop браузер подкладывает под кадр белый
- * прямоугольник, и он виден по краям на не совпадающих пропорциях.
- */
-.am-play:fullscreen {
-  width: 100vw;
-  height: 100vh;
-  background: #000;
-}
-
-.am-play::backdrop {
-  background: #000;
+.am-play--wide .am-play__seen {
+  background: rgb(255 255 255 / 0.18);
 }
 
 @media (max-width: 620px) {
@@ -933,15 +1040,19 @@
   }
 }
 
-@keyframes am-play-in {
+/*
+ * Всплытие без сдвига: старые кадры несли в себе translate(-50%,-50%),
+ * и любой элемент с этой анимацией оставался смещённым навсегда.
+ */
+@keyframes am-play-rise {
   from {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.9);
+    transform: scale(0.9);
   }
 
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -984,6 +1095,7 @@
   .am-play__hold,
   .am-play__menu,
   .am-play__side,
+  .am-play__resume,
   .am-play__skip {
     animation: none;
   }
