@@ -79,6 +79,17 @@ export interface AniMoriSettings {
    * с переносом: объединение заставило бы прятать обе кнопки ради одной.
    */
   showCompareButton: boolean
+  /**
+   * Папка для выгрузок списка в XML — пункт 3.3. Пустая строка значит
+   * «ещё не выбрана»: тогда файл уходит загрузкой окна, и экран говорит
+   * об этом вслух. Подставлять сюда домашний каталог за человека нельзя:
+   * молчаливая запись куда-то и была тем дефектом, ради которого всё затеяно.
+   *
+   * Хранится полным путᑑм, а не именем: окно выбора возвращает путь,
+   * и папка привязана к этой машине. В снимок списка ключ не попадает
+   * и на другое устройство не едет.
+   */
+  exportDir: string
   /** Производная: тайтлы включены, пока основной источник != 'off'. */
   translateTitles: boolean
 }
@@ -116,6 +127,7 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   showAdult: false,
   showSyncButton: true,
   showCompareButton: true,
+  exportDir: '',
   translateTitles: true,
 }
 
@@ -150,6 +162,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     showAdult,
     showSyncButton,
     showCompareButton,
+    exportDir,
   ] = await Promise.all([
     storage.get('set_interface', DEFAULT_SETTINGS.translateInterface),
     storage.get<TitleSource>('set_title_primary'),
@@ -176,6 +189,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('set_adult', DEFAULT_SETTINGS.showAdult),
     storage.get('set_btn_sync', DEFAULT_SETTINGS.showSyncButton),
     storage.get('set_btn_compare', DEFAULT_SETTINGS.showCompareButton),
+    storage.get('set_export_dir', DEFAULT_SETTINGS.exportDir),
   ])
 
   // Совместимость: старый set_titles применяется только при отсутствии нового ключа.
@@ -208,6 +222,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     showAdult,
     showSyncButton,
     showCompareButton,
+    exportDir,
     translateTitles: titlePrimary !== 'off',
   }
 }
