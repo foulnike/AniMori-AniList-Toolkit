@@ -7,6 +7,10 @@
 // разной высоты расползались по всему фуллскрину, и глазу негде было
 // зацепиться. Слева то, что делают руками, справа — вид и справка.
 //
+// Внутри панели данных тот же порядок: сначала числа, потом необратимое
+// одной строкой, потом выгрузка своим узлом. Пояснения убраны сознательно:
+// подписи кнопок и строка пути говорят то же самое и короче.
+//
 // Оформление живёт в settings-screen.css — так же, как у карточки и плеера.
 import { onMounted, ref } from 'vue'
 
@@ -35,7 +39,6 @@ import {
   submitToken,
   type LoginStart,
 } from '../auth/session'
-import { navigate } from '../router'
 import { saveXmlFile } from '../save-file'
 
 const version = __ANIMORI_VERSION__
@@ -130,7 +133,7 @@ const exportDir = ref(settings.exportDir)
 
 /**
  * Умеет ли площадка спрашивать папку. Окно выбора родное и живёт в оболочке;
- * в браузере его нет, и там кнопку честнее спрятать, чем показать неработающей.
+ * в браузере его нет, и там строку честнее спрятать, чем показать неработающей.
  */
 const canPickDir = Bridge.exportFile.available
 
@@ -292,6 +295,9 @@ function onDropList(): void {
  *
  * Закрытое окно выбора ошибкой не считается и ничего не меняет: null здесь
  * значит «передумал», и прежняя папка остаётся на месте.
+ *
+ * Ответа словами нет намеренно: новый путь встаёт в ту же строку, которую
+ * человек только что нажал, и это виднее любой заметки.
  */
 function onPickDir(): void {
   void guard(async () => {
@@ -302,7 +308,6 @@ function onPickDir(): void {
 
     exportDir.value = picked
     await saveSetting('exportDir', 'set_export_dir', picked)
-    note.value = `Выгрузки будут сохраняться в ${picked}`
   })
 }
 
@@ -345,15 +350,12 @@ function onExport(): void {
 /**
  * Переключение показа взрослого. Отбор живёт в core/adult.ts и читает ключ
  * в момент вопроса, поэтому перезапуска не нужно: следующий поиск уже другой.
+ *
+ * Заметки об исходе нет: сам тумблер и есть ответ, а прежняя строка писалась
+ * в панель другой колонки и читалась там как чужая.
  */
 function onAdult(): void {
-  note.value = ''
-
   void saveSetting('showAdult', 'set_adult', adult.value)
-
-  note.value = adult.value
-    ? 'Взрослое теперь видно в поиске и каталоге.'
-    : 'Взрослое скрыто из поиска и каталога.'
 }
 
 // Память сбрасывается только руками. Перезагрузка не делается сама:
@@ -366,14 +368,6 @@ function onClear(): void {
     await readState()
     note.value = 'Память очищена. Названия и описания загрузятся заново.'
   })
-}
-
-/**
- * Переход в журнал. Кнопка живёт здесь, а не в меню: журнал нужен при разборе
- * поломки, а не каждый день, и спрашивают о нём именно отсюда.
- */
-function onLog(): void {
-  navigate('log')
 }
 
 function onReload(): void {
@@ -426,8 +420,8 @@ onMounted(() => {
 <template>
   <section class="am-page">
     <div class="am-set">
-      <!-- Левая колонка — действия: подключение счёта и распоряжение данными.
-           Обе панели здесь умеют менять то, что лежит на диске. -->
+      <!-- Левая колонка — действия: подключение счёта, распоряжение данными
+           и облачная копия. Все панели здесь умеют менять то, что на диске. -->
       <div class="am-set__col">
         <div class="am-panel am-box">
           <div class="am-bar">
@@ -557,12 +551,8 @@ onMounted(() => {
             </li>
           </ul>
 
-          <p class="am-meta">
-            Список живёт здесь, на вашем диске, и от отключения счёта не исчезает. Выгрузка
-            в XML даёт файл, который примут Шикимори, AniList и другие сервисы. Память —
-            это названия, описания и обложки: её можно сбросить без потерь.
-          </p>
-
+          <!-- Необратимое одной строкой: сброс памяти и удаление списка стоят
+               рядом, потому что оба про то, что лежит на этом диске. -->
           <div class="am-row">
             <button
               v-tip="'Убрать сохранённые названия, описания и обложки'"
@@ -572,28 +562,6 @@ onMounted(() => {
               @click="onClear"
             >
               Очистить память
-            </button>
-
-            <button
-              v-if="listCount > 0"
-              v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
-              class="am-btn am-btn--ghost"
-              type="button"
-              :disabled="busy"
-              @click="onExport"
-            >
-              Выгрузить в XML
-            </button>
-
-            <button
-              v-if="canPickDir"
-              v-tip="'Выбрать папку, куда сохранять выгрузки'"
-              class="am-btn am-btn--ghost"
-              type="button"
-              :disabled="busy"
-              @click="onPickDir"
-            >
-              {{ exportDir ? 'Сменить папку' : 'Выбрать папку' }}
             </button>
 
             <button
@@ -612,15 +580,36 @@ onMounted(() => {
             </button>
           </div>
 
-          <!-- Куда ляжет выгрузка. Строка показывается только там, где папку
-               можно выбрать: в браузере это было бы обещание без силы. -->
-          <p v-if="canPickDir" class="am-meta am-path">
-            {{
-              exportDir
-                ? `Папка выгрузок: ${exportDir}`
-                : 'Папка выгрузок не выбрана — файл уйдёт в загрузки окна.'
-            }}
-          </p>
+          <!-- Выгрузка отдельным узлом строкой ниже: место и действие рядом.
+               Строка папки нажимается целиком, и путь виден всегда. -->
+          <div v-if="canPickDir || listCount > 0" class="am-out">
+            <button
+              v-if="canPickDir"
+              class="am-pick"
+              type="button"
+              :disabled="busy"
+              @click="onPickDir"
+            >
+              <span class="am-pick__text">
+                <span class="am-pick__name">Папка выгрузок</span>
+                <span class="am-pick__path" :class="{ 'am-pick__path--none': !exportDir }">
+                  {{ exportDir || 'Не выбрана — файл уйдёт в загрузки окна' }}
+                </span>
+              </span>
+              <span class="am-pick__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
+            </button>
+
+            <button
+              v-if="listCount > 0"
+              v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onExport"
+            >
+              Выгрузить в XML
+            </button>
+          </div>
 
           <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
           <div v-if="askingDrop" class="am-ask">
@@ -640,6 +629,51 @@ onMounted(() => {
           </div>
 
           <p v-if="note" class="am-note">{{ note }}</p>
+        </div>
+
+        <!-- Макет облачной копии: место, порядок и слова на будущее. Кнопки
+             нарочно мертвы, площадки нарисованы пунктиром — это заготовка
+             на посмотреть, а не работающая копия. -->
+        <div class="am-panel am-box">
+          <div class="am-bar">
+            <h3 class="am-h3">Облачная копия</h3>
+            <span class="am-bar__gap" />
+            <span class="am-flag">
+              <span class="am-flag__dot" aria-hidden="true" />
+              скоро
+            </span>
+          </div>
+
+          <div class="am-cloud">
+            <button class="am-cloud__pick" type="button" disabled>
+              <span class="am-cloud__mark" aria-hidden="true">Я</span>
+              <span class="am-cloud__name">Яндекс Диск</span>
+            </button>
+            <button class="am-cloud__pick" type="button" disabled>
+              <span class="am-cloud__mark" aria-hidden="true">G</span>
+              <span class="am-cloud__name">Google Drive</span>
+            </button>
+          </div>
+
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Место</span>
+              <span class="am-fact__value">не выбрано</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Последняя копия</span>
+              <span class="am-fact__value">—</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Записей в копии</span>
+              <span class="am-fact__value">—</span>
+            </li>
+          </ul>
+
+          <div class="am-row">
+            <button class="am-btn" type="button" disabled>Сохранить копию</button>
+            <button class="am-btn am-btn--ghost" type="button" disabled>Забрать копию</button>
+          </div>
         </div>
       </div>
 
@@ -665,13 +699,7 @@ onMounted(() => {
 
           <label class="am-switch">
             <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
-            <span class="am-switch__text">
-              <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
-              <span class="am-switch__hint">
-                Контент для взрослых в поиске и каталоге. Своего списка это не касается: добавленные
-                записи видны всегда.
-              </span>
-            </span>
+            <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
           </label>
         </div>
 
@@ -712,13 +740,6 @@ onMounted(() => {
             <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
             и запустите сборку кнопкой.
           </p>
-
-          <!-- Вход в журнал. Отсюда, а не из меню: читают его, когда что-то
-               не работает, и спрашивают о нём ровно на этом экране. -->
-          <div class="am-log-open">
-            <button class="am-btn am-btn--soft" type="button" @click="onLog">Открыть журнал</button>
-            <span class="am-meta">Записи этого запуска: сеть, склад, ошибки.</span>
-          </div>
         </div>
       </div>
     </div>
