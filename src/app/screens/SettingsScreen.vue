@@ -67,8 +67,8 @@ const DATASET_URL = 'https://github.com/foulnike/animori-data'
 
 /**
  * Где человек берёт пропуск к Яндекс Диску. Своего зарегистрированного
- * приложения у сборки нет, и честнее отправить за токеном напрямую,
- * чем делать вид, что окно входа сейчас откроется само.
+ * приложения у сборки нет, и честнее отправить за токеном напрямую, чем
+ * делать вид, что окно входа сейчас откроется само.
  */
 const YANDEX_OAUTH_URL = 'https://oauth.yandex.com/client/new/'
 
@@ -373,7 +373,7 @@ function onPickDir(): void {
  * Выгрузка списка файлом XML. Формат чужой и старый, зато его понимают
  * все: Шикимори, AniList, Kitsu и сам MyAnimeList.
  *
- * Записи без номера MAL выразить в нᄅм нечем, и их число говорится
+ * Записи без номера MAL выразить в нём нечем, и их число говорится
  * вслух: молча потерять часть списка при переезде в другой сервис —
  * худшее, что здесь может случиться.
  *
@@ -418,7 +418,7 @@ function whenText(ms: number): string {
 }
 
 /// Размер копии в килобайтах: байты человеку ничего не говорят, а мегабайта
-/// список даже в тысячу записей не набирает.
+/// список не набирает даже в тысячу записей.
 function sizeText(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`
 }
@@ -473,13 +473,14 @@ function onCloudToken(): void {
   void cloudGuard(async () => {
     cloudNote.value = ''
 
-    const done = await checkPlace(tokenDraft.value.trim())
+    const token = tokenDraft.value.trim()
+    const done = await checkPlace(token)
     if (!done.ok) {
       cloudError.value = done.problem
       return
     }
 
-    await saveSetting('cloudToken', 'am_cloud_token', tokenDraft.value.trim())
+    await saveSetting('cloudToken', 'am_cloud_token', token)
     cloudSaved.value = true
     tokenDraft.value = ''
     tokenOpen.value = false
@@ -728,4 +729,376 @@ onMounted(() => {
               <p class="am-ask__text">
                 Сейчас у нас записей: {{ listCount }}. Слияние добавит недостающее и оставит
                 ваши правки, если они свежее записи на сайте. Замена вычистит местный
-                список целиком, и записи, которых нет на AniList, вернут
+                список целиком, и записи, которых нет на AniList, вернуть будет неоткуда.
+              </p>
+
+              <div class="am-row">
+                <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
+                  Добавить недостающее
+                </button>
+                <button
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="busy"
+                  @click="onPull('replace')"
+                >
+                  Заменить целиком
+                </button>
+                <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+              </div>
+            </div>
+
+            <!-- Показывается только после нажатия: до него окна входа нет и ждать
+                 человеку нечего. -->
+            <p v-if="login && !authStatus.authorized" class="am-meta">
+              Окно AniList открыто, после разрешения оно закроется само. Ожидание —
+              {{ waitText(login.waitSecs) }}.
+            </p>
+
+            <div v-if="manualOpen && !authStatus.authorized" class="am-row">
+              <label class="am-field">
+                <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
+              </label>
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="busy || !manual.trim()"
+                @click="onManual"
+              >
+                Сохранить
+              </button>
+            </div>
+
+            <p v-if="error" class="am-error">{{ error }}</p>
+          </template>
+        </div>
+
+        <div class="am-panel am-box">
+          <h3 class="am-h3">Свои данные</h3>
+
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Записей в списке</span>
+              <span class="am-fact__value">{{ listCount }}</span>
+            </li>
+            <li v-if="usedSize" class="am-fact">
+              <span class="am-fact__name">Занято на диске</span>
+              <span class="am-fact__value">{{ usedSize }}</span>
+            </li>
+          </ul>
+
+          <!-- Необратимое одной строкой: сброс памяти и удаление списка стоят
+               рядом, потому что оба про то, что лежит на этом диске. -->
+          <div class="am-row">
+            <button
+              v-tip="'Убрать сохранённые названия, описания и обложки'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onClear"
+            >
+              Очистить память
+            </button>
+
+            <button
+              v-if="listCount > 0"
+              v-tip="'Удалить свой список с этого устройства'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onAskDrop"
+            >
+              Удалить мой список
+            </button>
+
+            <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
+              Перезагрузить
+            </button>
+          </div>
+
+          <!-- Выгрузка отдельным узлом строкой ниже: место и действие рядом.
+               Строка папки нажимается целиком, и путь виден всегда.
+
+               Класс свой, am-dir, а не am-pick: тем в styles/theme.css одет
+               нативный select, и совпадение имён отдавало этой строке чужие
+               правила — плотный фон списка и снятую обводку фокуса. -->
+          <div v-if="canPickDir || listCount > 0" class="am-out">
+            <button
+              v-if="canPickDir"
+              v-tip="'Сменить папку, куда уходят выгрузки XML'"
+              class="am-dir"
+              type="button"
+              :disabled="busy"
+              @click="onPickDir"
+            >
+              <span class="am-dir__mark" aria-hidden="true">📁</span>
+              <span class="am-dir__text">
+                <span class="am-dir__name">Папка выгрузок</span>
+                <span class="am-dir__path" :class="{ 'am-dir__path--none': !exportDir }">
+                  {{ exportDir || 'Не выбрана — файл уйдёт в загрузки окна' }}
+                </span>
+              </span>
+              <span class="am-dir__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
+            </button>
+
+            <button
+              v-if="listCount > 0"
+              v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onExport"
+            >
+              Выгрузить в XML
+            </button>
+          </div>
+
+          <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
+          <div v-if="askingDrop" class="am-ask">
+            <p class="am-ask__text">
+              Удалить список с этого устройства: записей {{ listCount }}. На AniList ваши записи
+              останутся нетронутыми, а добавленные здесь без входа вернуть будет неоткуда.
+            </p>
+
+            <div class="am-row">
+              <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
+                Удалить список
+              </button>
+              <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">
+                Отмена
+              </button>
+            </div>
+          </div>
+
+          <p v-if="note" class="am-note">{{ note }}</p>
+        </div>
+
+        <!-- Облачная копия: место, пропуск, копия туда и обратно. Само облако
+             ничего не начинает — обе кнопки нажимает человек, и обратный путь
+             всегда спрашивает: копия ложится поверх живого списка. Формат
+             файла — core/cloud-file.ts, порядок действий — core/cloud.ts,
+             сеть — api/yandex-disk.ts. -->
+        <div class="am-panel am-box">
+          <div class="am-bar">
+            <h3 class="am-h3">Облачная копия</h3>
+            <span class="am-bar__gap" />
+            <span class="am-flag" :class="{ 'am-flag--on': cloudOn() }">
+              <span class="am-flag__dot" aria-hidden="true" />
+              {{ cloudOn() ? 'подключено' : 'не подключено' }}
+            </span>
+          </div>
+
+          <div class="am-cloud">
+            <button
+              v-tip="'Хранить копию списка на Яндекс Диске'"
+              class="am-cloud__pick"
+              :class="{ 'am-cloud__pick--on': cloudPlace === 'yandex' }"
+              type="button"
+              :disabled="cloudBusy"
+              @click="onPickYandex"
+            >
+              <span class="am-cloud__mark" aria-hidden="true">Я</span>
+              <span class="am-cloud__name">Яндекс Диск</span>
+            </button>
+            <button class="am-cloud__pick" type="button" disabled>
+              <span class="am-cloud__mark" aria-hidden="true">G</span>
+              <span class="am-cloud__name">Google Drive</span>
+              <span class="am-cloud__soon">позже</span>
+            </button>
+          </div>
+
+          <template v-if="cloudPlace === 'yandex'">
+            <p v-if="!cloudSaved || tokenOpen" class="am-meta">
+              Пропуск выдаёт сам Яндекс: заведите приложение с правом на Диск на
+              <button class="am-link" type="button" @click="onCloudHelp">oauth.yandex.com</button>
+              и вставьте выданный токен сюда. Он останется на этом устройстве.
+            </p>
+
+            <div v-if="!cloudSaved || tokenOpen" class="am-row">
+              <label class="am-field">
+                <input
+                  v-model="tokenDraft"
+                  class="am-input"
+                  type="password"
+                  placeholder="Пропуск Яндекс Диска"
+                />
+              </label>
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="cloudBusy || !tokenDraft.trim()"
+                @click="onCloudToken"
+              >
+                {{ cloudBusy ? 'Проверяем…' : 'Проверить и сохранить' }}
+              </button>
+            </div>
+
+            <ul class="am-facts">
+              <li class="am-fact">
+                <span class="am-fact__name">Файл копии</span>
+                <span class="am-fact__value"><code>{{ CLOUD_PATH }}</code></span>
+              </li>
+              <li class="am-fact">
+                <span class="am-fact__name">Последняя копия</span>
+                <span class="am-fact__value">{{ whenText(cloudSavedAt) }}</span>
+              </li>
+              <li class="am-fact">
+                <span class="am-fact__name">Записей в копии</span>
+                <span class="am-fact__value">
+                  {{ cloudSavedCount > 0 ? cloudSavedCount : '—' }}
+                </span>
+              </li>
+              <li v-if="cloudThere" class="am-fact">
+                <span class="am-fact__name">В облаке сейчас</span>
+                <span class="am-fact__value">{{ cloudThere }}</span>
+              </li>
+            </ul>
+
+            <div class="am-row">
+              <button
+                v-tip="'Записать нынешний список в облако поверх прежней копии'"
+                class="am-btn"
+                type="button"
+                :disabled="!cloudOn() || cloudBusy"
+                @click="onCloudSave"
+              >
+                {{ cloudBusy ? 'Работаем…' : 'Сохранить копию' }}
+              </button>
+              <button
+                v-tip="'Забрать копию из облака: слиянием или с заменой'"
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="!cloudOn() || cloudBusy"
+                @click="onCloudAsk"
+              >
+                Забрать копию
+              </button>
+              <button
+                v-if="cloudSaved && !tokenOpen"
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="cloudBusy"
+                @click="tokenOpen = true"
+              >
+                Сменить пропуск
+              </button>
+              <button
+                v-if="cloudSaved"
+                v-tip="'Забыть пропуск. Файл копии в облаке останется'"
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="cloudBusy"
+                @click="onCloudForget"
+              >
+                Отключить облако
+              </button>
+            </div>
+
+            <!-- Копия ложится поверх живого списка: спрашиваем всегда, теми же
+                 словами и тем же узлом, что и перенос с AniList. -->
+            <div v-if="askingCloud" class="am-ask">
+              <p class="am-ask__text">
+                Сейчас у нас записей: {{ listCount }}. Слияние добавит недостающее и оставит
+                ваши правки, если они свежее записи в копии. Замена вычистит местный список
+                целиком и оставит только то, что лежит в копии.
+              </p>
+
+              <div class="am-row">
+                <button
+                  class="am-btn"
+                  type="button"
+                  :disabled="cloudBusy"
+                  @click="onCloudPull('merge')"
+                >
+                  Добавить недостающее
+                </button>
+                <button
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="cloudBusy"
+                  @click="onCloudPull('replace')"
+                >
+                  Заменить целиком
+                </button>
+                <button class="am-btn am-btn--ghost" type="button" @click="onCloudCancel">
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <p v-if="cloudError" class="am-error">{{ cloudError }}</p>
+          <p v-if="cloudNote" class="am-note">{{ cloudNote }}</p>
+        </div>
+      </div>
+
+      <!-- Правая колонка — вид и справка: то, что смотрят, а не то, чем правят. -->
+      <div class="am-set__col">
+        <div class="am-panel am-box">
+          <h3 class="am-h3">Оформление</h3>
+
+          <div class="am-skins">
+            <button
+              v-for="item in APPEARANCES"
+              :key="item.name"
+              v-tip="item.hint"
+              class="am-skins__btn"
+              :class="{ 'am-skins__btn--on': item.name === appearance }"
+              type="button"
+              @click="setAppearance(item.name)"
+            >
+              <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
+              <span class="am-skins__name">{{ item.title }}</span>
+            </button>
+          </div>
+
+          <label class="am-switch">
+            <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
+            <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
+          </label>
+        </div>
+
+        <div class="am-panel am-box">
+          <h3 class="am-h3">О программе</h3>
+
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Версия</span>
+              <span class="am-fact__value">{{ version }}</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Система</span>
+              <span class="am-fact__value">{{ system }}</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Датасет названий</span>
+              <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
+                {{ datasetText }}
+              </span>
+            </li>
+          </ul>
+
+          <!-- Атрибуция по ODbL: имя источника, лицензия и ссылка. Обязательна
+               с первого имени, показанного из датасета. -->
+          <p class="am-meta am-fine">
+            Русские названия поставляет датасет
+            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+            (лицензия ODbL-1.0): номера и связки — manami-project/anime-offline-database, сами
+            названия — из открытых API Шикимори и anime365.
+          </p>
+
+          <!-- Свежесть датасета — единственное, за чем человеку приходится следить
+               руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
+          <p v-if="datasetStale" class="am-stale">
+            Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет,
+            программа добирает из сети по одному — это медленно. Загляните в
+            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+            и запустите сборку кнопкой.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped src="./settings-screen.css"></style>
