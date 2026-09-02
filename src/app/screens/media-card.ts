@@ -304,7 +304,6 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     return mediaLinks({
       mediaId: found.mediaId,
       malId: found.malId,
-      type: 'ANIME',
       sourceUrl: russian.value?.url ?? null,
       sourceName: russian.value?.sourceName ?? null,
     })
