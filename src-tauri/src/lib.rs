@@ -35,6 +35,11 @@ mod anilist;
 // с файлом одинакова везде, а на Android она нужнее всего.
 mod files;
 
+// Пункт 3.3: выгрузка списка в папку, выбранную человеком. Отдельно от files.rs:
+// там служебный каталог и список из трёх имён, здесь чужая папка и родное окно
+// выбора. Склад снимка и выгрузка для человека — разные права.
+mod export;
+
 mod updater;
 
 // Прокси для трафика окна. Без cfg сознательно: чтение настроек одинаково везде,
@@ -112,9 +117,11 @@ pub fn run() {
                 .with_state_flags(window_state_flags())
                 .build(),
         )
-        // Автообновление; обоснования — в updater.rs. Разрешений тоже нет, и здесь это
-        // критичнее всего: updater:default означал бы право чужого скрипта запустить
-        // загрузку и установку исполняемого файла.
+        // Родные окна системы. Потребителей теперь два: автообновление (обоснования —
+        // в updater.rs) и выбор папки для выгрузки списка (export.rs). Оба дёргаются
+        // только из Rust, и разрешений разметке не выдано сознательно: updater:default
+        // означал бы право чужого скрипта запустить загрузку и установку исполняемого
+        // файла, а dialog:default — право открывать окна выбора файлов без нашего ведома.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Список команд дублируется в build.rs и в файлах capabilities: разрешено
@@ -134,6 +141,8 @@ pub fn run() {
             anilist::animori_anilist_query,
             files::animori_file_read,
             files::animori_file_write,
+            export::animori_export_pick_dir,
+            export::animori_export_write,
             proxy::animori_proxy_status,
             proxy::animori_proxy_probe
         ])
