@@ -15,6 +15,8 @@
 //   animori_anilist_query     -> allow-animori-anilist-query
 //   animori_file_read         -> allow-animori-file-read
 //   animori_file_write        -> allow-animori-file-write
+//   animori_export_pick_dir   -> allow-animori-export-pick-dir
+//   animori_export_write      -> allow-animori-export-write
 //   animori_proxy_status      -> allow-animori-proxy-status
 //   animori_proxy_probe       -> allow-animori-proxy-probe
 //
@@ -55,6 +57,11 @@ const COMMANDS: &[&str] = &[
     // по списку в files.rs, каталог выбирает сама оболочка.
     "animori_file_read",
     "animori_file_write",
+    // Пункт 3.3: выгрузка списка в папку, выбранную человеком. Окно выбора
+    // открывает сам Rust: разрешение dialog разметке не выдано и не будет.
+    // Запись принимает папку из настроек и имя файла, и проверяет оба в export.rs.
+    "animori_export_pick_dir",
+    "animori_export_write",
     // Пункт 5.3.6: диагностика прокси для карточки настроек. Обе только читают:
     // status отдаёт снимок состояния, probe открывает TCP-соединение на адрес из
     // файла настроек. Ни та, ни другая не принимают адрес параметром — иначе код
