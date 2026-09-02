@@ -11,10 +11,14 @@
 // одной строкой, потом выгрузка своим узлом. Пояснения убраны сознательно:
 // подписи кнопок и строка пути говорят то же самое и короче.
 //
+// Облачная копия живая с этого захода, но по-прежнему только по кнопке:
+// само по себе облако ничего не начинает и в фоне не ходит.
+//
 // Оформление живёт в settings-screen.css — так же, как у карточки и плеера.
 import { onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
+import { checkPlace, CLOUD_PATH, copyInfo, pullCopy, saveCopy } from '@/core/cloud'
 import {
   eachEntry,
   entryCount,
@@ -60,6 +64,13 @@ const system = systemName()
 
 /** Адрес датасета названий: атрибуция по ODbL обязана вести на источник. */
 const DATASET_URL = 'https://github.com/foulnike/animori-data'
+
+/**
+ * Где человек берёт пропуск к Яндекс Диску. Своего зарегистрированного
+ * приложения у сборки нет, и честнее отправить за токеном напрямую,
+ * чем делать вид, что окно входа сейчас откроется само.
+ */
+const YANDEX_OAUTH_URL = 'https://oauth.yandex.com/client/new/'
 
 /// Внешние ссылки из окна открываются только оболочкой: target="_blank"
 /// в WebView2 отбрасывается молча, без окна и без ошибки.
@@ -137,6 +148,39 @@ const exportDir = ref(settings.exportDir)
  */
 const canPickDir = Bridge.exportFile.available
 
+/**
+ * Облачная копия (этап 6). Значения списываются с настроек один раз,
+ * как adult и exportDir выше, и по той же причине.
+ */
+const cloudPlace = ref(settings.cloudPlace)
+
+/**
+ * Есть ли сохранённый пропуск. Хранится признак, а не сам пропуск:
+ * в разметку ему попадать незачем ни в каком виде.
+ */
+const cloudSaved = ref(settings.cloudToken !== '')
+
+/** Вставленный, но ещё не проверенный пропуск. Живёт только до сохранения. */
+const tokenDraft = ref('')
+
+/** Открыто ли поле пропуска при уже сохранённом: смена бывает редко. */
+const tokenOpen = ref(false)
+
+const cloudSavedAt = ref(settings.cloudSavedAt)
+const cloudSavedCount = ref(settings.cloudSavedCount)
+
+/** Что лежит в облаке сейчас, строкой. Пустая строка — «не спрашивали». */
+const cloudThere = ref('')
+
+// Свои заметка и ошибка: отказ облака не должен красить панель AniList
+// выше и не должен затирать ответ выгрузки в соседней панели.
+const cloudNote = ref('')
+const cloudError = ref('')
+const cloudBusy = ref(false)
+
+/** Спрошено ли подтверждение перед тем, как копия ляжет поверх списка. */
+const askingCloud = ref(false)
+
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -150,6 +194,20 @@ async function guard(action: () => Promise<void>): Promise<void> {
     error.value = describe(e)
   } finally {
     busy.value = false
+  }
+}
+
+/// То же самое для облака, но со своими признаками: панель у него своя,
+/// и чужая красная строка в соседней только сбивала бы с толку.
+async function cloudGuard(action: () => Promise<void>): Promise<void> {
+  cloudBusy.value = true
+  cloudError.value = ''
+  try {
+    await action()
+  } catch (e) {
+    cloudError.value = describe(e)
+  } finally {
+    cloudBusy.value = false
   }
 }
 
@@ -315,7 +373,7 @@ function onPickDir(): void {
  * Выгрузка списка файлом XML. Формат чужой и старый, зато его понимают
  * все: Шикимори, AniList, Kitsu и сам MyAnimeList.
  *
- * Записи без номера MAL выразить в нём нечем, и их число говорится
+ * Записи без номера MAL выразить в нᄅм нечем, и их число говорится
  * вслух: молча потерять часть списка при переезде в другой сервис —
  * худшее, что здесь может случиться.
  *
@@ -344,6 +402,182 @@ function onExport(): void {
     note.value = saved.toFolder
       ? `Выгружено записей: ${built.exported}. Файл: ${saved.path}${tail}`
       : `Выгружено записей: ${built.exported}. Папка не выбрана, файл ушёл в загрузки окна.${tail}`
+  })
+}
+
+/** Готово ли облако к работе: место выбрано и пропуск сохранён. */
+function cloudOn(): boolean {
+  return cloudPlace.value === 'yandex' && cloudSaved.value
+}
+
+/// Время человеку — местное и словами. Ноль и нечитаемая дата дают прочерк:
+/// «1 января 1970» на месте «копии не было» хуже пустоты.
+function whenText(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  return new Date(ms).toLocaleString('ru-RU')
+}
+
+/// Размер копии в килобайтах: байты человеку ничего не говорят, а мегабайта
+/// список даже в тысячу записей не набирает.
+function sizeText(bytes: number): string {
+  return `${Math.max(1, Math.round(bytes / 1024))} КБ`
+}
+
+/**
+ * Спрашивает облако, что там лежит. Отказ здесь не кричит: это строка
+ * факта, а не ответ на нажатие, и красная надпись при открытии настроек
+ * пугала бы там, где всего лишь нет сети. Любая кнопка ниже об отказе
+ * скажет громко.
+ */
+async function readCloud(): Promise<void> {
+  if (!cloudOn()) {
+    cloudThere.value = ''
+    return
+  }
+
+  const got = await copyInfo()
+  if (!got.ok) {
+    cloudThere.value = 'спросить не удалось'
+    return
+  }
+  if (!got.value.there) {
+    cloudThere.value = 'копии нет'
+    return
+  }
+
+  const when = got.value.modified === null ? '' : ` · ${whenText(Date.parse(got.value.modified))}`
+  cloudThere.value = `${sizeText(got.value.bytes)}${when}`
+}
+
+/**
+ * Выбор места. Пока место одно, но ключ в настройках строковый:
+ * Google Drive встанет рядом вторым значением, а не вторым флажком.
+ */
+function onPickYandex(): void {
+  if (cloudPlace.value === 'yandex') return
+
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+    cloudPlace.value = 'yandex'
+    await saveSetting('cloudPlace', 'am_cloud_place', 'yandex')
+    await readCloud()
+  })
+}
+
+/**
+ * Проверка и сохранение пропуска. Проверяется ДО записи: молча запомнить
+ * негодную строку значит соврать, что облако подключено, а выяснится это
+ * в самый неподходящий момент.
+ */
+function onCloudToken(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await checkPlace(tokenDraft.value.trim())
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    await saveSetting('cloudToken', 'am_cloud_token', tokenDraft.value.trim())
+    cloudSaved.value = true
+    tokenDraft.value = ''
+    tokenOpen.value = false
+    cloudNote.value = 'Пропуск принят: Яндекс Диск на связи.'
+    await readCloud()
+  })
+}
+
+/** Пропуск выдаёт сам Яндекс: адрес открывает оболочка, окно ходит только к API. */
+function onCloudHelp(): void {
+  void Bridge.shell.openExternal(YANDEX_OAUTH_URL)
+}
+
+/**
+ * Сохранение копии. Метка устройства идёт в файл, чтобы потом было видно,
+ * с какой машины копия: на ТВ это единственный способ понять, свежая ли она.
+ */
+function onCloudSave(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await saveCopy(system)
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    cloudSavedAt.value = done.value.savedAt
+    cloudSavedCount.value = done.value.count
+    cloudNote.value = `Копия сохранена: записей ${done.value.count}, ${sizeText(done.value.bytes)}.`
+    await readCloud()
+  })
+}
+
+/** Нажатие «Забрать копию»: сначала вопрос — копия ляжет поверх живого списка. */
+function onCloudAsk(): void {
+  cloudNote.value = ''
+  cloudError.value = ''
+  askingCloud.value = true
+}
+
+function onCloudCancel(): void {
+  askingCloud.value = false
+}
+
+/**
+ * Возвращение копии. Числа те же, что и у переноса с AniList, и по той же
+ * причине: после слияния важно не общее число, а что стало с набранным здесь.
+ */
+function onCloudPull(mode: PullMode): void {
+  askingCloud.value = false
+
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await pullCopy(mode)
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    const got = done.value
+    await readState()
+
+    const from = got.from.device === '' ? '' : ` Копия с устройства «${got.from.device}».`
+    const lost = got.dropped > 0 ? ` Битых записей в копии: ${got.dropped} — их пропустили.` : ''
+
+    cloudNote.value =
+      got.mode === 'replace'
+        ? `Список замещён копией: записей ${got.total}.${from}${lost}`
+        : `Копия приложена: всего ${got.total}, новых ${got.added}, ` +
+          `обновлено ${got.updated}, своих правок сохранено ${got.kept}, ` +
+          `только здесь ${got.onlyHere}.${from}${lost}`
+  })
+}
+
+/**
+ * Отключение облака. Файл на Диске остаётся нетронутым: стирать чужое
+ * хранилище по кнопке «отключить» программа не вправе.
+ */
+function onCloudForget(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    await saveSetting('cloudToken', 'am_cloud_token', '')
+    await saveSetting('cloudPlace', 'am_cloud_place', 'none')
+    await saveSetting('cloudSavedAt', 'am_cloud_saved_at', 0)
+    await saveSetting('cloudSavedCount', 'am_cloud_saved_count', 0)
+
+    cloudPlace.value = 'none'
+    cloudSaved.value = false
+    cloudSavedAt.value = 0
+    cloudSavedCount.value = 0
+    cloudThere.value = ''
+    tokenDraft.value = ''
+    tokenOpen.value = false
+
+    cloudNote.value = 'Облако отключено. Файл копии на Диске остался нетронутым.'
   })
 }
 
@@ -414,6 +648,7 @@ function ageText(days: number): string {
 onMounted(() => {
   void guard(refreshAuth)
   void readState()
+  void readCloud()
 })
 </script>
 
@@ -493,264 +728,4 @@ onMounted(() => {
               <p class="am-ask__text">
                 Сейчас у нас записей: {{ listCount }}. Слияние добавит недостающее и оставит
                 ваши правки, если они свежее записи на сайте. Замена вычистит местный
-                список целиком, и записи, которых нет на AniList, вернуть будет неоткуда.
-              </p>
-
-              <div class="am-row">
-                <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
-                  Добавить недостающее
-                </button>
-                <button
-                  class="am-btn am-btn--ghost"
-                  type="button"
-                  :disabled="busy"
-                  @click="onPull('replace')"
-                >
-                  Заменить целиком
-                </button>
-                <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
-              </div>
-            </div>
-
-            <!-- Показывается только после нажатия: до него окна входа нет и ждать
-                 человеку нечего. -->
-            <p v-if="login && !authStatus.authorized" class="am-meta">
-              Окно AniList открыто, после разрешения оно закроется само. Ожидание —
-              {{ waitText(login.waitSecs) }}.
-            </p>
-
-            <div v-if="manualOpen && !authStatus.authorized" class="am-row">
-              <label class="am-field">
-                <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
-              </label>
-              <button
-                class="am-btn"
-                type="button"
-                :disabled="busy || !manual.trim()"
-                @click="onManual"
-              >
-                Сохранить
-              </button>
-            </div>
-
-            <p v-if="error" class="am-error">{{ error }}</p>
-          </template>
-        </div>
-
-        <div class="am-panel am-box">
-          <h3 class="am-h3">Свои данные</h3>
-
-          <ul class="am-facts">
-            <li class="am-fact">
-              <span class="am-fact__name">Записей в списке</span>
-              <span class="am-fact__value">{{ listCount }}</span>
-            </li>
-            <li v-if="usedSize" class="am-fact">
-              <span class="am-fact__name">Занято на диске</span>
-              <span class="am-fact__value">{{ usedSize }}</span>
-            </li>
-          </ul>
-
-          <!-- Необратимое одной строкой: сброс памяти и удаление списка стоят
-               рядом, потому что оба про то, что лежит на этом диске. -->
-          <div class="am-row">
-            <button
-              v-tip="'Убрать сохранённые названия, описания и обложки'"
-              class="am-btn am-btn--ghost"
-              type="button"
-              :disabled="busy"
-              @click="onClear"
-            >
-              Очистить память
-            </button>
-
-            <button
-              v-if="listCount > 0"
-              v-tip="'Удалить свой список с этого устройства'"
-              class="am-btn am-btn--ghost"
-              type="button"
-              :disabled="busy"
-              @click="onAskDrop"
-            >
-              Удалить мой список
-            </button>
-
-            <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
-              Перезагрузить
-            </button>
-          </div>
-
-          <!-- Выгрузка отдельным узлом строкой ниже: место и действие рядом.
-               Строка папки нажимается целиком, и путь виден всегда.
-
-               Класс свой, am-dir, а не am-pick: тем в styles/theme.css одет
-               нативный select, и совпадение имён отдавало этой строке чужие
-               правила — плотный фон списка и снятую обводку фокуса. -->
-          <div v-if="canPickDir || listCount > 0" class="am-out">
-            <button
-              v-if="canPickDir"
-              v-tip="'Сменить папку, куда уходят выгрузки XML'"
-              class="am-dir"
-              type="button"
-              :disabled="busy"
-              @click="onPickDir"
-            >
-              <span class="am-dir__mark" aria-hidden="true">📁</span>
-              <span class="am-dir__text">
-                <span class="am-dir__name">Папка выгрузок</span>
-                <span class="am-dir__path" :class="{ 'am-dir__path--none': !exportDir }">
-                  {{ exportDir || 'Не выбрана — файл уйдёт в загрузки окна' }}
-                </span>
-              </span>
-              <span class="am-dir__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
-            </button>
-
-            <button
-              v-if="listCount > 0"
-              v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
-              class="am-btn am-btn--ghost"
-              type="button"
-              :disabled="busy"
-              @click="onExport"
-            >
-              Выгрузить в XML
-            </button>
-          </div>
-
-          <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
-          <div v-if="askingDrop" class="am-ask">
-            <p class="am-ask__text">
-              Удалить список с этого устройства: записей {{ listCount }}. На AniList ваши записи
-              останутся нетронутыми, а добавленные здесь без входа вернуть будет неоткуда.
-            </p>
-
-            <div class="am-row">
-              <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
-                Удалить список
-              </button>
-              <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">
-                Отмена
-              </button>
-            </div>
-          </div>
-
-          <p v-if="note" class="am-note">{{ note }}</p>
-        </div>
-
-        <!-- Макет облачной копии: место, порядок и слова на будущее. Кнопки
-             нарочно мертвы, площадки нарисованы пунктиром — это заготовка
-             на посмотреть, а не работающая копия. Формат самого файла копии
-             уже написан и проверен тестами: core/cloud-file.ts. -->
-        <div class="am-panel am-box">
-          <div class="am-bar">
-            <h3 class="am-h3">Облачная копия</h3>
-            <span class="am-bar__gap" />
-            <span class="am-flag">
-              <span class="am-flag__dot" aria-hidden="true" />
-              скоро
-            </span>
-          </div>
-
-          <div class="am-cloud">
-            <button class="am-cloud__pick" type="button" disabled>
-              <span class="am-cloud__mark" aria-hidden="true">Я</span>
-              <span class="am-cloud__name">Яндекс Диск</span>
-            </button>
-            <button class="am-cloud__pick" type="button" disabled>
-              <span class="am-cloud__mark" aria-hidden="true">G</span>
-              <span class="am-cloud__name">Google Drive</span>
-            </button>
-          </div>
-
-          <ul class="am-facts">
-            <li class="am-fact">
-              <span class="am-fact__name">Место</span>
-              <span class="am-fact__value">не выбрано</span>
-            </li>
-            <li class="am-fact">
-              <span class="am-fact__name">Последняя копия</span>
-              <span class="am-fact__value">—</span>
-            </li>
-            <li class="am-fact">
-              <span class="am-fact__name">Записей в копии</span>
-              <span class="am-fact__value">—</span>
-            </li>
-          </ul>
-
-          <div class="am-row">
-            <button class="am-btn" type="button" disabled>Сохранить копию</button>
-            <button class="am-btn am-btn--ghost" type="button" disabled>Забрать копию</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Правая колонка — вид и справка: то, что смотрят, а не то, чем правят. -->
-      <div class="am-set__col">
-        <div class="am-panel am-box">
-          <h3 class="am-h3">Оформление</h3>
-
-          <div class="am-skins">
-            <button
-              v-for="item in APPEARANCES"
-              :key="item.name"
-              v-tip="item.hint"
-              class="am-skins__btn"
-              :class="{ 'am-skins__btn--on': item.name === appearance }"
-              type="button"
-              @click="setAppearance(item.name)"
-            >
-              <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
-              <span class="am-skins__name">{{ item.title }}</span>
-            </button>
-          </div>
-
-          <label class="am-switch">
-            <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
-            <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
-          </label>
-        </div>
-
-        <div class="am-panel am-box">
-          <h3 class="am-h3">О программе</h3>
-
-          <ul class="am-facts">
-            <li class="am-fact">
-              <span class="am-fact__name">Версия</span>
-              <span class="am-fact__value">{{ version }}</span>
-            </li>
-            <li class="am-fact">
-              <span class="am-fact__name">Система</span>
-              <span class="am-fact__value">{{ system }}</span>
-            </li>
-            <li class="am-fact">
-              <span class="am-fact__name">Датасет названий</span>
-              <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
-                {{ datasetText }}
-              </span>
-            </li>
-          </ul>
-
-          <!-- Атрибуция по ODbL: имя источника, лицензия и ссылка. Обязательна
-               с первого имени, показанного из датасета. -->
-          <p class="am-meta am-fine">
-            Русские названия поставляет датасет
-            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-            (лицензия ODbL-1.0): номера и связки — manami-project/anime-offline-database, сами
-            названия — из открытых API Шикимори и anime365.
-          </p>
-
-          <!-- Свежесть датасета — единственное, за чем человеку приходится следить
-               руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
-          <p v-if="datasetStale" class="am-stale">
-            Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет,
-            программа добирает из сети по одному — это медленно. Загляните в
-            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-            и запустите сборку кнопкой.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-</template>
-
-<style scoped src="./settings-screen.css"></style>
+                список целиком, и записи, которых нет на AniList, вернут
