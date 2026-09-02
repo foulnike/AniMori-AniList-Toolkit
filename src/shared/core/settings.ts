@@ -18,6 +18,16 @@ export type AccentPreset =
  */
 export type AppearanceName = 'dark' | 'light' | 'amoled'
 
+/**
+ * Где живёт облачная копия списка — этап 6. Значение 'none' означает «нигде»:
+ * облако выключено, и наружу по своей воле не уходит ни один запрос.
+ *
+ * Место хранится строкой, а не флажком «включено», именно ради второго
+ * провайдера: Google Drive станет ещё одним значением, а не вторым ключом
+ * с отдельной логикой включения.
+ */
+export type CloudPlace = 'none' | 'yandex'
+
 export interface AniMoriSettings {
   translateInterface: boolean
   titlePrimary: TitleSource
@@ -85,11 +95,43 @@ export interface AniMoriSettings {
    * об этом вслух. Подставлять сюда домашний каталог за человека нельзя:
    * молчаливая запись куда-то и была тем дефектом, ради которого всё затеяно.
    *
-   * Хранится полным путᑑм, а не именем: окно выбора возвращает путь,
+   * Хранится полным путём, а не именем: окно выбора возвращает путь,
    * и папка привязана к этой машине. В снимок списка ключ не попадает
    * и на другое устройство не едет.
    */
   exportDir: string
+  /**
+   * Где держать облачную копию списка — этап 6. По умолчанию нигде: облако
+   * включает человек, а не установщик, и до его выбора наружу не уходит
+   * ни один запрос.
+   */
+  cloudPlace: CloudPlace
+  /**
+   * Пропуск (токен OAuth) выбранного облака. Пустая строка значит «облако
+   * выбрано, но входа нет»: сохранять и забирать копию нечем.
+   *
+   * Лежит в хранилище окна открытым текстом, как и остальные настройки, —
+   * это файл store в приватном каталоге приложения на этой машине. Пропуск
+   * AniList хранится строже, в оболочке (src-tauri/src/auth.rs), и облачный
+   * со временем стоит перенести туда же; пока он здесь, и молчать об этом
+   * было бы нечестно.
+   *
+   * В копию списка пропуск не попадает никогда: в core/cloud-file.ts поля
+   * записи перечислены поимённо, и лишнее туда не проходит.
+   */
+  cloudToken: string
+  /**
+   * Когда копия ушла в облако в последний раз, в миллисекундах. Ноль значит
+   * «ни разу»: экран тогда честно говорит, что копии нет, вместо показа
+   * начала эпохи Unix.
+   */
+  cloudSavedAt: number
+  /**
+   * Сколько записей было в последней копии. Нужно ровно для одного вопроса
+   * человека перед восстановлением: «а сколько там вообще лежит?». Число
+   * своё, а не спрошенное у облака: узнать его без сети тоже надо.
+   */
+  cloudSavedCount: number
   /** Производная: тайтлы включены, пока основной источник != 'off'. */
   translateTitles: boolean
 }
@@ -128,6 +170,10 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   showSyncButton: true,
   showCompareButton: true,
   exportDir: '',
+  cloudPlace: 'none',
+  cloudToken: '',
+  cloudSavedAt: 0,
+  cloudSavedCount: 0,
   translateTitles: true,
 }
 
@@ -163,6 +209,10 @@ async function readSettings(): Promise<AniMoriSettings> {
     showSyncButton,
     showCompareButton,
     exportDir,
+    cloudPlace,
+    cloudToken,
+    cloudSavedAt,
+    cloudSavedCount,
   ] = await Promise.all([
     storage.get('set_interface', DEFAULT_SETTINGS.translateInterface),
     storage.get<TitleSource>('set_title_primary'),
@@ -190,6 +240,10 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('set_btn_sync', DEFAULT_SETTINGS.showSyncButton),
     storage.get('set_btn_compare', DEFAULT_SETTINGS.showCompareButton),
     storage.get('set_export_dir', DEFAULT_SETTINGS.exportDir),
+    storage.get<CloudPlace>('am_cloud_place', DEFAULT_SETTINGS.cloudPlace),
+    storage.get('am_cloud_token', DEFAULT_SETTINGS.cloudToken),
+    storage.get('am_cloud_saved_at', DEFAULT_SETTINGS.cloudSavedAt),
+    storage.get('am_cloud_saved_count', DEFAULT_SETTINGS.cloudSavedCount),
   ])
 
   // Совместимость: старый set_titles применяется только при отсутствии нового ключа.
@@ -223,6 +277,10 @@ async function readSettings(): Promise<AniMoriSettings> {
     showSyncButton,
     showCompareButton,
     exportDir,
+    cloudPlace,
+    cloudToken,
+    cloudSavedAt,
+    cloudSavedCount,
     translateTitles: titlePrimary !== 'off',
   }
 }
