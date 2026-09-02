@@ -168,24 +168,111 @@
   line-height: 1.5;
 }
 
-/* Путь папки выгрузок. Пробелов в путях чаще всего нет, и без этого
-   правила строка тянется за край панели и разворачивает всю колонку.
-   anywhere, а не break-word: разрыв нужен именно там, где рвать нечего. */
-.am-path {
-  overflow-wrap: anywhere;
-}
-
-/* Вход в журнал: кнопка и пояснение рядом, а не строкой фактов выше —
-   это действие, а не число. */
-.am-log-open {
+/* Выгрузка одним узлом: место и действие рядом. Раньше «Выгрузить в XML»
+   и «Выбрать папку» лежали в общей россыпи кнопок, и связь между ними
+   человеку приходилось додумывать. */
+.am-out {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  padding: 11px 13px;
+}
+
+/* Строка папки нажимается целиком: путь и есть кнопка. Так выбранное
+   место видно всегда, а не одной подписью сразу после выбора. */
+.am-pick {
+  display: flex;
+  flex: 1 1 260px;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 14px;
+  font: inherit;
+  color: var(--am-text);
+  text-align: left;
+  cursor: pointer;
   background: var(--am-fill-1);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-l);
+  transition:
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease);
+}
+
+.am-pick:hover:not(:disabled) {
+  background: var(--am-hover);
+  border-color: var(--am-edge);
+}
+
+.am-pick:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.am-pick__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.am-pick__name {
+  font-size: 12px;
+  color: var(--am-dim);
+}
+
+/* Пробелов в путях чаще всего нет, и без разрыва по любому месту строка
+   тянется за край панели и разворачивает всю колонку. */
+.am-pick__path {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.am-pick__path--none {
+  font-weight: 400;
+  color: var(--am-dim);
+}
+
+.am-pick__act {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--am-accent);
+}
+
+/* Макет облачной копии. Площадки нарисованы пунктиром, а не рамкой:
+   пунктир сам говорит, что это заготовка, и ничего не обещает. */
+.am-cloud {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.am-cloud__pick {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+  padding: 13px 8px;
+  font: inherit;
+  color: var(--am-dim);
+  cursor: default;
+  background: var(--am-fill-1);
+  border: 1px dashed var(--am-line-soft);
+  border-radius: var(--am-r-l);
+}
+
+.am-cloud__mark {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--am-faint);
+}
+
+.am-cloud__name {
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 /* Исход действия: виден сразу и не путается с пояснениями рядом.
@@ -198,11 +285,12 @@
   overflow-wrap: anywhere;
 }
 
-/* Настройка-тумблер: вся строка нажимается, пояснение под названием. */
+/* Настройка-тумблер: вся строка нажимается, название рядом с переключателем.
+   Пояснения под названием больше нет — подпись говорит то же короче. */
 .am-switch {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   padding: 12px 14px;
   cursor: pointer;
   background: var(--am-fill-1);
@@ -222,7 +310,7 @@
   flex: none;
   width: 42px;
   height: 24px;
-  margin: 1px 0 0;
+  margin: 0;
   appearance: none;
   cursor: pointer;
   background: var(--am-fill-3);
@@ -257,21 +345,9 @@
   transform: translateX(18px);
 }
 
-.am-switch__text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
 .am-switch__name {
+  min-width: 0;
   font-weight: 600;
-}
-
-.am-switch__hint {
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--am-dim);
 }
 
 /* Ссылка-кнопка в тексте: внешний адрес открывает оболочка, не разметка. */
