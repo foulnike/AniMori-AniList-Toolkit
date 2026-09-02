@@ -277,8 +277,12 @@
   background: rgb(var(--am-accent-rgb) / 0.24);
 }
 
-/* Макет облачной копии. Площадки нарисованы пунктиром, а не рамкой:
-   пунктир сам говорит, что это заготовка, и ничего не обещает. */
+/* Выбор облака теми же карточками, что и выбор оформления: одинаковый
+   по смыслу выбор должен и выглядеть одинаково, иначе экран читается
+   как склад из разных мест.
+
+   Площадка, до которой руки ещё не дошли, одета пунктиром и погашена:
+   пунктир сам говорит «пока нет», и обещать словами ничего не приходится. */
 .am-cloud {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -288,15 +292,42 @@
 .am-cloud__pick {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   align-items: center;
   padding: 13px 8px;
   font: inherit;
   color: var(--am-dim);
-  cursor: default;
+  cursor: pointer;
   background: var(--am-fill-1);
-  border: 1px dashed var(--am-line-soft);
+  border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-l);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+.am-cloud__pick:hover:not(:disabled) {
+  color: var(--am-text);
+  background: var(--am-hover);
+  border-radius: var(--am-r-drop);
+  transform: translateY(-2px);
+}
+
+.am-cloud__pick--on {
+  color: var(--am-text);
+  background: rgb(var(--am-accent-rgb) / 0.12);
+  border-color: rgb(var(--am-accent-rgb) / 0.5);
+  border-radius: var(--am-r-drop);
+  box-shadow: var(--am-sh-glow);
+}
+
+.am-cloud__pick:disabled {
+  cursor: default;
+  border-style: dashed;
+  opacity: 0.55;
 }
 
 .am-cloud__mark {
@@ -306,9 +337,20 @@
   color: var(--am-faint);
 }
 
+.am-cloud__pick--on .am-cloud__mark {
+  color: var(--am-accent);
+}
+
 .am-cloud__name {
   font-size: 12.5px;
   font-weight: 600;
+}
+
+/* Подпись «позже» внутри погашенной карточки: пунктир говорит о том же,
+   но слово снимает последний вопрос — «сломано или ещё не сделано?». */
+.am-cloud__soon {
+  font-size: 11px;
+  color: var(--am-faint);
 }
 
 /* Исход действия: виден сразу и не путается с пояснениями рядом.
@@ -475,7 +517,8 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .am-skins__btn:hover {
+  .am-skins__btn:hover,
+  .am-cloud__pick:hover:not(:disabled) {
     transform: none;
   }
 }
