@@ -36,7 +36,7 @@ import {
   type LoginStart,
 } from '../auth/session'
 import { navigate } from '../router'
-import { saveTextFile } from '../save-file'
+import { saveXmlFile } from '../save-file'
 
 const version = __ANIMORI_VERSION__
 
@@ -120,6 +120,19 @@ const STALE_DAYS = 30
  * общий объект настроек не реактивен, и v-model по его полю не дал бы ответа на клик.
  */
 const adult = ref(settings.showAdult)
+
+/**
+ * Папка для выгрузок (пункт 3.3). Значение списывается один раз по той же
+ * причине, что и adult: поле общего объекта настроек в разметке не обновилось
+ * бы после выбора, и человек не увидел бы, что папка сменилась.
+ */
+const exportDir = ref(settings.exportDir)
+
+/**
+ * Умеет ли площадка спрашивать папку. Окно выбора родное и живёт в оболочке;
+ * в браузере его нет, и там кнопку честнее спрятать, чем показать неработающей.
+ */
+const canPickDir = Bridge.exportFile.available
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -274,12 +287,36 @@ function onDropList(): void {
 }
 
 /**
+ * Выбор папки для выгрузок. Спрашивается один раз, дальше выгрузка идёт молча:
+ * человек просил не окно на каждый файл, а место, о котором он знает.
+ *
+ * Закрытое окно выбора ошибкой не считается и ничего не меняет: null здесь
+ * значит «передумал», и прежняя папка остаётся на месте.
+ */
+function onPickDir(): void {
+  void guard(async () => {
+    note.value = ''
+
+    const picked = await Bridge.exportFile.pickDir()
+    if (picked === null) return
+
+    exportDir.value = picked
+    await saveSetting('exportDir', 'set_export_dir', picked)
+    note.value = `Выгрузки будут сохраняться в ${picked}`
+  })
+}
+
+/**
  * Выгрузка списка файлом XML. Формат чужой и старый, зато его понимают
  * все: Шикимори, AniList, Kitsu и сам MyAnimeList.
  *
  * Записи без номера MAL выразить в нём нечем, и их число говорится
  * вслух: молча потерять часть списка при переезде в другой сервис —
  * худшее, что здесь может случиться.
+ *
+ * Путь показывается целиком, а кнопки «показать в папке» нет сознательно:
+ * строку можно прочитать и вставить куда угодно, а право открывать
+ * проводник ради этого выдавать не за что.
  */
 function onExport(): void {
   void guard(async () => {
@@ -292,16 +329,16 @@ function onExport(): void {
       return
     }
 
-    if (!saveTextFile(malXmlFileName(), built.xml)) {
-      error.value = 'Окно не приняло файл. Подробности в журнале.'
-      return
-    }
+    // Отказ записи прилетает исключением и попадает в error силами guard:
+    // текст приходит из Rust готовым, вида «Папка не найдена: …».
+    const saved = await saveXmlFile(malXmlFileName(), built.xml)
 
     const lost = built.noMalId.length
-    note.value =
-      lost > 0
-        ? `Выгружено записей: ${built.exported}. Без номера MAL осталось ${lost} — их в файле нет.`
-        : `Выгружено записей: ${built.exported}.`
+    const tail = lost > 0 ? ` Без номера MAL осталось ${lost} — их в файле нет.` : ''
+
+    note.value = saved.toFolder
+      ? `Выгружено записей: ${built.exported}. Файл: ${saved.path}${tail}`
+      : `Выгружено записей: ${built.exported}. Папка не выбрана, файл ушёл в загрузки окна.${tail}`
   })
 }
 
@@ -549,6 +586,17 @@ onMounted(() => {
             </button>
 
             <button
+              v-if="canPickDir"
+              v-tip="'Выбрать папку, куда сохранять выгрузки'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onPickDir"
+            >
+              {{ exportDir ? 'Сменить папку' : 'Выбрать папку' }}
+            </button>
+
+            <button
               v-if="listCount > 0"
               v-tip="'Удалить свой список с этого устройства'"
               class="am-btn am-btn--ghost"
@@ -563,6 +611,16 @@ onMounted(() => {
               Перезагрузить
             </button>
           </div>
+
+          <!-- Куда ляжет выгрузка. Строка показывается только там, где папку
+               можно выбрать: в браузере это было бы обещание без силы. -->
+          <p v-if="canPickDir" class="am-meta am-path">
+            {{
+              exportDir
+                ? `Папка выгрузок: ${exportDir}`
+                : 'Папка выгрузок не выбрана — файл уйдёт в загрузки окна.'
+            }}
+          </p>
 
           <!-- Удаление списка необратимо для местных записей: спрашиваем всегда. -->
           <div v-if="askingDrop" class="am-ask">
