@@ -16,7 +16,7 @@ import { clearLogs, readLogs, registerLogSink, type LogEntry, type LogType } fro
  * Виды записей для отбора. Порядок не алфавитный, а по частоте вопроса:
  * сначала «что сломалось», потом «что происходило».
  */
-const KINDS: ReadonlyArray<LogType> = ['ERROR', 'WARN', 'INFO', 'API', 'DB', 'QUEUE']
+const KINDS: ReadonlyArray<LogType> = ['ERROR', 'WARN', 'INFO', 'API', 'DB']
 
 /**
  * Сколько строк рисуем разом. Буфер вмещает пятьсот, но показ всех сразу
@@ -229,7 +229,7 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
-/* Семь видов в капсуле: на узком окне ряд прокручивается, а не ломается. */
+/* Пять видов и «Все» в капсуле: на узком окне ряд прокручивается, а не ломается. */
 .am-log__kinds {
   display: flex;
   flex-wrap: wrap;
@@ -290,10 +290,6 @@ onBeforeUnmount(() => {
 
 .am-log__row[data-kind='API'] {
   --am-tint: var(--am-accent);
-}
-
-.am-log__row[data-kind='QUEUE'] {
-  --am-tint: var(--am-accent-2);
 }
 
 .am-log__head {
