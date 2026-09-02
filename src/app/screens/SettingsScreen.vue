@@ -581,22 +581,28 @@ onMounted(() => {
           </div>
 
           <!-- Выгрузка отдельным узлом строкой ниже: место и действие рядом.
-               Строка папки нажимается целиком, и путь виден всегда. -->
+               Строка папки нажимается целиком, и путь виден всегда.
+
+               Класс свой, am-dir, а не am-pick: тем в styles/theme.css одет
+               нативный select, и совпадение имён отдавало этой строке чужие
+               правила — плотный фон списка и снятую обводку фокуса. -->
           <div v-if="canPickDir || listCount > 0" class="am-out">
             <button
               v-if="canPickDir"
-              class="am-pick"
+              v-tip="'Сменить папку, куда уходят выгрузки XML'"
+              class="am-dir"
               type="button"
               :disabled="busy"
               @click="onPickDir"
             >
-              <span class="am-pick__text">
-                <span class="am-pick__name">Папка выгрузок</span>
-                <span class="am-pick__path" :class="{ 'am-pick__path--none': !exportDir }">
+              <span class="am-dir__mark" aria-hidden="true">📁</span>
+              <span class="am-dir__text">
+                <span class="am-dir__name">Папка выгрузок</span>
+                <span class="am-dir__path" :class="{ 'am-dir__path--none': !exportDir }">
                   {{ exportDir || 'Не выбрана — файл уйдёт в загрузки окна' }}
                 </span>
               </span>
-              <span class="am-pick__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
+              <span class="am-dir__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
             </button>
 
             <button
@@ -633,7 +639,8 @@ onMounted(() => {
 
         <!-- Макет облачной копии: место, порядок и слова на будущее. Кнопки
              нарочно мертвы, площадки нарисованы пунктиром — это заготовка
-             на посмотреть, а не работающая копия. -->
+             на посмотреть, а не работающая копия. Формат самого файла копии
+             уже написан и проверен тестами: core/cloud-file.ts. -->
         <div class="am-panel am-box">
           <div class="am-bar">
             <h3 class="am-h3">Облачная копия</h3>
