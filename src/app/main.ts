@@ -7,7 +7,6 @@ import { startAppearance } from './appearance'
 import { tip } from './tip'
 import { initCollection } from '@/core/collection'
 import { initDatasetNames, updateDatasetNamesInBackground } from '@/core/dataset-names'
-import { startEditSender } from '@/core/edit-sender'
 import { loadSettings } from '@/core/settings'
 import { installGlobalErrorHandlers } from '@/utils/logger'
 
@@ -29,11 +28,14 @@ if (!root) throw new Error('AniMori: корень #app не найден в inde
  * Своих ошибок loadSettings не бросает: без хранилища он оставляет дефолты,
  * и окно всё равно открывается.
  *
- * Отправщик очереди правок запускается после монтирования, а не до него:
- * чтение снимка задержало бы первую отрисовку, а очередь минуту-две
- * подождёт. Раньше его не звали вовсе, и фоновый разбор с повтором при
- * возврате сети просто не жил: уходила только правка, сделанная руками
- * при живом сервере.
+ * Коллекция поднимается после монтирования, а не до него: чтение снимка
+ * задержало бы первую отрисовку, а до первого обращения к списку она
+ * всё равно никому не нужна. Звать её всё же надо здесь: без подъёма у снимка
+ * нет хозяина, а без хозяина запись на диск молча не случается.
+ *
+ * Отправщика правок здесь больше нет и быть не должно: список
+ * односторонний, правки живут в памяти и снимке, а AniList служит
+ * источником переноса.
  *
  * Датасет названий стартует фоном и не блокирует окно: чтение слепка
  * с диска подождёт первый запрос имён (обещание одно на всех), а сверка
@@ -56,14 +58,12 @@ async function start(): Promise<void> {
     .directive('tip', tip)
     .mount(root as HTMLElement)
 
-  // Отправщику нужна поднятая коллекция: до неё в памяти править нечего.
   // Ошибка подъёма окно не роняет — список просто останется пустым до
   // первого действия, а причина уйдёт в журнал.
   try {
     await initCollection()
-    startEditSender()
   } catch (e: unknown) {
-    console.error('AniMori: отправщик правок не запущен', e)
+    console.error('AniMori: список не поднялся из снимка', e)
   }
 
   void initDatasetNames()

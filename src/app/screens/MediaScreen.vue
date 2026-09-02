@@ -238,7 +238,7 @@ watch(mediaId, () => {
                 <p v-if="notes" class="am-mine__note">{{ notes }}</p>
 
                 <p v-if="drifted" class="am-mine__drift">
-                  Правка сохранена и ждёт отправки на AniList.
+                  Запись изменена здесь. На AniList она осталась прежней.
                 </p>
               </template>
 

@@ -2,15 +2,14 @@
 // оценки площадок, франшиза и правки записи. За экраном осталась
 // разметка: в одном файле карточка перестала поддаваться правке.
 //
-// Состояние списка берётся из памяти коллекции, а не из ответа:
-// там правда свежее, когда правка ещё не уехала на AniList.
+// Состояние списка берётся из памяти коллекции, а не из ответа: список
+// односторонний, правки живут только здесь, и правда тоже здесь.
 import { computed, nextTick, ref, type ComputedRef, type Ref } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
 import { Bridge } from '@/bridge'
 import { hiddenCount, keepAllowed } from '@/core/adult'
-import { getEntry } from '@/core/collection'
-import { queueEdit, type EntryLook } from '@/core/edit-sender'
+import { editEntry, getEntry, type EntryLook } from '@/core/collection'
 import { fetchFranchise, type FranchiseWork } from '@/core/franchise'
 import { partsOut } from '@/core/media-looks'
 import {
@@ -156,15 +155,15 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   /**
    * Облик тайтла для записи списка: латинские имена и метка взрослого.
-   * Идёт вместе с правкой, иначе запись, созданная без входа, останется
-   * безымянной: имена и метку до сих пор приносил только ответ сервера.
+   * Идёт вместе с правкой, иначе запись, созданная до переноса списка,
+   * останется безымянной: имена и метку до сих пор приносил только
+   * ответ сервера.
    */
   const look = computed<EntryLook | undefined>(() => {
     const found = card.value
     if (found === null) return undefined
 
     return {
-      type: 'ANIME',
       romaji: found.romaji,
       english: found.english,
       isAdult: found.isAdult,
@@ -259,8 +258,12 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   )
 
   /**
-   * Разошлось ли наше состояние с сервером. Говорится вслух: чаще всего это
-   * неотправленная правка, а молчание выглядит как потеря данных.
+   * Разошлось ли наше состояние с тем, что лежит на сайте.
+   *
+   * Расхождение теперь не временное, а постоянное: правки на сервер
+   * не уезжают вовсе, и после первой же правки здесь две копии записи
+   * живут отдельно. Говорится вслух именно поэтому: человек должен
+   * знать, что на сайте другие числа, прежде чем переносить список обратно.
    */
   const drifted = computed<boolean>(() => {
     const server = card.value?.ownEntry
@@ -541,13 +544,16 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     navigate('media', { id: String(work.mediaId) })
   }
 
-  /** Отправляет одну правку в очередь и обновляет показ по памяти. */
-  async function send(kind: CardEdit, value: string | number): Promise<void> {
+  /**
+   * Кладёт одну правку в память и обновляет показ. Синхронно и без сети:
+   * правка никуда не едет, а запись снимка уйдёт на диск отложенно.
+   */
+  function send(kind: CardEdit, value: string | number): void {
     if (mediaId.value === 0) return
 
     try {
-      // Облик идёт вместе с правкой: без входа его больше взять негде.
-      await queueEdit(mediaId.value, kind, value, look.value)
+      // Облик идёт вместе с правкой: без переноса списка его больше взять негде.
+      editEntry(mediaId.value, kind, value, look.value)
       editStamp.value += 1
     } catch (e) {
       trouble.value = describe(e)
@@ -556,31 +562,31 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   function onPickStatus(value: string): void {
     if (value === status.value) return
-    void send('status', value)
+    send('status', value)
   }
 
   function onPickScore(value: number): void {
-    void send('score', value)
+    send('score', value)
   }
 
   function onPickProgress(value: number): void {
-    void send('progress', value)
+    send('progress', value)
   }
 
   function onPickRepeat(value: number): void {
-    void send('repeat', value)
+    send('repeat', value)
   }
 
   function onPickStarted(value: string): void {
-    void send('startedAt', value)
+    send('startedAt', value)
   }
 
   function onPickCompleted(value: string): void {
-    void send('completedAt', value)
+    send('completedAt', value)
   }
 
   function onPickNotes(value: string): void {
-    void send('notes', value)
+    send('notes', value)
   }
 
   return {
