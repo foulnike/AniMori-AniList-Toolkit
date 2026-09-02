@@ -2,7 +2,8 @@
 // Пункт 3.9а: окно правки записи списка. Своего состояния почти не держит:
 // значения приходят сверху, а наружу уходят просьбы поправить.
 // Исключение — черновик комментария: отдавать его на каждую букву нельзя.
-// Отправкой занимается карточка: окну о сети и очереди знать незачем.
+// Правка ложится в память списка и никуда не уезжает: окну о хранении
+// и сети знать незачем.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { partsWord, statusList, statusWord } from '../labels'
@@ -62,7 +63,7 @@ const donePart = computed(() => {
 
 /**
  * Черновик комментария. Поле правится часто и мелко, а каждая буква наружу —
- * это правка в очередь и запрос к серверу, поэтому отдаём по уходу из поля.
+ * это правка записи и взвод записи снимка, поэтому отдаём по уходу из поля.
  */
 const draft = ref(props.notes ?? '')
 let lastSent = props.notes ?? ''
@@ -95,7 +96,7 @@ function markStyle(mark: number): Record<string, string> {
   }
 }
 
-/** Оценка шагом шкалы, с обрезкой по краям: сервер знает только 0—10. */
+/** Оценка шагом шкалы, с обрезкой по краям: шкала списка — от 0 до 10. */
 function bumpScore(delta: number): void {
   const next = Math.round((props.score10 + delta) / SCORE_STEP) * SCORE_STEP
   const fixed = Math.min(10, Math.max(0, Math.round(next * 10) / 10))
@@ -106,7 +107,7 @@ function setScore(value: number): void {
   if (value !== props.score10) emit('score', value)
 }
 
-/** Счёт серий. Выше известного итога не пускаем: такую правку сервер отвергнет. */
+/** Счёт серий. Выше известного итога не пускаем: больше, чем есть, не посмотришь. */
 function bumpProgress(delta: number): void {
   const next = props.progress + delta
   const fixed = Math.max(0, props.partsTotal === null ? next : Math.min(props.partsTotal, next))
@@ -128,7 +129,7 @@ function today(): string {
   return `${now.getFullYear()}-${pad(month)}-${pad(day)}`
 }
 
-/** Пустая строка наружу значит «стереть дату»: так договорились с очередью. */
+/** Пустая строка наружу значит «стереть дату»: так договорились с коллекцией. */
 function onStarted(event: Event): void {
   emit('startedAt', (event.target as HTMLInputElement).value)
 }
@@ -310,7 +311,7 @@ onBeforeUnmount(() => {
             v-model="draft"
             class="am-input am-note"
             rows="3"
-            placeholder="Личная заметка, её видно на AniList"
+            placeholder="Личная заметка, остаётся в вашем списке"
             @blur="sendNotes"
           />
         </section>
