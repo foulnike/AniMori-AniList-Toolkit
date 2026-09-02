@@ -3,13 +3,12 @@
 // в коллекции, сборка строки с порядком показа и доборами — в lists-row.
 // Здесь остаётся отбор: закладка, слово, потолок показа и вид показа.
 //
-// Переноса списка с AniList на экране нет: он заменяет список целиком
-// и живёт в настройках, рядом со входом и очисткой склада.
+// Переноса списка с AniList на экране нет: он живёт в настройках, рядом
+// со входом и очисткой склада, и там же человек выбирает способ переноса.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { initCollection } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
-import { startEditSender } from '@/core/edit-sender'
 import { searchOwnList } from '@/core/media-search'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
@@ -283,12 +282,9 @@ onMounted(() => {
   void (async () => {
     try {
       // Только снимок с диска: в сеть за списком экран сам не ходит.
-      // Перенос заменяет список целиком, и решать это человеку в настройках.
+      // Перенос человек заводит сам в настройках, и там же выбирает способ.
       await initCollection()
       refill()
-
-      // Отправщик запускается только после подъёма: до него в памяти править нечего.
-      startEditSender()
     } catch (e) {
       trouble.value = describe(e)
     } finally {
