@@ -10,14 +10,17 @@ import { onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
 import {
+  eachEntry,
   entryCount,
   forgetCollection,
   initCollection,
   refreshFromServer,
   unlinkCollection,
+  type PullMode,
 } from '@/core/collection'
 import { datasetStatus, initDatasetNames } from '@/core/dataset-names'
 import { clearCache, getDbStats } from '@/core/db'
+import { buildMalXml, malXmlFileName } from '@/core/mal-xml'
 import { saveSetting, settings } from '@/core/settings'
 
 import { APPEARANCES, appearance, setAppearance } from '../appearance'
@@ -31,6 +34,7 @@ import {
   type LoginStart,
 } from '../auth/session'
 import { navigate } from '../router'
+import { saveTextFile } from '../save-file'
 
 const version = __ANIMORI_VERSION__
 
@@ -75,8 +79,9 @@ const note = ref('')
 const cleared = ref(false)
 
 /**
- * Спрошено ли подтверждение переноса. Перенос замещает список целиком,
- * а такое не делают одним промахом мыши.
+ * Спрошено ли подтверждение переноса. Спрашивается всегда: даже слияние
+ * двигает записи, а замена вовсе вычищает список — такое не делают
+ * одним промахом мыши.
  */
 const asking = ref(false)
 
@@ -199,17 +204,31 @@ function onManual(): void {
 }
 
 /**
- * Перенос списка с AniList: оба типа целиком и с заменой местного.
- * Зовётся только из подтверждения и никогда сам по входу.
+ * Перенос списка с AniList одним из двух способов. Зовётся только
+ * из подтверждения и никогда сам по входу.
+ *
+ * Итог говорится числами, а не одним «перенесено N»: после слияния
+ * важно не общее число, а что стало с набранным здесь.
  */
-function onPull(): void {
+function onPull(mode: PullMode): void {
   asking.value = false
 
   void guard(async () => {
     note.value = ''
-    const count = await refreshFromServer()
+    const done = await refreshFromServer(mode)
     await readState()
-    note.value = `Список перенесён с AniList: записей ${count}.`
+
+    // Способ берётся из ответа, а не из просьбы: смена счёта переключает
+    // перенос на замену сама, и сказать надо о том, что случилось на деле.
+    if (done.mode === 'replace') {
+      note.value = `Список замещён списком с AniList: записей ${done.total}.`
+      return
+    }
+
+    note.value =
+      `Списки слиты: всего ${done.total}, новых ${done.added}, ` +
+      `обновлено ${done.updated}, своих правок сохранено ${done.kept}, ` +
+      `только здесь ${done.onlyHere}.`
   })
 }
 
@@ -249,6 +268,38 @@ function onDropList(): void {
     await forgetCollection()
     await readState()
     note.value = 'Список удалён. На AniList ваши записи остались нетронутыми.'
+  })
+}
+
+/**
+ * Выгрузка списка файлом XML. Формат чужой и старый, зато его понимают
+ * все: Шикимори, AniList, Kitsu и сам MyAnimeList.
+ *
+ * Записи без номера MAL выразить в нём нечем, и их число говорится
+ * вслух: молча потерять часть списка при переезде в другой сервис —
+ * худшее, что здесь может случиться.
+ */
+function onExport(): void {
+  void guard(async () => {
+    note.value = ''
+    await initCollection()
+
+    const built = buildMalXml({ entries: eachEntry() })
+    if (built.exported === 0) {
+      note.value = 'Выгружать нечего: ни одной записи с закладкой и номером MAL.'
+      return
+    }
+
+    if (!saveTextFile(malXmlFileName(), built.xml)) {
+      error.value = 'Окно не приняло файл. Подробности в журнале.'
+      return
+    }
+
+    const lost = built.noMalId.length
+    note.value =
+      lost > 0
+        ? `Выгружено записей: ${built.exported}. Без номера MAL осталось ${lost} — их в файле нет.`
+        : `Выгружено записей: ${built.exported}.`
   })
 }
 
@@ -358,7 +409,7 @@ onMounted(() => {
               {{
                 authStatus.authorized
                   ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
-                  : 'Подключите аккаунт, чтобы перенести свой список и править его на AniList. Поиск, карточки и свои записи работают и без него.'
+                  : 'Подключите аккаунт, чтобы перенести свой список сюда. Правки остаются здесь: обратно на AniList программа ничего не отправляет.'
               }}
             </p>
 
@@ -374,7 +425,7 @@ onMounted(() => {
               </button>
               <template v-else>
                 <button
-                  v-tip="'Забрать список с AniList и заменить им местный'"
+                  v-tip="'Забрать список с AniList: слиянием или с заменой'"
                   class="am-btn"
                   type="button"
                   :disabled="busy"
@@ -403,16 +454,26 @@ onMounted(() => {
               </button>
             </div>
 
-            <!-- Вопрос перед заменой: человек видит, что будет с местными записями. -->
+            <!-- Вопрос перед переносом: два способа рядом, чтобы разница была
+                 видна до нажатия, а не после него. -->
             <div v-if="asking" class="am-ask">
               <p class="am-ask__text">
-                Список с AniList заменит местный целиком. Записи, добавленные здесь без входа, будут
-                потеряны, если их нет на AniList. Сейчас у нас записей: {{ listCount }}.
+                Сейчас у нас записей: {{ listCount }}. Слияние добавит недостающее и оставит
+                ваши правки, если они свежее записи на сайте. Замена вычистит местный
+                список целиком, и записи, которых нет на AniList, вернуть будет неоткуда.
               </p>
 
               <div class="am-row">
-                <button class="am-btn" type="button" :disabled="busy" @click="onPull">
-                  Перенести и заменить
+                <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
+                  Добавить недостающее
+                </button>
+                <button
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="busy"
+                  @click="onPull('replace')"
+                >
+                  Заменить целиком
                 </button>
                 <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
               </div>
@@ -458,8 +519,9 @@ onMounted(() => {
           </ul>
 
           <p class="am-meta">
-            Список живёт здесь, на вашем диске, и от отключения счёта не исчезает. Память — это
-            названия, описания и обложки: её можно сбросить без потерь.
+            Список живёт здесь, на вашем диске, и от отключения счёта не исчезает. Выгрузка
+            в XML даёт файл, который примут Шикимори, AniList и другие сервисы. Память —
+            это названия, описания и обложки: её можно сбросить без потерь.
           </p>
 
           <div class="am-row">
@@ -471,6 +533,17 @@ onMounted(() => {
               @click="onClear"
             >
               Очистить память
+            </button>
+
+            <button
+              v-if="listCount > 0"
+              v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onExport"
+            >
+              Выгрузить в XML
             </button>
 
             <button
@@ -584,7 +657,7 @@ onMounted(() => {
                не работает, и спрашивают о нём ровно на этом экране. -->
           <div class="am-log-open">
             <button class="am-btn am-btn--soft" type="button" @click="onLog">Открыть журнал</button>
-            <span class="am-meta">Записи этого запуска: сеть, склад, очередь правок, ошибки.</span>
+            <span class="am-meta">Записи этого запуска: сеть, склад, ошибки.</span>
           </div>
         </div>
       </div>
@@ -719,7 +792,7 @@ onMounted(() => {
   font-weight: 600;
 }
 
-/* Вопрос перед заменой списка: отделён рамкой, но без крика.
+/* Вопрос перед переносом списка: отделён рамкой, но без крика.
    Тон берётся от --am-warn: жёлтый литерал на светлой теме слепил. */
 .am-ask {
   display: flex;
@@ -751,200 +824,4 @@ onMounted(() => {
   border-radius: var(--am-r-m);
 }
 
-/* Атрибуция обязана быть видна, но читают её раз в жизни: своим кеглем
-   она уходит на второй план и не спорит с фактами выше. */
-.am-fine {
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* Вход в журнал: кнопка и пояснение рядом, а не строкой фактов выше —
-   это действие, а не число. */
-.am-log-open {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  padding: 11px 13px;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-l);
-}
-
-/* Исход действия: виден сразу и не путается с пояснениями рядом. */
-.am-note {
-  margin: 0;
-  font-size: 13px;
-  color: var(--am-good);
-}
-
-/* Настройка-тумблер: вся строка нажимается, пояснение под названием. */
-.am-switch {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 12px 14px;
-  cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-l);
-  transition: background-color var(--am-fast) var(--am-ease);
-}
-
-.am-switch:hover {
-  background: var(--am-hover);
-}
-
-/* Свой переключатель вместо системной галочки: та игнорирует тему
-   и рисуется по-своему в каждом движке. */
-.am-switch__box {
-  position: relative;
-  flex: none;
-  width: 42px;
-  height: 24px;
-  margin: 1px 0 0;
-  appearance: none;
-  cursor: pointer;
-  background: var(--am-fill-3);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-cap);
-  transition:
-    background var(--am-fast) var(--am-ease),
-    border-color var(--am-fast) var(--am-ease);
-}
-
-.am-switch__box::before {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
-  content: '';
-  background: var(--am-faint);
-  border-radius: var(--am-r-cap);
-  transition:
-    transform var(--am-mid) var(--am-ease),
-    background-color var(--am-fast) var(--am-ease);
-}
-
-.am-switch__box:checked {
-  background: linear-gradient(135deg, var(--am-accent), var(--am-accent-2));
-  border-color: transparent;
-}
-
-.am-switch__box:checked::before {
-  background: var(--am-bg);
-  transform: translateX(18px);
-}
-
-.am-switch__text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.am-switch__name {
-  font-weight: 600;
-}
-
-.am-switch__hint {
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--am-dim);
-}
-
-/* Ссылка-кнопка в тексте: внешний адрес открывает оболочка, не разметка. */
-.am-link {
-  padding: 0;
-  font: inherit;
-  color: var(--am-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  background: none;
-  border: 0;
-}
-
-/* Состояние подключения точкой: видно без чтения. */
-.am-flag {
-  display: inline-flex;
-  gap: 7px;
-  align-items: center;
-  padding: 5px 12px;
-  font-size: 12.5px;
-  color: var(--am-dim);
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-cap);
-}
-
-.am-flag__dot {
-  width: 8px;
-  height: 8px;
-  background: var(--am-faint);
-  border-radius: var(--am-r-cap);
-}
-
-.am-flag--on {
-  color: var(--am-good);
-  background: color-mix(in srgb, var(--am-good) 14%, transparent);
-  border-color: color-mix(in srgb, var(--am-good) 38%, transparent);
-}
-
-.am-flag--on .am-flag__dot {
-  background: var(--am-good);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--am-good) 80%, transparent);
-}
-
-.am-facts {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.am-fact {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--am-line-soft);
-}
-
-.am-fact:last-child {
-  border-bottom: 0;
-}
-
-.am-fact__name {
-  font-size: 13px;
-  color: var(--am-dim);
-}
-
-.am-fact__value {
-  font-weight: 600;
-  text-align: right;
-}
-
-/* Возраст датасета сверх порога. Раньше здесь стоял литерал: жёлтого
-   в наборе не было. Теперь --am-warn есть и подобран под каждую тему. */
-.am-fact__value--stale {
-  color: var(--am-warn);
-}
-
-code {
-  padding: 1px 6px;
-  font-size: 12.5px;
-  background: var(--am-fill-2);
-  border-radius: var(--am-r-s);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .am-skins__btn:hover {
-    transform: none;
-  }
-}
-</style>
+/* Атрибуция обязана быть видна, но читают её
