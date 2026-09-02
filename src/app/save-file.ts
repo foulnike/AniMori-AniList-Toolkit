@@ -1,13 +1,20 @@
-// Сохранение текстового файла на диск через средства самого окна.
+// Выгрузка списка файлом. Путей два, и нужны оба.
 //
-// Место — app/, а не shared/core/: здесь Blob, URL и <a download>, то есть DOM,
+// 1. Папка выбрана — пишем прямо в неё и возвращаем полный путь файла.
+//    Запись и само окно выбора живут в src-tauri/src/export.rs: разрешений
+//    на диалог разметке не выдано и выдано не будет.
+// 2. Папки нет или среда её не умеет — прежняя загрузка окном. Работает
+//    всегда, но куда ляжет файл, отсюда не видно вовсе.
+//
+// Место — app/, а не shared/core/: здесь Blob, URL и ссылка с download, то есть DOM,
 // а ядро обязано оставаться независимым от площадки.
 //
-// Мост и разрешения Tauri сюда не втянуты сознательно. Запись через files.rs
-// умеет только три разрешённых имени в служебном каталоге, куда человеку
-// не добраться, а выбор каталога потребовал бы новой команды в Rust
-// и разрешения на диалог. Для выгрузки списка хватает загрузки окна.
+// Прежняя шапка уверяла, будто выбор каталога потребовал бы новой команды
+// в Rust И разрешения на диалог. Первое оказалось верно, второе нет: плагин
+// диалога дёргается только из Rust, и права окна от этого не меняются.
 
+import { Bridge } from '@/bridge'
+import { settings } from '@/core/settings'
 import { Logger } from '@/utils/logger'
 
 /**
@@ -16,24 +23,30 @@ import { Logger } from '@/utils/logger'
  */
 const KEEP_MS = 20000
 
+/** Куда в итоге лёг файл. */
+export interface SaveResult {
+  /** Полный путь файла. Пустая строка, если файл ушёл загрузкой окна. */
+  path: string
+  /** true — записан в выбранную папку, false — отдан окну. */
+  toFolder: boolean
+}
+
 /**
- * Отдаёт текст человеку файлом. Куда именно он ляжет — дело окна:
- * в браузере и в WebView2 это папка загрузок или спрос места.
+ * Отдаёт текст человеку файлом средствами самого окна. Куда именно он ляжет —
+ * дело окна, и спросить его отсюда нельзя.
  *
  * Кодировка названа явно: без неё часть импортёров читает русские заметки
  * в однобайтной кодировке и портит их вопросительными знаками.
  *
- * @returns Удалось ли вообще начать сохранение. Отказ механизма окна после
- * нажатия отсюда не виден, и обещать больше было бы нечестно.
+ * Отказ механизма окна ПОСЛЕ нажатия отсюда не виден, и обещать больше
+ * было бы нечестно: именно поэтому выше есть первый путь с папкой.
  */
-export function saveTextFile(
-  name: string,
-  text: string,
-  mime = 'application/xml',
-): boolean {
+function saveByWindow(name: string, text: string): void {
+  let href = ''
+
   try {
-    const blob = new Blob([text], { type: `${mime};charset=utf-8` })
-    const href = URL.createObjectURL(blob)
+    const blob = new Blob([text], { type: 'application/xml;charset=utf-8' })
+    href = URL.createObjectURL(blob)
 
     const link = document.createElement('a')
     link.href = href
@@ -41,18 +54,42 @@ export function saveTextFile(
     link.rel = 'noopener'
     link.style.display = 'none'
 
-    // Ссылка вставляется в документ, а не жмётся воздухе: часть движков
+    // Ссылка вставляется в документ, а не жмётся в воздухе: часть движков
     // игнорирует нажатие на узле вне дерева.
     document.body.append(link)
     link.click()
     link.remove()
 
-    window.setTimeout(() => URL.revokeObjectURL(href), KEEP_MS)
-
     Logger('DB', `Выгрузка отдана окну: ${name}, байт ${blob.size}`)
-    return true
   } catch (e) {
     Logger('WARN', `Выгрузку не начать: ${String(e)}`)
-    return false
+    throw new Error('Окно не приняло файл. Подробности в журнале.')
+  } finally {
+    // Отзыв откладывается даже при ошибке ниже по тексту: адрес уже создан,
+    // и без отзыва Blob остался бы в памяти до перезагрузки окна.
+    if (href) window.setTimeout(() => URL.revokeObjectURL(href), KEEP_MS)
   }
+}
+
+/**
+ * Сохраняет выгрузку XML и говорит, куда именно она легла.
+ *
+ * Папка читается в момент вызова, а не запоминается при импорте: её меняют
+ * тут же, в настройках, и копия значения устарела бы к первому же нажатию.
+ *
+ * Отклоняется с внятным текстом — например, когда выбранную папку стᑑрли
+ * или переименовали. Молчание после нажатия и было тем дефектом,
+ * из-за которого файл приходилось искать по диску.
+ */
+export async function saveXmlFile(name: string, text: string): Promise<SaveResult> {
+  const dir = settings.exportDir.trim()
+
+  if (Bridge.exportFile.available && dir) {
+    const path = await Bridge.exportFile.write(dir, name, text)
+    Logger('DB', `Выгрузка записана: ${path}, знаков ${text.length}`)
+    return { path, toFolder: true }
+  }
+
+  saveByWindow(name, text)
+  return { path: '', toFolder: false }
 }
