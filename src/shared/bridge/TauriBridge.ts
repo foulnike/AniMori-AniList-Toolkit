@@ -23,6 +23,7 @@ import {
   type HttpResponse,
   type IBridge,
   type IClipboard,
+  type IExport,
   type IFiles,
   type IHttp,
   type IShell,
@@ -152,6 +153,32 @@ const tauriFiles: IFiles = {
   },
 }
 
+// ==== выгрузка ====
+
+/**
+ * Выгрузка списка в папку, выбранную человеком (пункт 3.3). Окно выбора
+ * открывает сам Rust: разрешений на диалог разметке не выдано, и проверка
+ * имени с папкой живёт там же, в export.rs.
+ *
+ * Отказы НЕ глотаются, в отличие от tauriFiles выше: там дубль снимка,
+ * который вправе не получиться молча, а выгрузку человек затеял руками
+ * и ждёт ответа. Текст ошибки приходит из Rust уже читаемым.
+ */
+const tauriExport: IExport = {
+  available: true,
+
+  async pickDir(): Promise<string | null> {
+    // null — человек закрыл окно выбора. Это не ошибка и наверх идёт как есть.
+    const picked = await invoke<string | null>('animori_export_pick_dir')
+    return picked ?? null
+  },
+
+  async write(dir: string, name: string, text: string): Promise<string> {
+    // Ответ команды — полный путь записанного файла, его и отдаём.
+    return await invoke<string>('animori_export_write', { dir, name, text })
+  },
+}
+
 // ==== прокси ====
 
 /**
@@ -196,7 +223,7 @@ async function loadProxyOption(): Promise<TauriProxyOption> {
     const url = proxyUrl(config)
 
     if (config.enabled && !url) {
-      // Инвариант 4: иначе включённый тумблер врёт, а трафик идёт напрямую.
+      // Инвариант 4: иначе включённый тумблер врᑑт, а трафик идёт напрямую.
       console.warn(
         '[AniMori] Прокси включён, но адрес или порт заданы неверно — запросы идут напрямую',
       )
@@ -378,6 +405,8 @@ export const tauriBridge: IBridge = {
   platform: 'tauri',
   storage: tauriStorage,
   files: tauriFiles,
+  // Реализация выше: чужая папка и окно выбора, отдельно от служебных files.
+  exportFile: tauriExport,
   http: tauriHttp,
   // Реализация в TauriAniList.ts: запрос собирает Rust вместе с пропуском.
   anilist: tauriAniList,
