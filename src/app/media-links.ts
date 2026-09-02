@@ -32,14 +32,10 @@ export interface MediaLink {
   hint: string
 }
 
+/** Всё, из чего собирается хвост. Вида тайтла здесь нет: только аниме. */
 export interface MediaLinksInput {
   mediaId: number
   malId: number | null
-  /**
-   * Остаток от времён манги: на разделы каталогов вид больше не влияет.
-   * Поле необязательное, чтобы уже записанные вызовы дожили до своей правки.
-   */
-  type?: 'ANIME'
   /** Адрес страницы, откуда взято описание. Пустая строка — как отсутствие. */
   sourceUrl?: string | null
   sourceName?: string | null
