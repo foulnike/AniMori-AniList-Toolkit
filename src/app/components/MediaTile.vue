@@ -2,7 +2,11 @@
 // Плитка тайтла: постер, название и метки поверх картинки.
 // Одна на списки, поиск и полки главной: вид тайтла везде один.
 // Своих данных не добывает: сотня плиток ушла бы в сеть сотню раз.
+// Метка доступности приходит готовой из core/playable по той же причине:
+// спрашивать источники сама плитка не вправе.
 import { computed, ref, watch } from 'vue'
+
+import type { PlayState } from '@/core/playable'
 
 import { soonHint, soonWord } from '../labels'
 
@@ -25,6 +29,8 @@ interface Props {
   ongoing?: boolean
   /** Ни одной части ещё не вышло: метка анонса. */
   soon?: boolean
+  /** Есть ли тайтл у источников видео. null — ещё не спрашивали, и метки не будет. */
+  play?: PlayState | null
   /** Свой счёт частей строкой вида «7 / 12». */
   own?: string | null
   /** Доля пройденного от нуля до единицы: полоса внизу постера. */
@@ -44,6 +50,7 @@ const props = withDefaults(defineProps<Props>(), {
   note: null,
   ongoing: false,
   soon: false,
+  play: null,
   own: null,
   done: 0,
   adult: false,
@@ -78,9 +85,22 @@ const donePart = computed(() => `${Math.round(Math.min(1, Math.max(0, props.done
  */
 const repeatHint = computed(() => `Повторных проходов: ${props.repeat}`)
 
+/**
+ * Метка доступности. У анонса её нет вовсе: там смотреть нечего по самой
+ * природе тайтла, и об этом уже сказано меткой анонса. Две метки об одном
+ * рядом читались бы как спор.
+ */
+const playMark = computed<PlayState | null>(() => (props.soon ? null : props.play))
+
 /** Есть ли вообще что показывать в левом верхнем углу. */
 const hasTags = computed(
-  () => props.mark !== null || props.adult || props.soon || props.repeat > 0 || props.note !== null,
+  () =>
+    props.mark !== null ||
+    props.adult ||
+    props.soon ||
+    props.repeat > 0 ||
+    props.note !== null ||
+    playMark.value !== null,
 )
 </script>
 
@@ -105,6 +125,22 @@ const hasTags = computed(
         <span v-if="hasTags" class="am-tile__tags">
           <span v-if="soon" v-tip="soonHint()" class="am-tile__tag am-tile__tag--soon">
             {{ soonWord() }}
+          </span>
+
+          <span
+            v-if="playMark === 'yes'"
+            v-tip="'Можно посмотреть: тайтл есть у источников видео'"
+            class="am-tile__tag am-tile__tag--play"
+          >
+            Есть видео
+          </span>
+
+          <span
+            v-else-if="playMark === 'no'"
+            v-tip="'Ни один источник этот тайтл не отдаёт'"
+            class="am-tile__tag am-tile__tag--none"
+          >
+            Нет видео
           </span>
 
           <span v-if="mark" class="am-tile__tag">{{ mark }}</span>
@@ -304,6 +340,22 @@ const hasTags = computed(
   color: var(--am-on-art);
   background: color-mix(in srgb, var(--am-accent) 58%, transparent);
   border-color: color-mix(in srgb, var(--am-accent) 66%, transparent);
+}
+
+/* «Есть видео» — тем же зелёным, что и точка идущего сезона: в обоих случаях
+   речь об одном и том же, о «прямо сейчас». */
+.am-tile__tag--play {
+  color: var(--am-on-art);
+  background: color-mix(in srgb, var(--am-good) 52%, transparent);
+  border-color: color-mix(in srgb, var(--am-good) 62%, transparent);
+}
+
+/* «Нет видео» тише всех прочих меток: это отсутствие, а не свойство тайтла,
+   и кричать о нём поверх постера незачем. Красным — тем более: тайтл
+   ни в чём не виноват. */
+.am-tile__tag--none {
+  color: color-mix(in srgb, var(--am-on-art) 62%, transparent);
+  border-color: color-mix(in srgb, var(--am-on-art) 10%, transparent);
 }
 
 /* Знаки пересмотра и заметки — круглые монетки без подписей: ряд пилюль
