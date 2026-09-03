@@ -13,6 +13,17 @@
 // Сами ссылки не кэшируются нигде: они живут считанные часы, и протухшая
 // вместо отказа даёт чёрный экран. Кэшируется только выборка озвучек:
 // адреса страниц серий постоянные.
+//
+// ПРО material_data. Первый шаг заодно просит сводку по тайтлу: русское имя,
+// описание и число вышедших серий. Стоит это ноль запросов — поле приезжает
+// в том же ответе поиска, который делается перед просмотром и так. Взято оно
+// на замену тому, что раньше приходило из манами: датасет теперь собирается
+// перечислением каталога Шикимори, и у части тайтлов русского имени в нём
+// нет вовсе. Постер и кадры сознательно не берутся: они лежат на i.kodik.biz,
+// а новый хост потребовал бы правки прав оболочки ради картинки, которая
+// экрану не нужна. И главное: ничего из этой сводки не попадает в файлы
+// выпуска датасета и попасть не должно — это подсказка на один запуск,
+// а не источник данных.
 
 import { Bridge, type HttpResponse } from '@/bridge'
 import { reportError, reportStatus } from '../core/net-health'
@@ -52,6 +63,13 @@ const VOICES_MEMORY_MS = 600000
 /** Перебор сдвига шифра: все варианты, кроме тождественного. */
 const SHIFTS: number[] = Array.from({ length: 25 }, (_, i) => i + 1)
 
+/**
+ * Русским именем считается только кириллическое. У службы в title нередко
+ * лежит латиница — её экран покажет и без нашей помощи, а вот подменять
+ * ею русское имя из датасета нельзя.
+ */
+const CYRILLIC = /[А-Яа-яЁё]/
+
 /** Запись серии в ответе поиска: с with_episodes_data это объект, без него — строка. */
 interface KodikEpisodeData {
   link?: string | null
@@ -70,6 +88,20 @@ interface KodikTranslation {
   title?: string | null
 }
 
+/**
+ * Сводка по тайтлу с with_material_data. Полей у службы куда больше, здесь
+ * объявлены только те, что действительно читаются: остальные пришлось бы
+ * поддерживать без нужды.
+ */
+interface KodikMaterialData {
+  anime_title?: string | null
+  title?: string | null
+  anime_description?: string | null
+  description?: string | null
+  episodes_aired?: number | null
+  episodes_total?: number | null
+}
+
 interface KodikResult {
   id?: string | null
   type?: string | null
@@ -77,6 +109,7 @@ interface KodikResult {
   translation?: KodikTranslation | null
   episodes_count?: number | null
   seasons?: Record<string, KodikSeason | null> | null
+  material_data?: KodikMaterialData | null
 }
 
 interface KodikSearchResponse {
@@ -106,6 +139,23 @@ interface KodikVoiceRow {
   episodes: KodikEpisodeRow[]
 }
 
+/**
+ * Сводка по тайтлу наружу. Любое поле вправе быть null: служба заполняет
+ * material_data как придётся, и отсутствие имени — обычное дело, а не сбой.
+ */
+export interface KodikMaterial {
+  russianTitle: string | null
+  description: string | null
+  episodesAired: number | null
+  episodesTotal: number | null
+}
+
+/** Что даёт один ответ поиска: озвучки и сводка приезжают вместе. */
+interface KodikFound {
+  voices: KodikVoiceRow[]
+  material: KodikMaterial | null
+}
+
 /** Подписи и признаки со страницы серии — всё, что нужно для /ftor. */
 interface PageFields {
   d: string
@@ -119,8 +169,8 @@ interface PageFields {
   id: string
 }
 
-const voicesMemory = new Map<number, { at: number; voices: KodikVoiceRow[] }>()
-const pendingVoices = new Map<number, Promise<KodikVoiceRow[]>>()
+const foundMemory = new Map<number, { at: number; found: KodikFound }>()
+const pendingFound = new Map<number, Promise<KodikFound>>()
 
 /** Удачный сдвиг прошлого разбора. Ноль — ещё ни разу не встречался. */
 let knownShift = 0
@@ -203,6 +253,56 @@ function formBody(fields: Record<string, string>): string {
   return Object.entries(fields)
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&')
+}
+
+/** Непустая строка или null: у службы пустое поле и отсутствие поля равнозначны. */
+function textOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+/** Положительное число или null: нули у службы означают «неизвестно». */
+function countOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+/**
+ * Сводка из material_data. Собирается по всем записям поиска, а не по первой:
+ * тайтл у них один, а поле у одной озвучки бывает пустым, у соседней — полным.
+ * Каждое поле берётся у первой записи, где оно есть; имя, кроме того, обязано
+ * быть кириллическим.
+ */
+function toMaterial(results: KodikResult[]): KodikMaterial | null {
+  const found: KodikMaterial = {
+    russianTitle: null,
+    description: null,
+    episodesAired: null,
+    episodesTotal: null,
+  }
+
+  for (const item of results) {
+    const data = item.material_data
+    if (!data) continue
+
+    if (found.russianTitle === null) {
+      const name = textOrNull(data.anime_title) ?? textOrNull(data.title)
+      if (name !== null && CYRILLIC.test(name)) found.russianTitle = name
+    }
+
+    found.description ??=
+      textOrNull(data.anime_description) ?? textOrNull(data.description)
+    found.episodesAired ??= countOrNull(data.episodes_aired)
+    found.episodesTotal ??= countOrNull(data.episodes_total)
+  }
+
+  const empty =
+    found.russianTitle === null &&
+    found.description === null &&
+    found.episodesAired === null &&
+    found.episodesTotal === null
+
+  return empty ? null : found
 }
 
 /**
@@ -429,27 +529,31 @@ function toVoices(results: KodikResult[]): KodikVoiceRow[] {
   return [...rows.values()].sort((a, b) => b.episodes.length - a.episodes.length)
 }
 
-/** Выборка озвучек по номеру Шикимори. Десять минут живёт в памяти. */
-async function loadVoices(shikimoriId: number): Promise<KodikVoiceRow[]> {
-  const known = voicesMemory.get(shikimoriId)
-  if (known && Date.now() - known.at < VOICES_MEMORY_MS) return known.voices
+/**
+ * Ответ поиска по номеру Шикимори. Десять минут живёт в памяти целиком:
+ * озвучки и сводка приезжают одним ответом, и разделять их значило бы
+ * спрашивать службу дважды об одном.
+ */
+async function loadFound(shikimoriId: number): Promise<KodikFound> {
+  const known = foundMemory.get(shikimoriId)
+  if (known && Date.now() - known.at < VOICES_MEMORY_MS) return known.found
 
-  const pending = pendingVoices.get(shikimoriId)
+  const pending = pendingFound.get(shikimoriId)
   if (pending) return pending
 
-  const task = loadVoicesUncached(shikimoriId)
-  pendingVoices.set(shikimoriId, task)
+  const task = loadFoundUncached(shikimoriId)
+  pendingFound.set(shikimoriId, task)
 
   try {
-    const voices = await task
-    voicesMemory.set(shikimoriId, { at: Date.now(), voices })
-    return voices
+    const found = await task
+    foundMemory.set(shikimoriId, { at: Date.now(), found })
+    return found
   } finally {
-    pendingVoices.delete(shikimoriId)
+    pendingFound.delete(shikimoriId)
   }
 }
 
-async function loadVoicesUncached(shikimoriId: number): Promise<KodikVoiceRow[]> {
+async function loadFoundUncached(shikimoriId: number): Promise<KodikFound> {
   Logger('API', `Запрос Kodik для Shikimori ID: ${shikimoriId}`)
 
   const query = [
@@ -458,13 +562,34 @@ async function loadVoicesUncached(shikimoriId: number): Promise<KodikVoiceRow[]>
     'with_seasons=true',
     'with_episodes=true',
     'with_episodes_data=true',
+    'with_material_data=true',
   ].join('&')
 
   const res = await send({ method: 'GET', url: `${SEARCH_BASE}/search?${query}` }, 'поиск')
-  if (res === null) return []
+  if (res === null) return { voices: [], material: null }
 
   const found = parseJson<KodikSearchResponse>(res.text, 'поиск')
-  return toVoices(found?.results ?? [])
+  const results = found?.results ?? []
+
+  return { voices: toVoices(results), material: toMaterial(results) }
+}
+
+/** Озвучки по номеру Шикимори: та же память, что и у сводки. */
+async function loadVoices(shikimoriId: number): Promise<KodikVoiceRow[]> {
+  const found = await loadFound(shikimoriId)
+  return found.voices
+}
+
+/**
+ * Сводка по тайтлу. Своих запросов не делает: либо отдаёт уже полученное,
+ * либо тянет тот же поиск, что нужен для озвучек. Null — служба тайтл
+ * не знает или material_data не заполнила; это не сбой.
+ */
+export async function kodikMaterial(shikimoriId: number): Promise<KodikMaterial | null> {
+  if (!Number.isFinite(shikimoriId) || shikimoriId <= 0) return null
+
+  const found = await loadFound(shikimoriId)
+  return found.material
 }
 
 /** Подписи со страницы серии. Запрашивается в последний момент и не кэшируется. */
@@ -593,6 +718,7 @@ export const kodikSource: VideoSource = {
 
 /** Только для проверок и кнопки очистки кэша: память сама себя не чистит. */
 export function forgetKodikVoices(): void {
-  voicesMemory.clear()
+  foundMemory.clear()
+  pendingFound.clear()
   knownShift = 0
 }
