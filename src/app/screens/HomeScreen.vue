@@ -5,10 +5,19 @@
 import { onMounted, ref, watch } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
+import { setupVideoSources } from '@/api/video-sources'
 import { initCollection } from '@/core/collection'
 import { selectEntries } from '@/core/collection-view'
-import { notOutYet, partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
+import {
+  notOutYet,
+  partsOut,
+  peekLook,
+  SOON_STATUS,
+  warmLooks,
+  type MediaLook,
+} from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
+import { peekPlayable, warmPlayable, type PlayAsk } from '@/core/playable'
 import { hideRec, motifShelf, recShelf, tasteShelf } from '@/core/recs'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
@@ -16,7 +25,7 @@ import { Logger } from '@/utils/logger'
 import MediaTile from '../components/MediaTile.vue'
 import { formatWord, GENRE_CHOICES, genreWord, partsShort } from '../labels'
 import { navigate } from '../router'
-import { toTileRow, type TileRow } from '../tile-row'
+import { toPlayAsk, toTileRow, type TileRow } from '../tile-row'
 import { homeGenre } from './home-keep'
 
 /** Сколько постеров класть на свою полку. */
@@ -25,6 +34,18 @@ const SHELF_SIZE = 14
 /** Скольким плиткам добирать русские названия и по скольку за заход. */
 const TITLE_DEPTH = 12
 const TITLE_CHUNK = 6
+
+/**
+ * Скольким верхним плиткам полки спрашивать доступность и сколько таких
+ * вопросов позволено всей витрине за один заход.
+ *
+ * Глубина — это то, что видно без прокрутки ряда. Бюджет — потолок на всё
+ * сразу: шесть полок по четырнадцать плиток — это сотня тайтлов, а спросить
+ * про каждый надо два источника. Метка, за которую платят двумя сотнями
+ * запросов на открытие окна, стоит дороже, чем помогает.
+ */
+const PLAY_DEPTH = 5
+const PLAY_BUDGET = 20
 
 /** Сколько заглушек держать на время подъёма снимка. */
 const HOLD_COUNT = 7
@@ -78,6 +99,9 @@ let activeDefs: ShelfDef[] = []
 let lookRun = 0
 let titleRun = 0
 let recsRun = 0
+
+/** Остаток бюджета вопросов о доступности: общий на все полки захода. */
+let playLeft = 0
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -263,6 +287,48 @@ async function warmRecTitles(mine: number, key: string): Promise<void> {
   }
 }
 
+/**
+ * Спрашивает источники про верх полки и ставит метку «Есть видео».
+ *
+ * Анонсы не спрашиваются вовсе: у них не вышло ни одной части, и ответ
+ * известен заранее. Остальное идёт в пределах общего бюджета захода:
+ * кто из полок приехал раньше, тот и тратит.
+ */
+async function warmRecPlay(mine: number, key: string): Promise<void> {
+  const items = staged.get(key)
+  if (items === undefined || playLeft <= 0) return
+
+  const asks: PlayAsk[] = items
+    .slice(0, PLAY_DEPTH)
+    .filter((brief) => brief.status !== SOON_STATUS && peekPlayable(brief.mediaId) === null)
+    .slice(0, playLeft)
+    .map(toPlayAsk)
+
+  if (asks.length === 0) return
+  playLeft -= asks.length
+
+  try {
+    // Реестр источников собирает не ядро, а слой api, и до плеера человек может
+    // и не дойти. Повторный зов ничего не стоит: сборка идёт один раз за запуск.
+    setupVideoSources()
+
+    await warmPlayable(asks)
+    if (mine !== recsRun) return
+
+    publish()
+  } catch (e) {
+    // Без ответа плитка останется без метки, а не с ложной: так и задумано.
+    Logger('WARN', 'Главная: метки доступности не доехали', e)
+  }
+}
+
+/** Добор одной полки: сначала имена, потом метки. Имя важнее: без него
+    плитку не узнать вовсе, а без метки она просто молчит. */
+async function warmRecShelf(mine: number, key: string): Promise<void> {
+  await warmRecTitles(mine, key)
+  await warmRecPlay(mine, key)
+}
+
 /** Полки витрины: каждая встаёт сама по готовности. */
 function loadRecs(): void {
   const mine = ++recsRun
@@ -270,6 +336,7 @@ function loadRecs(): void {
   recs.value = []
   activeDefs = shelfDefs()
   recsPending.value = true
+  playLeft = PLAY_BUDGET
 
   const tasks = activeDefs.map((def) =>
     def
@@ -278,7 +345,7 @@ function loadRecs(): void {
         if (mine !== recsRun || items.length === 0) return
         staged.set(def.key, items)
         publish()
-        void warmRecTitles(mine, def.key)
+        void warmRecShelf(mine, def.key)
       })
       .catch((e) => {
         Logger('WARN', `Главная: полка «${def.key}» не доехала`, e)
@@ -435,6 +502,7 @@ watch(homeGenre, () => {
             :own="row.own"
             :done="row.done"
             :soon="row.soon"
+            :play="row.play"
             :adult="row.adult"
             hidable
             @open="open(row.mediaId)"
