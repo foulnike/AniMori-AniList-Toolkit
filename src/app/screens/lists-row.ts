@@ -4,8 +4,16 @@
 // Модуль один сознательно: веер мелких файлов труднее держать в согласии.
 import { ref, type Ref } from 'vue'
 
+import { setupVideoSources } from '@/api/video-sources'
 import { notOutYet, partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
+import {
+  peekPlayable,
+  primePlayable,
+  warmPlayable,
+  type PlayAsk,
+  type PlayState,
+} from '@/core/playable'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
 
@@ -15,6 +23,14 @@ import type { SortName } from './lists-keep'
 
 /** По скольку тайтлов просить названия за заход: источники отвечают по одному. */
 const TITLE_CHUNK = 10
+
+/**
+ * Скольким строкам добирать метку доступности сетью за один заход. Склад
+ * поднимается для всех показанных даром, а в сеть идёт только верх: строка
+ * стоит запроса к каждому источнику, и сотня строк съела бы очередь темпа
+ * целиком. Остальные доберутся следующим заходом или из склада.
+ */
+const PLAY_DEPTH = 10
 
 /** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
 export interface Row {
@@ -27,6 +43,14 @@ export interface Row {
   ongoing: boolean
   /** Ни одной части ещё не вышло: на постере вместо сезона стоит анонс. */
   soon: boolean
+  /** Есть ли тайтл у источников видео. null — ещё не спрашивали. */
+  play: PlayState | null
+  /**
+   * Чем спрашивать источники про этот тайтл. Лежит в строке, потому что
+   * позже собирать вопрос уже не из чего: добор видит только строки,
+   * а номер MAL и латинские названия живут в записи снимка.
+   */
+  ask: PlayAsk
   own: string | null
   done: number
   cover: string | null
@@ -34,12 +58,14 @@ export interface Row {
   adult: boolean
 }
 
-/** Доборы, отданные экрану: два флажка для подвала и два пуска. */
+/** Доборы, отданные экрану: флажки для подвала и пуски. */
 export interface RowWarm {
   looksBusy: Ref<boolean>
   titlesBusy: Ref<boolean>
+  playBusy: Ref<boolean>
   fillLooks: () => Promise<void>
   fillTitles: () => Promise<void>
+  fillPlay: () => Promise<void>
 }
 
 /** Короткая подпись под названием: вид и год. Больше в две строки не влезает. */
@@ -81,6 +107,27 @@ function titleOf(entry: SnapshotEntry): string {
     peekLook(entry.mediaId)?.romaji ??
     `Тайтл #${entry.mediaId}`
   )
+}
+
+/**
+ * Чем спрашивать источники: номер MAL и названия по убыванию пригодности.
+ * Номер снимка не выдумывается — записи, сделанные до его появления, идут
+ * с null, и метка «нет видео» такому тайтлу не поставится никогда.
+ */
+function playAskOf(entry: SnapshotEntry, look: MediaLook | null): PlayAsk {
+  const names = [
+    entry.romaji,
+    entry.english,
+    look?.romaji ?? null,
+    peekRussianName(entry.mediaId),
+  ]
+
+  return {
+    mediaId: entry.mediaId,
+    malId: entry.malId ?? null,
+    titles: [...new Set(names.filter((name): name is string => name !== null && name !== ''))],
+    year: look?.seasonYear ?? undefined,
+  }
 }
 
 /** Средняя оценка каталога для порядка: неизвестная уходит в конец. */
@@ -131,6 +178,9 @@ export function toRow(entry: SnapshotEntry): Row {
     note: entry.notes,
     ongoing: (look?.airingEpisode ?? null) !== null,
     soon: notOutYet(look),
+    // Спрашивается только память: сеть здесь задержала бы отрисовку списка целиком.
+    play: peekPlayable(entry.mediaId),
+    ask: playAskOf(entry, look),
     own: ownText(entry, parts),
     done: donePart(entry, parts),
     cover: look?.cover ?? null,
@@ -147,9 +197,11 @@ export function toRow(entry: SnapshotEntry): Row {
 export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
   const looksBusy = ref(false)
   const titlesBusy = ref(false)
+  const playBusy = ref(false)
 
   let lookRun = 0
   let titleRun = 0
+  let playRun = 0
 
   /**
    * Добирает обложки для показанных плиток. Сотня строк стоит двух
@@ -210,5 +262,43 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
     }
   }
 
-  return { looksBusy, titlesBusy, fillLooks, fillTitles }
+  /**
+   * Добирает метки доступности. Сначала склад — он отвечает даром и разом
+   * по всем показанным строкам, — и только потом сеть, и то верхним строкам.
+   * Без метки список живой: плитка про доступность просто молчит.
+   */
+  async function fillPlay(): Promise<void> {
+    const mine = ++playRun
+    const unknown = rows.value.filter((row) => row.play === null)
+    if (unknown.length === 0) return
+
+    playBusy.value = true
+
+    try {
+      const primed = await primePlayable(unknown.map((row) => row.mediaId))
+      if (mine !== playRun) return
+      if (primed > 0) redraw()
+
+      const wanted = rows.value
+        .filter((row) => peekPlayable(row.mediaId) === null)
+        .slice(0, PLAY_DEPTH)
+        .map((row) => row.ask)
+
+      if (wanted.length === 0) return
+
+      // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
+      setupVideoSources()
+
+      await warmPlayable(wanted)
+      if (mine !== playRun) return
+
+      redraw()
+    } catch (e) {
+      Logger('WARN', 'Списки: метки доступности не доехали', e)
+    } finally {
+      if (mine === playRun) playBusy.value = false
+    }
+  }
+
+  return { looksBusy, titlesBusy, playBusy, fillLooks, fillTitles, fillPlay }
 }
