@@ -149,15 +149,19 @@ function redraw(): void {
   rows.value = sortEntries(list, sortKey.value).slice(0, limit.value).map(toRow)
 }
 
-// Доборы обложек и названий живут рядом со сборкой строки: экран отдаёт
-// свои строки и перерисовку. Флажки нужны подвалу и кнопок не держат.
-const { looksBusy, titlesBusy, fillLooks, fillTitles } = useRowWarm(rows, redraw)
+// Доборы обложек, названий и меток доступности живут рядом со сборкой строки:
+// экран отдаёт свои строки и перерисовку. Флажки нужны подвалу и кнопок не держат.
+const { looksBusy, titlesBusy, playBusy, fillLooks, fillTitles, fillPlay } = useRowWarm(
+  rows,
+  redraw,
+)
 
-/** Отрисовка и два добора вслед. Сами доборы зовут только redraw — круга нет. */
+/** Отрисовка и три добора вслед. Сами доборы зовут только redraw — круга нет. */
 function refill(): void {
   redraw()
   void fillLooks()
   void fillTitles()
+  void fillPlay()
 }
 
 /** Возврат к первой сотне: любая смена отбора начинает показ сначала. */
@@ -424,6 +428,7 @@ onBeforeUnmount(() => {
         :note="row.note"
         :ongoing="row.ongoing"
         :soon="row.soon"
+        :play="row.play"
         :own="row.own"
         :done="row.done"
         :adult="row.adult"
@@ -462,6 +467,7 @@ onBeforeUnmount(() => {
       {{ rows.length }} из {{ shown }} · всего {{ total }}
       <template v-if="looksBusy"> · обложки…</template>
       <template v-if="titlesBusy"> · названия…</template>
+      <template v-if="playBusy"> · доступность…</template>
     </p>
   </section>
 </template>
