@@ -3,6 +3,6 @@ contact_links:
   - name: Вопрос по установке скрипта
     url: https://greasyfork.org/ru/scripts/572948-animori-anilist-toolkit/feedback
     about: Обсуждение на Greasy Fork — менеджер скриптов, автообновление, скрипт не запускается.
-  - name: Установка приложения, WebView2 и автообновление
-    url: https://github.com/foulnike/AniMori-AniList-Toolkit#приложение-для-windows
-    about: Раздел README с порядком установки и требованиями к системе.
+  - name: Установка приложения и обновление
+    url: https://github.com/foulnike/AniMori-AniList-Toolkit/releases/latest
+    about: Последний выпуск: установщик, подпись и требования к системе.
