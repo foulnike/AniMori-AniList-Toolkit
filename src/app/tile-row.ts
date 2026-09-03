@@ -5,6 +5,7 @@ import type { MediaBrief } from '@/api/anilist-media'
 import { getEntry } from '@/core/collection'
 import { SOON_STATUS } from '@/core/media-looks'
 import { peekRussianName } from '@/core/media-title'
+import { peekPlayable, type PlayAsk, type PlayState } from '@/core/playable'
 
 import { formatWord, partsShort, statusWord } from './labels'
 
@@ -22,6 +23,8 @@ export interface TileRow {
   note: string | null
   done: number
   soon: boolean
+  /** Есть ли тайтл у источников видео. null — ещё не спрашивали. */
+  play: PlayState | null
   adult: boolean
 }
 
@@ -109,6 +112,22 @@ function pickTitle(brief: MediaBrief): string {
   )
 }
 
+/**
+ * Что источникам нужно знать о тайтле, чтобы ответить про доступность.
+ * Собирается так же, как его собирает плеер: номера для тех, кто входит по ним,
+ * названия по убыванию пригодности — для тех, кто ищет словами.
+ */
+export function toPlayAsk(brief: MediaBrief): PlayAsk {
+  const titles = [brief.romaji, brief.english, brief.native, peekRussianName(brief.mediaId)]
+
+  return {
+    mediaId: brief.mediaId,
+    malId: brief.malId,
+    titles: titles.filter((t): t is string => typeof t === 'string' && t.trim() !== ''),
+    year: brief.seasonYear ?? undefined,
+  }
+}
+
 /** Выписка сервера в плитку показа. */
 export function toTileRow(brief: MediaBrief): TileRow {
   // Повторы и комментарий бывают только своими: у ответа каталога их нет.
@@ -127,6 +146,8 @@ export function toTileRow(brief: MediaBrief): TileRow {
     note: mine?.notes ?? null,
     done: donePart(brief),
     soon: notOut(brief),
+    // Спрашивается только память: сеть здесь задержала бы отрисовку полки целиком.
+    play: peekPlayable(brief.mediaId),
     adult: brief.isAdult,
   }
 }
