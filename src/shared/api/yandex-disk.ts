@@ -20,6 +20,18 @@
 // ensureFolder отсюда убран совсем. Он просил право создать папку в корне,
 // которого у нового пропуска нет и быть не должно.
 //
+// ССЫЛКА ВМЕСТО ВХОДА: ХОЛОДНЫЙ СТАРТ БЕЗ КЛАВИАТУРЫ
+// Пропуск Диска — строка под шесть десятков знаков, и набрать её пультом
+// на телевизоре невозможно. Поэтому у копии есть второй путь, только на чтение:
+// владелец один раз публикует файл с компьютера и получает короткую ссылку,
+// а новое устройство забирает копию по ней вообще без пропуска — опубликованные
+// ресурсы Диск отдаёт всем. Файл из папки приложения публиковать можно:
+// cloud_api:disk.app_folder прямо указана среди прав метода publish.
+//
+// Ссылка открыта каждому, кто её знает, поэтому публикует человек кнопкой,
+// а не программа сама, и снять публикацию можно там же. Дорога односторонняя:
+// по ссылке копию читают, но не пишут — записи нужен пропуск владельца.
+//
 // Пропуск передаётся аргументом и здесь не хранится: хранение — дело настроек,
 // а решение отдать пропуск в сеть — дело вызывающего.
 //
@@ -32,6 +44,15 @@ import { Logger } from '../utils/logger'
 /** Ресурсы Диска: и метаданные, и одноразовые адреса тел живут здесь. */
 const API = 'https://cloud-api.yandex.net/v1/disk/resources'
 
+/** Опубликованные ресурсы. Пропуск этим адресам не нужен и не передаётся. */
+const PUBLIC_API = 'https://cloud-api.yandex.net/v1/disk/public/resources'
+
+/**
+ * Начало публичной ссылки Диска. Нужно, чтобы принять от человека один хвост
+ * ссылки: на устройстве с пультом каждый лишний знак — лишняя минута.
+ */
+const SHARE_HOME = 'https://disk.yandex.ru'
+
 /**
  * Корень папки приложения. Полный путь до файла собирает core/cloud.ts:
  * имя файла копии — дело формата, а не провайдера.
@@ -42,12 +63,24 @@ export const DISK_APP_ROOT = 'app:'
 const LINK_TIMEOUT_MS = 20000
 const BODY_TIMEOUT_MS = 60000
 
+/**
+ * Поля метаданных, которые нам нужны. Список назван явно: без него Диск шлёт
+ * полный объект ресурса с превью, идентификаторами и правами, а нам хватает
+ * пяти полей. Тип запрашивается ради одной проверки — не папка ли по ссылке.
+ */
+const FILE_FIELDS = 'name,size,modified,type,public_url'
+
+/** Заголовки к публичным адресам: пропуска в них нет и быть не должно. */
+const PUBLIC_HEADERS: Record<string, string> = { Accept: 'application/json' }
+
 /** Что Диск знает о файле копии. Показывается человеку, программе не нужно. */
 export interface DiskFileInfo {
   name: string
   bytes: number
   /** Время правки в виде ISO 8601, как его отдал Диск, или null. */
   modified: string | null
+  /** Публичная ссылка на файл или null, если он не опубликован. */
+  share: string | null
 }
 
 /**
@@ -125,6 +158,24 @@ function problem(status: number, text: string, what: string): string {
 }
 
 /**
+ * То же для чтения по ссылке. Список отдельный, потому что советы другие:
+ * пропуска здесь нет вовсе, зато есть чужая ссылка, которую могли снять,
+ * и суточный предел Диска на скачивание опубликованного файла.
+ */
+function publicProblem(status: number, text: string, what: string): string {
+  const words = said(text)
+  const tail = words === '' ? '' : `: ${words}`
+
+  if (status === 404) return 'По этой ссылке ничего нет: проверьте её или опубликуйте копию заново'
+  if (status === 429) {
+    return 'Яндекс ограничил скачивание по этой ссылке: повторите позже или заберите копию пропуском'
+  }
+  if (status >= 500) return `Яндекс Диск ответил ошибкой ${status}: это на их стороне`
+
+  return `${what}: Яндекс Диск ответил ${status}${tail}`
+}
+
+/**
  * Сорванный запрос в человеческую фразу. Мост отклоняется только сетевым
  * отказом (см. BridgeHttpError в bridge/IBridge.ts), и различать нечего,
  * кроме молчания по таймауту: советы человеку в этих случаях разные.
@@ -137,10 +188,57 @@ function offline(e: unknown, what: string): string {
   return `${what}: запрос до Яндекс Диска не дошёл — проверьте сеть`
 }
 
+/** Тело ответа объектом. Разбор один на всех, кто спрашивает метаданные. */
+function bodyOf(text: string, what: string): DiskResult<Record<string, unknown>> {
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return { ok: false, problem: `${what}: Яндекс Диск ответил не по форме` }
+  }
+
+  if (typeof raw !== 'object' || raw === null) {
+    return { ok: false, problem: `${what}: Яндекс Диск ответил не по форме` }
+  }
+
+  return { ok: true, value: raw as Record<string, unknown> }
+}
+
 /**
- * Одноразовый адрес для тела файла. Диск отвечает объектом Link, и шаблонный
- * адрес мы честно отклоняем: подставлять значения в скобки здесь нечем,
- * а тихо отправить копию по недостроенному адресу хуже отказа.
+ * Адрес тела из ответа-ссылки. Шаблонный адрес мы честно отклоняем:
+ * подставлять значения в скобки здесь нечем, а тихо отправить копию
+ * по недостроенному адресу хуже отказа.
+ */
+function hrefOf(text: string, what: string): DiskResult<string> {
+  const body = bodyOf(text, what)
+  if (!body.ok) return body
+
+  const link = body.value as { href?: unknown; templated?: unknown }
+  if (link.templated === true) {
+    return { ok: false, problem: `${what}: Диск прислал шаблон адреса вместо адреса` }
+  }
+  if (typeof link.href !== 'string' || link.href === '') {
+    return { ok: false, problem: `${what}: Диск не прислал адрес файла` }
+  }
+
+  return { ok: true, value: link.href }
+}
+
+/** Сведения о ресурсе из его метаданных. */
+function fileOf(item: Record<string, unknown>): DiskFileInfo {
+  const share = item.public_url
+
+  return {
+    name: typeof item.name === 'string' ? item.name : '',
+    bytes: typeof item.size === 'number' ? item.size : 0,
+    modified: typeof item.modified === 'string' ? item.modified : null,
+    share: typeof share === 'string' && share !== '' ? share : null,
+  }
+}
+
+/**
+ * Одноразовый адрес для тела файла. Диск отвечает объектом Link, и разбирает
+ * его hrefOf — тот же разбор нужен и публичному чтению.
  */
 async function linkFor(
   token: string,
@@ -161,26 +259,7 @@ async function linkFor(
 
     if (!res.ok) return { ok: false, problem: problem(res.status, res.text, what) }
 
-    let raw: unknown
-    try {
-      raw = JSON.parse(res.text)
-    } catch {
-      return { ok: false, problem: `${what}: Яндекс Диск ответил не по форме` }
-    }
-
-    if (typeof raw !== 'object' || raw === null) {
-      return { ok: false, problem: `${what}: Яндекс Диск ответил не по форме` }
-    }
-
-    const link = raw as { href?: unknown; templated?: unknown }
-    if (link.templated === true) {
-      return { ok: false, problem: `${what}: Диск прислал шаблон адреса вместо адреса` }
-    }
-    if (typeof link.href !== 'string' || link.href === '') {
-      return { ok: false, problem: `${what}: Диск не прислал адрес файла` }
-    }
-
-    return { ok: true, value: link.href }
+    return hrefOf(res.text, what)
   } catch (e) {
     Logger('WARN', `Яндекс Диск: адрес для ${kind} не получен`, e)
     return { ok: false, problem: offline(e, what) }
@@ -237,7 +316,7 @@ export async function statFile(
 
   try {
     const res = await Bridge.http.request({
-      url: `${API}?path=${diskPath(path)}&fields=name,size,modified,type`,
+      url: `${API}?path=${diskPath(path)}&fields=${FILE_FIELDS}`,
       headers: headers(token),
       timeoutMs: LINK_TIMEOUT_MS,
       credentials: 'omit',
@@ -246,27 +325,10 @@ export async function statFile(
     if (res.status === 404) return { ok: true, value: null }
     if (!res.ok) return { ok: false, problem: problem(res.status, res.text, what) }
 
-    let raw: unknown
-    try {
-      raw = JSON.parse(res.text)
-    } catch {
-      return { ok: false, problem: `${what}: Яндекс Диск ответил не по форме` }
-    }
+    const body = bodyOf(res.text, what)
+    if (!body.ok) return body
 
-    if (typeof raw !== 'object' || raw === null) {
-      return { ok: false, problem: `${what}: Яндекс Диск ответил не по форме` }
-    }
-
-    const item = raw as { name?: unknown; size?: unknown; modified?: unknown; type?: unknown }
-
-    return {
-      ok: true,
-      value: {
-        name: typeof item.name === 'string' ? item.name : '',
-        bytes: typeof item.size === 'number' ? item.size : 0,
-        modified: typeof item.modified === 'string' ? item.modified : null,
-      },
-    }
+    return { ok: true, value: fileOf(body.value) }
   } catch (e) {
     Logger('WARN', 'Яндекс Диск: сведения о файле не получены', e)
     return { ok: false, problem: offline(e, what) }
@@ -337,6 +399,193 @@ export async function downloadText(token: string, path: string): Promise<DiskRes
     return { ok: true, value: res.text }
   } catch (e) {
     Logger('WARN', 'Яндекс Диск: тело копии не пришло', e)
+    return { ok: false, problem: offline(e, what) }
+  }
+}
+
+/**
+ * Публикует копию и возвращает ссылку на неё.
+ *
+ * Метод publish отвечает адресом самого ресурса, а не публичной ссылкой:
+ * public_url появляется в метаданных файла, за ними и идёт второй запрос.
+ * Повторная публикация уже опубликованного файла законна и просто вернёт
+ * ту же ссылку — на этом держится кнопка «Показать ссылку» без оглядки
+ * на то, публиковали копию раньше или нет.
+ */
+export async function shareFile(token: string, path: string): Promise<DiskResult<string>> {
+  const what = 'Публикация копии'
+
+  try {
+    const res = await Bridge.http.request({
+      method: 'PUT',
+      url: `${API}/publish?path=${diskPath(path)}`,
+      headers: headers(token),
+      timeoutMs: LINK_TIMEOUT_MS,
+      credentials: 'omit',
+    })
+
+    if (!res.ok) return { ok: false, problem: problem(res.status, res.text, what) }
+  } catch (e) {
+    Logger('WARN', 'Яндекс Диск: публикация не удалась', e)
+    return { ok: false, problem: offline(e, what) }
+  }
+
+  const info = await statFile(token, path)
+  if (!info.ok) return info
+  if (info.value === null) return { ok: false, problem: `${what}: копии на Диске нет` }
+  if (info.value.share === null) {
+    return { ok: false, problem: `${what}: Диск не прислал ссылку на файл` }
+  }
+
+  Logger('API', `Яндекс Диск: копия опубликована (${info.value.share})`)
+  return { ok: true, value: info.value.share }
+}
+
+/**
+ * Снимает публикацию. Сам файл остаётся на месте: закрывается только доступ
+ * по ссылке, и старая ссылка после этого не работает даже у того, кто её знал.
+ */
+export async function unshareFile(token: string, path: string): Promise<DiskResult<true>> {
+  const what = 'Закрытие ссылки'
+
+  try {
+    const res = await Bridge.http.request({
+      method: 'PUT',
+      url: `${API}/unpublish?path=${diskPath(path)}`,
+      headers: headers(token),
+      timeoutMs: LINK_TIMEOUT_MS,
+      credentials: 'omit',
+    })
+
+    if (!res.ok) return { ok: false, problem: problem(res.status, res.text, what) }
+
+    Logger('API', 'Яндекс Диск: копия снята с публикации')
+    return { ok: true, value: true }
+  } catch (e) {
+    Logger('WARN', 'Яндекс Диск: снять публикацию не удалось', e)
+    return { ok: false, problem: offline(e, what) }
+  }
+}
+
+/**
+ * Что пробовать в качестве ключа публикации из того, что ввёл человек.
+ *
+ * Ключом Диск считает и саму ссылку целиком, поэтому полный адрес уходит как
+ * есть. Но на устройстве с пультом набирать «https://disk.yandex.ru/i/» —
+ * это тридцать знаков ни за что, и один хвост ссылки принимается тоже.
+ *
+ * Хвост без буквы неоднозначен: у файла ссылка вида /i/, у папки — /d/,
+ * и какая именно была, человек не помнит. Поэтому вариантов два, и первым
+ * идёт файл: копия — это файл, а папка тут случай редкий.
+ */
+export function shareKeys(text: string): string[] {
+  const line = text.trim()
+  if (line === '') return []
+
+  if (/^https?:\/\//i.test(line)) return [line]
+
+  const tail = line.replace(/^\/+/, '')
+  if (/^[id]\//i.test(tail)) return [`${SHARE_HOME}/${tail}`]
+
+  return [`${SHARE_HOME}/i/${tail}`, `${SHARE_HOME}/d/${tail}`]
+}
+
+/**
+ * Сведения о копии по ссылке — и заодно проверка самой ссылки. Пропуска нет:
+ * опубликованный ресурс Диск показывает любому.
+ *
+ * Возвращается и подошедший ключ: перебор вариантов дело этого места,
+ * и повторять его при чтении тела незачем.
+ */
+export async function publicInfo(
+  link: string,
+): Promise<DiskResult<{ key: string; file: DiskFileInfo }>> {
+  const what = 'Сведения о копии по ссылке'
+
+  const keys = shareKeys(link)
+  if (keys.length === 0) return { ok: false, problem: 'Ссылка не введена' }
+
+  let last = 'По этой ссылке ничего нет'
+
+  for (const key of keys) {
+    try {
+      const res = await Bridge.http.request({
+        url: `${PUBLIC_API}?public_key=${encodeURIComponent(key)}&fields=${FILE_FIELDS}`,
+        headers: PUBLIC_HEADERS,
+        timeoutMs: LINK_TIMEOUT_MS,
+        credentials: 'omit',
+      })
+
+      // Не подошёл вид ссылки — пробуем следующий, а не сдаёмся: об отказе
+      // говорим только когда кончились все варианты.
+      if (res.status === 404) {
+        last = publicProblem(404, res.text, what)
+        continue
+      }
+
+      if (!res.ok) return { ok: false, problem: publicProblem(res.status, res.text, what) }
+
+      const body = bodyOf(res.text, what)
+      if (!body.ok) return body
+
+      if (body.value.type === 'dir') {
+        return { ok: false, problem: 'По ссылке лежит папка, а не файл копии' }
+      }
+
+      Logger('API', `Яндекс Диск: копия по ссылке найдена (${key})`)
+      return { ok: true, value: { key, file: fileOf(body.value) } }
+    } catch (e) {
+      Logger('WARN', 'Яндекс Диск: сведения по ссылке не получены', e)
+      return { ok: false, problem: offline(e, what) }
+    }
+  }
+
+  return { ok: false, problem: last }
+}
+
+/**
+ * Забирает текст копии по ключу публикации. Два шага, как и у обычного чтения,
+ * но пропуск не нужен ни на одном: и адрес тела, и само тело Диск отдаёт по
+ * ключу. Ключ берётся из publicInfo — там он уже проверен.
+ */
+export async function downloadPublic(key: string): Promise<DiskResult<string>> {
+  const what = 'Чтение копии по ссылке'
+
+  let href = ''
+
+  try {
+    const res = await Bridge.http.request({
+      url: `${PUBLIC_API}/download?public_key=${encodeURIComponent(key)}`,
+      headers: PUBLIC_HEADERS,
+      timeoutMs: LINK_TIMEOUT_MS,
+      credentials: 'omit',
+    })
+
+    if (!res.ok) return { ok: false, problem: publicProblem(res.status, res.text, what) }
+
+    const link = hrefOf(res.text, what)
+    if (!link.ok) return link
+
+    href = link.value
+  } catch (e) {
+    Logger('WARN', 'Яндекс Диск: адрес копии по ссылке не получен', e)
+    return { ok: false, problem: offline(e, what) }
+  }
+
+  try {
+    const res = await Bridge.http.request({
+      url: href,
+      headers: PUBLIC_HEADERS,
+      timeoutMs: BODY_TIMEOUT_MS,
+      credentials: 'omit',
+    })
+
+    if (!res.ok) return { ok: false, problem: publicProblem(res.status, res.text, what) }
+
+    Logger('API', `Яндекс Диск: копия прочитана по ссылке (${res.text.length} знаков)`)
+    return { ok: true, value: res.text }
+  } catch (e) {
+    Logger('WARN', 'Яндекс Диск: тело копии по ссылке не пришло', e)
     return { ok: false, problem: offline(e, what) }
   }
 }
