@@ -7,6 +7,7 @@
 import { computed, nextTick, ref, type ComputedRef, type Ref } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
+import { setupVideoSources } from '@/api/video-sources'
 import { Bridge } from '@/bridge'
 import { hiddenCount, keepAllowed } from '@/core/adult'
 import { editEntry, getEntry, type EntryLook } from '@/core/collection'
@@ -18,6 +19,13 @@ import {
   prefetchRussianNames,
   type RussianTitle,
 } from '@/core/media-title'
+import {
+  peekPlayable,
+  primePlayable,
+  warmPlayable,
+  type PlayAsk,
+  type PlayState,
+} from '@/core/playable'
 import { getTitleRatings, type TitleRatings } from '@/core/ratings'
 import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
@@ -25,6 +33,14 @@ import { Logger } from '@/utils/logger'
 import { formatWord, statusWord } from '../labels'
 import { mediaLinks, type MediaLink } from '../media-links'
 import { navigate } from '../router'
+
+/**
+ * Скольким частям франшизы добирать метку доступности сетью. Со склада
+ * поднимается вся полка даром, а в сеть идёт только начало: часть стоит
+ * вопроса к каждому источнику, а у долгоиграющего дерева частей бывает
+ * и три десятка. Остальные ответят со склада, когда их однажды спросят.
+ */
+const PLAY_DEPTH = 8
 
 /** Оценка площадки для героя. */
 export interface Rating {
@@ -76,6 +92,7 @@ export interface MediaCardView {
   franchiseName: (work: FranchiseWork) => string
   franchiseStatus: (work: FranchiseWork) => string | null
   franchiseHint: (work: FranchiseWork) => string
+  franchisePlay: (work: FranchiseWork) => PlayState | null
   openFranchiseWork: (work: FranchiseWork) => void
   openStudio: (studioId: number) => void
   onOpen: (url: string) => void
@@ -123,7 +140,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   /** Литографии студий с Шикимори: подставляются в чипы по готовности. */
   const logos = ref<Map<string, string> | null>(null)
 
-  /** Оценки Шикимори и MAL: доход отдельный от русской карточки тайтла. */
+  /** Оценки Шикимори и MAL: доход отдельный от русской карточки. */
   const platformRatings = ref<TitleRatings | null>(null)
 
   /** Хронология франшизы: null — дерева нет или оно не приехало. */
@@ -131,6 +148,9 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   /** Счётчик добора русских имён франшизы: заставляет пересчитать строки. */
   const franchiseStamp = ref(0)
+
+  /** Счётчик добора меток доступности: память ответов вне реактивности. */
+  const playStamp = ref(0)
 
   /** Счётчик добора имени из датасета: заставляет пересчитать заголовок. */
   const nameStamp = ref(0)
@@ -400,6 +420,52 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     )
   })
 
+  /**
+   * Метки доступности частям франшизы. Сначала склад — он отвечает даром
+   * и разом по всей полке, — и только потом сеть, и то первым частям.
+   *
+   * Полка франшизы — то место, где метка полезнее всего: человек смотрит
+   * на дерево именно чтобы решить, что смотреть дальше.
+   */
+  async function warmFranchisePlay(
+    mine: number,
+    works: readonly FranchiseWork[],
+    ids: readonly number[],
+  ): Promise<void> {
+    const primed = await primePlayable(ids)
+    if (mine !== run) return
+    if (primed > 0) playStamp.value += 1
+
+    const asks: PlayAsk[] = []
+
+    for (const work of works) {
+      if (asks.length >= PLAY_DEPTH) break
+
+      const id = work.mediaId
+      if (id === null || work.type === 'MANGA') continue
+      if (peekPlayable(id) !== null) continue
+
+      const names = [...new Set([work.name, peekRussianName(id) ?? ''])]
+
+      asks.push({
+        mediaId: id,
+        malId: work.malId,
+        titles: names.filter((name) => name !== ''),
+        year: typeof work.year === 'number' ? work.year : undefined,
+      })
+    }
+
+    if (asks.length === 0) return
+
+    // Реестр источников собирает слой api: ядро своих поставщиков не зовёт.
+    setupVideoSources()
+
+    await warmPlayable(asks)
+    if (mine !== run) return
+
+    playStamp.value += 1
+  }
+
   /** Дерево франшизы: склад или сеть, затем русские имена частей фоном. */
   async function beginFranchise(mine: number, id: number, found: MediaCard): Promise<void> {
     const works = await fetchFranchise(id, found.malId)
@@ -418,7 +484,12 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     if (ids.length === 0) return
 
     await prefetchRussianNames(ids)
-    if (mine === run) franchiseStamp.value += 1
+    if (mine !== run) return
+
+    franchiseStamp.value += 1
+
+    // Метки доступности — после имён: имя важнее, без него часть не узнать.
+    await warmFranchisePlay(mine, works, ids)
   }
 
   /** Забирает подробности и русскую карточку. Фоновые доборы её не ждут. */
@@ -537,6 +608,15 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     return work.kind === null ? work.name : `${work.name} · ${work.kind}`
   }
 
+  /**
+   * Есть ли часть у источников видео. Счётчик в зависимостях не случаен:
+   * память ответов живёт вне реактивности Vue и пересчёт сама не закажет.
+   */
+  function franchisePlay(work: FranchiseWork): PlayState | null {
+    void playStamp.value
+    return work.mediaId === null ? null : peekPlayable(work.mediaId)
+  }
+
   /** Переход на карточку части франшизы: текущая и несопоставленная не ведут. */
   function openFranchiseWork(work: FranchiseWork): void {
     if (work.mediaId === null || work.mediaId === mediaId.value) return
@@ -620,6 +700,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     franchiseName,
     franchiseStatus,
     franchiseHint,
+    franchisePlay,
     openFranchiseWork,
     openStudio,
     onOpen,
