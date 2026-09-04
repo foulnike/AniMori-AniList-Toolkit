@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Плитка тайтла: постер, название и метки поверх картинки.
-// Одна на списки, поиск и полки главной: вид тайтла везде один.
+// Плитка аниме: постер, название и метки поверх картинки.
+// Одна на списки, поиск и полки главной: вид аниме везде один.
 // Своих данных не добывает: сотня плиток ушла бы в сеть сотню раз.
 // Метка доступности приходит готовой из core/playable по той же причине:
 // спрашивать источники сама плитка не вправе.
@@ -15,6 +15,12 @@
 // Клавиатурный случай — :has(:focus-visible), а не :focus-within: последний срабатывал
 // бы и на обычном нажатии мышью, оставляя постер приподнятым после ухода
 // курсора.
+//
+// ПРАВКА ЗАПИСИ — В ПРАВОМ УГЛУ, КРЕСТИК — В ЛЕВОМ
+// Две кнопки разведены по углам сознательно и вместе не встречаются:
+// крестик — только в витрине главной, правка — только в своих списках.
+// На время наведения оценка каталога и точка идущего сезона уступают
+// правке место точно так же, как метки слева уступают крестику.
 import { computed, ref, watch } from 'vue'
 
 import type { PlayState } from '@/core/playable'
@@ -41,7 +47,7 @@ interface Props {
   ongoing?: boolean
   /** Ни одной части ещё не вышло: метка анонса. */
   soon?: boolean
-  /** Есть ли тайтл у источников видео. null — ещё не спрашивали, и метки не будет. */
+  /** Есть ли аниме у источников видео. null — ещё не спрашивали, и метки не будет. */
   play?: PlayState | null
   /** Свой счёт частей строкой вида «7 / 12». */
   own?: string | null
@@ -50,6 +56,8 @@ interface Props {
   adult?: boolean
   /** Крестик «не интересует» поверх постера: только для плиток витрины. */
   hidable?: boolean
+  /** Кнопка правки записи: только там, где запись уже есть. */
+  editable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -67,9 +75,10 @@ const props = withDefaults(defineProps<Props>(), {
   done: 0,
   adult: false,
   hidable: false,
+  editable: false,
 })
 
-const emit = defineEmits<{ (e: 'open'): void; (e: 'hide'): void }>()
+const emit = defineEmits<{ (e: 'open'): void; (e: 'hide'): void; (e: 'edit'): void }>()
 
 const imageFailed = ref(false)
 
@@ -85,7 +94,7 @@ const artStyle = computed(() => ({
   background: props.color ?? 'linear-gradient(160deg, var(--am-panel-2), var(--am-bg-2))',
 }))
 
-/** Первая буква названия — для тайтла без обложки. */
+/** Первая буква названия — для аниме без обложки. */
 const letter = computed(() => props.title.trim().charAt(0).toUpperCase() || '?')
 
 /** Ширина полосы счёта. За края шкалы не выходим даже при чужом странном счёте. */
@@ -99,11 +108,11 @@ const repeatHint = computed(() => `Повторных проходов: ${props.
 
 /**
  * Метка доступности. У анонса её нет вовсе: там смотреть нечего по самой
- * природе тайтла, и об этом уже сказано меткой анонса. Две метки об одном
+ * природе аниме, и об этом уже сказано меткой анонса. Две метки об одном
  * рядом читались бы как спор.
  *
  * Сидит она в правом нижнем углу постера, а не среди меток слева: там
- * говорят о самом тайтле, а доступность — про наш плеер, и её место рядом
+ * говорят о самом аниме, а доступность — про наш плеер, и её место рядом
  * с кнопкой просмотра, а не рядом с оценкой.
  */
 const playMark = computed<PlayState | null>(() => (props.soon ? null : props.play))
@@ -125,7 +134,7 @@ const hasTags = computed(
 </script>
 
 <template>
-  <li class="am-tile" :class="{ 'am-tile--hidable': hidable }">
+  <li class="am-tile" :class="{ 'am-tile--hidable': hidable, 'am-tile--edit': editable }">
     <button v-tip="title" class="am-tile__hit" type="button" @click="emit('open')">
       <span class="am-tile__art" :style="artStyle">
         <img
@@ -206,6 +215,25 @@ const hasTags = computed(
     >
       <SakuraBloom />
       <span class="am-tile__hide-sign" aria-hidden="true">✕</span>
+    </button>
+
+    <!-- Знак ползунков, а не карандаш: правятся параметры записи —
+         закладка, оценка, счёт серий, — а не текст. Карандаш занят знаком
+         своего комментария в метках слева. -->
+    <button
+      v-if="editable"
+      v-tip="'Изменить запись'"
+      class="am-tile__edit"
+      type="button"
+      aria-label="Изменить запись"
+      @click="emit('edit')"
+    >
+      <SakuraBloom />
+      <svg class="am-tile__edit-sign" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M2.2 5.4h6.1M11.3 5.4h2.5M2.2 10.6h2.5M7.6 10.6h6.2" />
+        <circle cx="9.8" cy="5.4" r="1.7" />
+        <circle cx="6.1" cy="10.6" r="1.7" />
+      </svg>
     </button>
   </li>
 </template>
@@ -363,7 +391,7 @@ const hasTags = computed(
 }
 
 /* Метка анонса: единственная цветная в ряду, и только потому, что говорит
-   о тайтле главное: смотреть пока нечего. */
+   об аниме главное: смотреть пока нечего. */
 .am-tile__tag--soon {
   color: var(--am-on-art);
   background: color-mix(in srgb, var(--am-accent) 58%, transparent);
@@ -413,6 +441,9 @@ const hasTags = computed(
   border: 1px solid color-mix(in srgb, var(--am-warn) 30%, transparent);
   border-radius: var(--am-r-cap);
   backdrop-filter: blur(8px);
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
 }
 
 /* Идущий сезон — одна точка в углу: надпись шумела бы на всю сетку. */
@@ -426,6 +457,9 @@ const hasTags = computed(
   border-radius: var(--am-r-cap);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--am-good) 22%, transparent);
   animation: am-pulse 2.6s var(--am-ease-soft) infinite;
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
 }
 
 @keyframes am-pulse {
@@ -441,6 +475,17 @@ const hasTags = computed(
 /* Если в том же углу оценка каталога, точка садится под неё. */
 .am-tile__live--low {
   top: 36px;
+}
+
+/* Правка стоит в том же правом углу, что оценка каталога и точка
+   идущего сезона, и на время наведения те уступают ей место —
+   зеркально тому, как метки слева уступают крестику витрины. */
+.am-tile--edit:hover .am-tile__score,
+.am-tile--edit:has(:focus-visible) .am-tile__score,
+.am-tile--edit:hover .am-tile__live,
+.am-tile--edit:has(:focus-visible) .am-tile__live {
+  opacity: 0;
+  transform: translateX(6px);
 }
 
 .am-tile__own {
@@ -466,7 +511,7 @@ const hasTags = computed(
 
 /* Метка доступности: маленький Play в правом нижнем углу. Слов нет вовсе:
    треугольник понятен без подписи, а пилюля «Есть видео» отнимала бы
-   половину верхнего ряда у меток о самом тайтле.
+   половину верхнего ряда у меток о самом аниме.
 
    ОПРАВЫ НЕТ НАРОЧНО
    Раньше здесь сидела стеклянная монета с акцентным градиентом, оправой
@@ -522,7 +567,7 @@ const hasTags = computed(
 }
 
 /* «Нет в каталоге»: тот же знак, только погашенный и перечёркнутый. Это
-   отсутствие в нашем плеере, а не свойство тайтла: красным здесь кричать
+   отсутствие в нашем плеере, а не свойство аниме: красным здесь кричать
    не о чем, и в ряду плиток такая метка обязана молчать — оттого у неё нет
    ни акцентного ореола, ни роста под курсором. */
 .am-tile__play--none {
@@ -589,7 +634,7 @@ const hasTags = computed(
 
 /* Крестик «не интересует»: виден под курсором и фокусом, а не всегда.
    Сидит слева: в правом углу он закрывал оценку каталога и точку
-   идущего сезона — ровно то, по чему выбирают тайтл в витрине.
+   идущего сезона — ровно то, по чему выбирают аниме в витрине.
    Показ идёт прозрачностью, а не переключением display: с none на inline-flex
    браузер успевал показать символ по базовой линии — крестик сидел
    на полпикселя ниже центра.
@@ -670,6 +715,88 @@ const hasTags = computed(
   transform: translateY(-1px);
 }
 
+/* Правка записи собрана тем же способом, что крестик витрины, только
+   в другом углу и с другой точкой роста: кнопка вырастает из верхнего
+   правого угла постера. Всё прочее — отсутствие своей формы, цветок под
+   знаком, расширенная цель нажатия — взято оттуда же без изменений. */
+.am-tile__edit {
+  --am-bloom-deep: var(--am-art-deep);
+  --am-bloom-petal: color-mix(in srgb, var(--am-sakura) 34%, var(--am-art-deep));
+  --am-bloom-out: 2px;
+
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: var(--am-on-art);
+  visibility: hidden;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--am-r-cap);
+  opacity: 0;
+  transform: translate(4px, -4px) scale(0.84);
+  transform-origin: top right;
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    visibility var(--am-fast) var(--am-ease),
+    color var(--am-fast) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
+}
+
+.am-tile__edit::before {
+  position: absolute;
+  inset: -8px;
+  content: '';
+}
+
+.am-tile:hover .am-tile__edit,
+.am-tile:has(:focus-visible) .am-tile__edit {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+}
+
+/* Знак поверх цветка — та же причина, что у крестика. Обводка рисуется
+   цветом текста: оттенки знака тогда живут в одном правиле с кнопкой. */
+.am-tile__edit-sign {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-tile__edit:hover > .am-tile__edit-sign,
+.am-tile__edit:focus-visible > .am-tile__edit-sign {
+  transform: translateY(-1px);
+}
+
+/* Где курсора нет вовсе — правка видна сразу: навести пальцем нельзя,
+   а без кнопки правка со списка там была бы недоступна вовсе. Крестик
+   витрины сюда не входит нарочно: «не интересует» — действие редкое
+   и необратимое, и постоянный крестик на каждой плитке витрины
+   ловился бы пальцем случайно. */
+@media (hover: none) {
+  .am-tile__edit {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Спокойное движение: системная просьба сильнее наших красот. */
 @media (prefers-reduced-motion: reduce) {
   .am-tile:hover .am-tile__art,
@@ -678,18 +805,14 @@ const hasTags = computed(
   .am-tile:has(:focus-visible) .am-tile__play,
   .am-tile--hidable:hover .am-tile__tags,
   .am-tile--hidable:has(:focus-visible) .am-tile__tags,
+  .am-tile--edit:hover .am-tile__score,
+  .am-tile--edit:has(:focus-visible) .am-tile__score,
+  .am-tile--edit:hover .am-tile__live,
+  .am-tile--edit:has(:focus-visible) .am-tile__live,
   .am-tile__hide,
   .am-tile__hide:hover > .am-tile__hide-sign,
-  .am-tile__hide:focus-visible > .am-tile__hide-sign {
-    transform: none;
-  }
-
-  .am-tile:hover .am-tile__sheen {
-    transform: translateX(-130%);
-  }
-
-  .am-tile__live {
-    animation: none;
-  }
-}
-</style>
+  .am-tile__hide:focus-visible > .am-tile__hide-sign,
+  .am-tile__edit,
+  .am-tile__edit:hover > .am-tile__edit-sign,
+  .am-tile__edit:focus-visible > .am-tile__edit-sign {
+    transform
