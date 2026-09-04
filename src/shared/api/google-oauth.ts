@@ -61,14 +61,16 @@ export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
 const SCOPE_TRIES: readonly string[] = [`email profile ${GOOGLE_SCOPE}`, GOOGLE_SCOPE]
 
 /**
- * Подсказка на случай, когда не принята ни одна область. Своими словами
- * Google называет область, но не причину, а причина лежит не в коде: либо
- * клиент создан не того вида, либо Диск в проекте не включён.
+ * Подсказка на случай, когда не принята ни одна область. Google называет
+ * область, но не причину, а причин ровно три, и все три живут в консоли
+ * облака, а не в коде: вид клиента, включённый Диск и перечень областей
+ * на экране согласия. Слова Google к подсказке приписываются рядом:
+ * без них не видно, какую именно строку он забраковал.
  */
 const SCOPE_HINT =
-  'Google не принял область доступа. Проверьте в консоли облака две вещи: ' +
-  'вид клиента должен быть «Телевизоры и устройства с ограниченным вводом», ' +
-  'а Google Drive API — включён в том же проекте'
+  'Google не принял область доступа. Проверьте в консоли облака: вид клиента — ' +
+  '«Телевизоры и устройства с ограниченным вводом», Google Drive API включён ' +
+  'в том же проекте, а drive.appdata стоит в перечне областей на экране согласия'
 
 /** Шаги входа короткие: тел тут нет, только короткие ответы JSON. */
 const STEP_TIMEOUT_MS = 20000
@@ -242,7 +244,9 @@ async function post(
  *
  * Области перебираются по списку и только при отказе именно на область:
  * любая другая беда — не повод спрашивать снова, иначе одна и та же поломка
- * будет стучаться к Google дважды за каждый вход.
+ * будет стучаться к Google дважды за каждый вход. Последние слова Google
+ * запоминаются и приписываются к отказу: без них человеку виден только
+ * список того, что стоит проверить, но не то, на чём споткнулись.
  */
 export async function startDeviceLogin(client: string): Promise<GoogleResult<DeviceStart>> {
   const what = 'Начало входа в Google'
@@ -252,12 +256,15 @@ export async function startDeviceLogin(client: string): Promise<GoogleResult<Dev
   }
 
   try {
+    let last = ''
+
     for (const scope of SCOPE_TRIES) {
       const res = await post(DEVICE_URL, { client_id: client.trim(), scope })
 
       if (res.status < 200 || res.status > 299) {
         if (word(body(res.text), 'error') === 'invalid_scope') {
-          Logger('WARN', `Вход в Google: область «${scope}» не принята`, said(res.text))
+          last = said(res.text)
+          Logger('WARN', `Вход в Google: область «${scope}» не принята`, last)
           continue
         }
 
@@ -293,7 +300,9 @@ export async function startDeviceLogin(client: string): Promise<GoogleResult<Dev
     }
 
     Logger('WARN', 'Вход в Google: ни одна область доступа не принята')
-    return { ok: false, problem: `${what}: ${SCOPE_HINT}` }
+
+    const tail = last === '' ? '' : `. Google: ${last}`
+    return { ok: false, problem: `${what}: ${SCOPE_HINT}${tail}` }
   } catch (e) {
     Logger('WARN', 'Вход в Google: код для устройства не получен', e)
     return { ok: false, problem: offline(e, what) }
