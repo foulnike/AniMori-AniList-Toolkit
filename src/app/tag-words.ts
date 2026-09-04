@@ -14,6 +14,21 @@
 // Сервер отдаёт категорию видом «Theme-Sci Fi-Mecha». Знакомые разделы
 // переведены целиком, у незнакомого берётся последняя часть: в заголовке
 // группы «Mecha» лучше, чем «Theme-Sci Fi-Mecha».
+//
+// ВЫЧИТКА: КАНОН, А НЕ РАЗБОР АНГЛИЙСКОГО
+// Часть слов приехала из словаря калькой: «Watersports» значились «водными
+// играми», «Scat» — «скатом», «Arranged Marriage» — «браком по расчёту».
+// Правило вычитки одно: берётся то слово, которым эту вещь называют
+// по-русски, а не то, что получается разбором английского. Где русского
+// слова нет вовсе, остаётся прижившееся заимствование — «Ахегао»,
+// «Футанари», «Бондаж», — но не свежая транслитерация: «Фейшиал» и «Воре»
+// не значат по-русски ничего.
+//
+// ЯПОНСКИЕ СЛОВА ПИШУТСЯ КАК ПРИЖИЛИСЬ
+// «Цундере», «Яндере», «Накадаши», «Шимайдон» — не Поливанов, и это
+// не недосмотр. Словарь идёт за тем, как эти слова читают в сообществе,
+// а не за системой транслитерации: приводить их к «цундэрэ» значило бы
+// сделать чип неузнаваемым ради правила, которого здесь никто не ждёт.
 
 /** Разделы справочника. Ключи — как их отдаёт сервер, без причёсывания. */
 const GROUP_WORDS: Readonly<Record<string, string>> = {
@@ -47,7 +62,7 @@ const GROUP_WORDS: Readonly<Record<string, string>> = {
 /** Слова тэгов. Ключ — имя тэга у AniList, оно же уходит в запрос отбора. */
 const TAG_WORDS: Readonly<Record<string, string>> = {
   '4-koma': '4-кома',
-  Achromatic: 'Ахроматичность',
+  Achromatic: 'Чёрно-белое',
   'Achronological Order': 'Нехронологический порядок',
   Acrobatics: 'Акробатика',
   Acting: 'Актёрское мастерство',
@@ -73,12 +88,13 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   'Anti-Hero': 'Антигерой',
   Archery: 'Стрельба из лука',
   Aromantic: 'Аромантичность',
-  'Arranged Marriage': 'Брак по расчёту',
+  // Не «брак по расчёту»: тот про деньги, а этот про сговор семей.
+  'Arranged Marriage': 'Договорной брак',
   'Artificial Intelligence': 'Искусственный интеллект',
   Asexual: 'Асексуальность',
   Assassins: 'Убийцы',
   Astronomy: 'Астрономия',
-  Athletics: 'Атлетика',
+  Athletics: 'Лёгкая атлетика',
   'Augmented Reality': 'Дополненная реальность',
   Autobiographical: 'Автобиографичность',
   Aviation: 'Авиация',
@@ -119,15 +135,17 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   'Classic Literature': 'Классическая литература',
   'Classical Music': 'Классическая музыка',
   Clone: 'Клоны',
-  Coastal: 'Прибрежье',
+  Coastal: 'Побережье',
   Cohabitation: 'Сожительство',
   College: 'Колледж',
   'Coming of Age': 'Взросление',
   Conspiracy: 'Заговор',
-  'Cosmic Horror': 'Космические ужасы',
+  // «Космические ужасы» читались как хоррор в космосе, а это лавкрафтовский
+  // ужас перед непостижимым, и места действия он не называет вовсе.
+  'Cosmic Horror': 'Космический хоррор',
   Cosplay: 'Косплей',
   Cowboys: 'Ковбои',
-  'Creature Taming': 'Укрощение существ',
+  'Creature Taming': 'Приручение существ',
   Crime: 'Преступность',
   'Criminal Organization': 'Преступная организация',
   Crossdressing: 'Кроссдрессинг',
@@ -153,7 +171,7 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Dragons: 'Драконы',
   Drawing: 'Рисование',
   Drugs: 'Наркотики',
-  Dullahan: 'Дюллахан',
+  Dullahan: 'Дуллахан',
   Dungeon: 'Подземелье',
   Dystopian: 'Антиутопия',
   'E-Sports': 'Киберспорт',
@@ -167,7 +185,8 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Episodic: 'Эпизодичность',
   'Ero Guro': 'Эрогуро',
   Espionage: 'Шпионаж',
-  'Estranged Family': 'Разлучённая семья',
+  'Estranged Family': 'Отчуждённая семья',
+  Exiled: 'Изгнанник',
   Exorcism: 'Экзорцизм',
   Fairy: 'Феи',
   'Fairy Tale': 'Сказка',
@@ -212,10 +231,14 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Homeless: 'Бездомные',
   Horticulture: 'Садоводство',
   'Human Experimentation': 'Эксперименты над людьми',
-  'Ice Skating': 'Фигурное катание',
+  // Фигурное катание — только один из ледовых видов, а тэг общий: под ним
+  // идут и хоккей, и шорт-трек. Соседний «Ice Sports» — тоже общий.
+  'Ice Skating': 'Катание на коньках',
+  'Ice Sports': 'Ледовые виды спорта',
   Idol: 'Идолы',
-  'Indigenous Cultures': 'Коренные культуры',
+  'Indigenous Cultures': 'Культуры коренных народов',
   Inn: 'Гостиница',
+  Interspecies: 'Межвидовые отношения',
   Isekai: 'Исекай',
   Iyashikei: 'Иясикэй',
   'Jazz Music': 'Джаз',
@@ -233,8 +256,7 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   'Language Barrier': 'Языковой барьер',
   'LGBTQ+ Themes': 'ЛГБТК+',
   'Long Strip': 'Длинная полоса',
-  'Lost Civilization': 'Потерянная цивилизация',
-  'Love Triangle': 'Любовный треугольник',
+  'Lost Civilization': 'Затерянная цивилизация',
   Mafia: 'Мафия',
   Magic: 'Магия',
   Mahjong: 'Маджонг',
@@ -253,9 +275,11 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Mermaid: 'Русалки',
   Meta: 'Мета',
   'Metal Music': 'Метал',
+  // Ключ приходит со строчной буквой в «east» — так у AniList, не опечатка.
+  'Middle east': 'Ближний Восток',
   Military: 'Военное',
   'Mixed Gender Harem': 'Смешанный гарем',
-  'Mixed Media': 'Смешанные медиа',
+  'Mixed Media': 'Смешанная техника',
   Modeling: 'Модельный бизнес',
   'Monster Boy': 'Мальчик-монстр',
   'Monster Girl': 'Девочка-монстр',
@@ -278,7 +302,7 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Oiran: 'Ойран',
   'Ojou-sama': 'Одзё-сама',
   Orphan: 'Сироты',
-  'Otaku Culture': 'Отаку',
+  'Otaku Culture': 'Культура отаку',
   'Outdoor Activities': 'Активный отдых',
   Pandemic: 'Пандемия',
   Parenthood: 'Родительство',
@@ -316,7 +340,7 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Robots: 'Роботы',
   'Rock Music': 'Рок',
   Rotoscoping: 'Ротоскопирование',
-  'Royal Affairs': 'Королевские дела',
+  'Royal Affairs': 'Королевский двор',
   Rugby: 'Регби',
   Rural: 'Сельская местность',
   Samurai: 'Самураи',
@@ -328,6 +352,7 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Shapeshifting: 'Смена облика',
   Ships: 'Корабли',
   Shogi: 'Сёги',
+  'Short-Form Chapter': 'Короткие главы',
   Shoujo: 'Сёдзё',
   Shounen: 'Сёнэн',
   'Shrine Maiden': 'Мико',
@@ -405,17 +430,21 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   // Взрослое: раздел «Sexual Content» справочника. В меню отбора эти тэги
   // видны только при разрешённом показе взрослого, но слова нужны всегда:
   // тэг может лежать в отборе с прежних настроек.
+  //
+  // Регистр здесь ровный и клинический: рядом с «Куннилингусом»
+  // и «Иррумацией» разговорный «тройничок» читался чужой строкой.
   Ahegao: 'Ахегао',
   Amputation: 'Ампутация',
   'Anal Sex': 'Анальный секс',
   Armpits: 'Подмышки',
   Ashikoki: 'Асикоки',
-  Asphyxiation: 'Асфиксия',
+  Asphyxiation: 'Удушение',
   Bondage: 'Бондаж',
   Boobjob: 'Паизури',
-  'Cervix Penetration': 'Проникновение в матку',
+  // Cervix — шейка матки, а не сама матка: прежнее слово называло не то место.
+  'Cervix Penetration': 'Проникновение в шейку матки',
   Cheating: 'Измена',
-  Cumflation: 'Камфлейшн',
+  Cumflation: 'Раздувание от спермы',
   Cunnilingus: 'Куннилингус',
   Deepthroat: 'Глубокий минет',
   Defloration: 'Дефлорация',
@@ -423,17 +452,17 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   'Double Penetration': 'Двойное проникновение',
   'Erotic Piercings': 'Эротический пирсинг',
   Exhibitionism: 'Эксгибиционизм',
-  Facial: 'Фейшиал',
+  Facial: 'Камшот на лицо',
   Feet: 'Ступни',
-  Fellatio: 'Феллацио',
+  Fellatio: 'Фелляция',
   Femdom: 'Фемдом',
-  Fingering: 'Фингеринг',
+  Fingering: 'Стимуляция пальцами',
   Fisting: 'Фистинг',
   'Flat Chest': 'Плоская грудь',
   Futanari: 'Футанари',
   'Group Sex': 'Групповой секс',
   'Hair Pulling': 'Таскание за волосы',
-  Handjob: 'Хендджоб',
+  Handjob: 'Хэндджоб',
   'Human Pet': 'Человек-питомец',
   Hypersexuality: 'Гиперсексуальность',
   Incest: 'Инцест',
@@ -455,22 +484,27 @@ const TAG_WORDS: Readonly<Record<string, string>> = {
   Prostitution: 'Проституция',
   'Public Sex': 'Секс в общественном месте',
   Rape: 'Изнасилование',
-  Rimjob: 'Римминг',
+  Rimjob: 'Анилингус',
   Sadism: 'Садизм',
-  Scat: 'Скат',
-  Scissoring: 'Ножницы',
+  // «Скат» по-русски — рыба. Клиническое слово рядом с соседями по разделу
+  // не выделяется и понимается однозначно.
+  Scat: 'Копрофилия',
+  Scissoring: 'Трибадизм',
   'Sex Toys': 'Секс-игрушки',
   Shimaidon: 'Шимайдон',
+  'Sixty-nine': 'Поза 69',
   Squirting: 'Сквирт',
+  'Strap-on': 'Страпон',
   Sumata: 'Сумата',
   Swapping: 'Обмен партнёрами',
   Sweat: 'Пот',
   Tentacles: 'Тентакли',
-  Threesome: 'Тройничок',
+  Threesome: 'Секс втроём',
   Virginity: 'Девственность',
-  Vore: 'Воре',
+  Vore: 'Пожирание',
   Voyeur: 'Вуайеризм',
-  Watersports: 'Водные игры',
+  // Не «водные игры»: за этим словом стоит уролагния, а не бассейн.
+  Watersports: 'Уролагния',
   Zoophilia: 'Зоофилия',
 }
 
