@@ -80,6 +80,11 @@ function openPlayer(): void {
   if (mediaId.value > 0) navigate('player', { id: String(mediaId.value) })
 }
 
+/** Подсказка метки доступности. Слов на самой метке нет: там только знак. */
+function playHint(state: 'yes' | 'no' | null): string {
+  return state === 'yes' ? 'Можно посмотреть' : 'Нет в каталоге'
+}
+
 onMounted(() => {
   void load()
 })
@@ -288,9 +293,16 @@ watch(mediaId, () => {
                   </span>
                   <span class="am-part__year">{{ work.year ?? '···' }}</span>
                   <span class="am-part__name">{{ franchiseName(work) }}</span>
-                  <!-- Молчание метки — это «не спрашивали или не нашли», а не «нет»:
-                       на маленькой карточке честнее не рисовать ничего. -->
-                  <span v-if="franchisePlay(work) === 'yes'" class="am-part__play">Есть видео</span>
+                  <!-- Молчание метки — это «не спрашивали», а не «нет»: пока источники
+                       не высказались все, на карточке не рисуется ничего. -->
+                  <span
+                    v-if="franchisePlay(work) !== null"
+                    v-tip="playHint(franchisePlay(work))"
+                    class="am-part__play"
+                    :class="{ 'am-part__play--none': franchisePlay(work) === 'no' }"
+                    role="img"
+                    :aria-label="playHint(franchisePlay(work))"
+                  />
                   <span v-if="franchiseStatus(work)" class="am-part__status">
                     {{ franchiseStatus(work) }}
                   </span>
@@ -314,7 +326,14 @@ watch(mediaId, () => {
                   </span>
                   <span class="am-part__year">{{ work.year ?? '···' }}</span>
                   <span class="am-part__name">{{ franchiseName(work) }}</span>
-                  <span v-if="franchisePlay(work) === 'yes'" class="am-part__play">Есть видео</span>
+                  <span
+                    v-if="franchisePlay(work) !== null"
+                    v-tip="playHint(franchisePlay(work))"
+                    class="am-part__play"
+                    :class="{ 'am-part__play--none': franchisePlay(work) === 'no' }"
+                    role="img"
+                    :aria-label="playHint(franchisePlay(work))"
+                  />
                   <span v-if="work.mediaId === mediaId" class="am-part__here">вы здесь</span>
                   <span v-else-if="franchiseStatus(work)" class="am-part__status">
                     {{ franchiseStatus(work) }}
@@ -361,15 +380,43 @@ watch(mediaId, () => {
 <style scoped src="./media-screen.css"></style>
 
 <!-- Оформление карточки франшизы живёт в media-screen.css. Здесь только метка
-     доступности: одно правило рядом с разметкой, которая его завела. -->
+     доступности: несколько правил рядом с разметкой, которая их завела. -->
 <style scoped>
+/* Тот же знак, что на плитках, только мельче. Постер здесь — сама картинка,
+   а не слой с углами, поэтому знак стоит строкой под ней, а не поверх. */
 .am-part__play {
+  display: grid;
+  place-items: center;
   align-self: center;
-  padding: 1px 7px;
-  font-size: 10px;
-  font-weight: 600;
+  width: 16px;
+  height: 16px;
   color: var(--am-accent);
-  background: rgb(var(--am-accent-rgb) / 0.16);
-  border-radius: var(--am-r-cap);
+}
+
+/* clip-path, а не рамки: так треугольник остаётся ровно в центре своего
+   квадрата и поверх него можно положить перечёркивание. */
+.am-part__play::before {
+  grid-area: 1 / 1;
+  width: 9px;
+  height: 11px;
+  content: '';
+  background: currentcolor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* «Нет в каталоге»: тот же знак, но серый и перечёркнутый. Это отсутствие
+   в нашем плеере, а не свойство тайтла. */
+.am-part__play--none {
+  color: var(--am-dim);
+}
+
+.am-part__play--none::after {
+  grid-area: 1 / 1;
+  width: 17px;
+  height: 2px;
+  content: '';
+  background: currentcolor;
+  border-radius: 1px;
+  transform: rotate(-45deg);
 }
 </style>
