@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Пункт 3.4: карточка тайтла. Номер из адреса, подробности с сервера,
+// Пункт 3.4: карточка аниме. Номер из адреса, подробности с сервера,
 // а состояние списка — из памяти: там правда свежее чужого ответа.
 // Настройки записи живут в окне правки, отсюда оно только открывается.
 //
@@ -48,7 +48,6 @@ const {
   heroStyle,
   donePart,
   progressText,
-  drifted,
   about,
   aboutLinks,
   facts,
@@ -90,7 +89,7 @@ onMounted(() => {
 })
 
 // Переход с карточки на карточку не пересобирает экран: грузим сами.
-// Окно правки закрывается заодно: оно про запись прошлого тайтла.
+// Окно правки закрывается заодно: оно про запись прошлого аниме.
 watch(mediaId, () => {
   sheetOpen.value = false
   void load()
@@ -101,7 +100,7 @@ watch(mediaId, () => {
   <section class="am-page">
     <div v-if="mediaId === 0" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⊘</span>
-      <span>Тайтл не выбран: в адресе нет номера.</span>
+      <span>Аниме не выбрано: в адресе нет номера.</span>
       <span>Откройте карточку из списков или поиска.</span>
     </div>
 
@@ -242,13 +241,9 @@ watch(mediaId, () => {
                 </dl>
 
                 <p v-if="notes" class="am-mine__note">{{ notes }}</p>
-
-                <p v-if="drifted" class="am-mine__drift">
-                  Запись изменена здесь. На AniList она осталась прежней.
-                </p>
               </template>
 
-              <p v-else class="am-mine__none">Тайтла нет в ваших списках.</p>
+              <p v-else class="am-mine__none">Этого аниме нет в ваших списках.</p>
             </div>
 
             <div v-if="ratings.length > 0" class="am-panel am-rates">
@@ -409,7 +404,7 @@ watch(mediaId, () => {
 }
 
 /* «Нет в каталоге»: тот же знак, но серый и перечёркнутый. Это отсутствие
-   в нашем плеере, а не свойство тайтла. */
+   в нашем плеере, а не свойство аниме. */
 .am-part__play--none {
   color: var(--am-dim);
 }
