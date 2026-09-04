@@ -61,6 +61,7 @@ const {
   franchiseName,
   franchiseStatus,
   franchiseHint,
+  franchisePlay,
   openFranchiseWork,
   openStudio,
   onOpen,
@@ -287,6 +288,9 @@ watch(mediaId, () => {
                   </span>
                   <span class="am-part__year">{{ work.year ?? '···' }}</span>
                   <span class="am-part__name">{{ franchiseName(work) }}</span>
+                  <!-- Молчание метки — это «не спрашивали или не нашли», а не «нет»:
+                       на маленькой карточке честнее не рисовать ничего. -->
+                  <span v-if="franchisePlay(work) === 'yes'" class="am-part__play">Есть видео</span>
                   <span v-if="franchiseStatus(work)" class="am-part__status">
                     {{ franchiseStatus(work) }}
                   </span>
@@ -310,6 +314,7 @@ watch(mediaId, () => {
                   </span>
                   <span class="am-part__year">{{ work.year ?? '···' }}</span>
                   <span class="am-part__name">{{ franchiseName(work) }}</span>
+                  <span v-if="franchisePlay(work) === 'yes'" class="am-part__play">Есть видео</span>
                   <span v-if="work.mediaId === mediaId" class="am-part__here">вы здесь</span>
                   <span v-else-if="franchiseStatus(work)" class="am-part__status">
                     {{ franchiseStatus(work) }}
@@ -354,3 +359,17 @@ watch(mediaId, () => {
 </template>
 
 <style scoped src="./media-screen.css"></style>
+
+<!-- Оформление карточки франшизы живёт в media-screen.css. Здесь только метка
+     доступности: одно правило рядом с разметкой, которая его завела. -->
+<style scoped>
+.am-part__play {
+  align-self: center;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--am-accent);
+  background: rgb(var(--am-accent-rgb) / 0.16);
+  border-radius: var(--am-r-cap);
+}
+</style>
