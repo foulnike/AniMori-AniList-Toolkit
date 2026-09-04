@@ -35,6 +35,8 @@ import { tagChoices } from '@/core/recs'
 import { formatWord, GENRE_CHOICES, genreWord } from '../labels'
 import { tagGroupWord, tagWord } from '../tag-words'
 
+import SakuraBloom from './SakuraBloom.vue'
+
 const props = defineProps<{
   open: boolean
   pick: CatalogPick
@@ -396,7 +398,21 @@ onBeforeUnmount(() => {
           <h2 class="am-h2">Подбор</h2>
           <span v-if="count > 0" v-tip="'Условий в отборе'" class="am-sheet__num">{{ count }}</span>
           <span class="am-bar__gap" />
-          <button class="am-btn am-btn--ghost" type="button" @click="onClose">Закрыть</button>
+
+          <!-- Закрытие знаком, как в остальных окнах: слово «Закрыть» рядом
+               с «Готово» в подвале читалось как второе действие, хотя это
+               выход без применения. Имя кнопке даёт aria-label: знак спрятан
+               от чтецов, а подсказка живёт отдельным слоем в body. -->
+          <button
+            v-tip="'Закрыть'"
+            class="am-sheet__close"
+            type="button"
+            aria-label="Закрыть"
+            @click="onClose"
+          >
+            <SakuraBloom />
+            <span aria-hidden="true">×</span>
+          </button>
         </header>
 
         <div class="am-sheet__body">
@@ -698,6 +714,57 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* Цель нажатия в 44 пикселя. Своей одежды у кнопки нет: круг и распускающуюся
+   под курсором сакуру рисует вложенный слой, а сама кнопка остаётся
+   прямоугольной — при ней остаются и попадание курсора по всей цели,
+   и кольцо фокуса.
+
+   Оттенки цветка берутся от --am-hover: это тон приподнятого управления
+   в теме. Тень мелкая, --am-sh-1: шапка меню и так лежит своей подложкой,
+   и плотный провал под знаком был бы вторым слоем на ровном месте. */
+.am-sheet__close {
+  --am-bloom-deep: var(--am-hover);
+  --am-bloom-petal: color-mix(in srgb, var(--am-sakura) 30%, var(--am-hover));
+  --am-bloom-shade: var(--am-sh-1);
+
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--am-touch);
+  height: var(--am-touch);
+  padding: 0;
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  /* Ничего не красит: держит круглым только кольцо :focus-visible. */
+  border-radius: var(--am-r-cap);
+  transition: color var(--am-fast) var(--am-ease);
+}
+
+.am-sheet__close:hover,
+.am-sheet__close:focus-visible {
+  color: var(--am-text);
+}
+
+/* Знак поднят над цветком: тот лежит своим слоем, а по правилам рисования
+   слой накрывает обычное содержимое. Центровку держит place-items родителя. */
+.am-sheet__close > span {
+  position: relative;
+  display: block;
+  transition: transform var(--am-fast) var(--am-ease);
+}
+
+.am-sheet__close:hover > span,
+.am-sheet__close:focus-visible > span {
+  transform: translateY(-1px);
+}
+
 .am-sheet__body {
   display: flex;
   flex: 1 1 auto;
@@ -913,6 +980,11 @@ onBeforeUnmount(() => {
   .am-sheet__veil,
   .am-sheet__box {
     animation: none;
+  }
+
+  .am-sheet__close:hover > span,
+  .am-sheet__close:focus-visible > span {
+    transform: none;
   }
 
   .am-fold__arrow,
