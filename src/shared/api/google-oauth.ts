@@ -11,12 +11,21 @@
 // окна входа, никакого перехвата адреса возврата и никакого местного порта,
 // который на телевизоре всё равно не набрать.
 //
-// ОБЛАСТЬ РОВНО НА СВОЮ ПАПКУ
-// Просится одна drive.appdata — скрытая папка приложения, и больше ничего:
-// ни почты, ни имени, ни чужих файлов. Справочник Google разрешает входу
-// с устройства ровно две области Диска — appdata и file, — и первая как раз
-// наш случай: вторая даёт право на файлы, которые человек выбрал сам,
+// ОБЛАСТЬ РОВНО НА СВОЮ ПАПКУ, НО С ОПОЗНАНИЕМ
+// Из Диска просится одна drive.appdata — скрытая папка приложения, и больше
+// ничего: ни чужих файлов, ни перечисления Диска. Справочник Google разрешает
+// входу с устройства ровно две области Диска — appdata и file, — и первая как
+// раз наш случай: вторая даёт право на файлы, которые человек выбрал сам,
 // а нам нужен один служебный файл, который выбирать незачем.
+//
+// Рядом с ней приходится ставить email и profile. Это не сбор сведений,
+// а требование потока: к области любого API вход с устройства просит
+// добавлять опознание человека, и на одинокую drive.appdata Google отвечает
+// «Invalid device flow scope» — отказом на область, которую сам же разрешает.
+// Читать имя и почту всё равно нечем: опросник о человеке здесь не зовётся
+// ни разу, пропуск уходит только на Диск, и в настройках человеку
+// показывается именно папка. Если правило переменится обратно, вторая
+// попытка ниже спросит одну папку без опознания.
 //
 // КЛЮЧИ КЛИЕНТА ПЕРЕДАЮТСЯ АРГУМЕНТАМИ
 // Здесь не читаются ни настройки, ни хранилище — ровно как в клиенте Диска.
@@ -43,6 +52,23 @@ const REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
  * в настройках, чтобы было видно, что именно у него спросили.
  */
 export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
+
+/**
+ * Что просится у входа с устройства, по порядку. Сначала папка вместе
+ * с опознанием — так требует справочник, — а если и это не принято,
+ * одна папка: вдруг правило переменится обратно.
+ */
+const SCOPE_TRIES: readonly string[] = [`email profile ${GOOGLE_SCOPE}`, GOOGLE_SCOPE]
+
+/**
+ * Подсказка на случай, когда не принята ни одна область. Своими словами
+ * Google называет область, но не причину, а причина лежит не в коде: либо
+ * клиент создан не того вида, либо Диск в проекте не включён.
+ */
+const SCOPE_HINT =
+  'Google не принял область доступа. Проверьте в консоли облака две вещи: ' +
+  'вид клиента должен быть «Телевизоры и устройства с ограниченным вводом», ' +
+  'а Google Drive API — включён в том же проекте'
 
 /** Шаги входа короткие: тел тут нет, только короткие ответы JSON. */
 const STEP_TIMEOUT_MS = 20000
@@ -213,6 +239,10 @@ async function post(
 /**
  * Просит код для устройства. Первый шаг входа: после него на экране
  * появляются QR и короткий код, а программа начинает ждать.
+ *
+ * Области перебираются по списку и только при отказе именно на область:
+ * любая другая беда — не повод спрашивать снова, иначе одна и та же поломка
+ * будет стучаться к Google дважды за каждый вход.
  */
 export async function startDeviceLogin(client: string): Promise<GoogleResult<DeviceStart>> {
   const what = 'Начало входа в Google'
@@ -222,37 +252,48 @@ export async function startDeviceLogin(client: string): Promise<GoogleResult<Dev
   }
 
   try {
-    const res = await post(DEVICE_URL, { client_id: client.trim(), scope: GOOGLE_SCOPE })
-    if (res.status < 200 || res.status > 299) {
-      return { ok: false, problem: problem(res.status, res.text, what) }
+    for (const scope of SCOPE_TRIES) {
+      const res = await post(DEVICE_URL, { client_id: client.trim(), scope })
+
+      if (res.status < 200 || res.status > 299) {
+        if (word(body(res.text), 'error') === 'invalid_scope') {
+          Logger('WARN', `Вход в Google: область «${scope}» не принята`, said(res.text))
+          continue
+        }
+
+        return { ok: false, problem: problem(res.status, res.text, what) }
+      }
+
+      const at = body(res.text)
+      const deviceCode = word(at, 'device_code')
+      const userCode = word(at, 'user_code')
+      const verifyUrl = word(at, 'verification_url') || word(at, 'verification_uri')
+
+      if (deviceCode === '' || userCode === '' || verifyUrl === '') {
+        return { ok: false, problem: `${what}: Google ответил не по форме` }
+      }
+
+      const ready = word(at, 'verification_url_complete') || word(at, 'verification_uri_complete')
+      const seconds = count(at, 'expires_in', 1800)
+      const interval = count(at, 'interval', DEFAULT_INTERVAL_MS / 1000)
+
+      Logger('API', 'Вход в Google: код для устройства получен')
+
+      return {
+        ok: true,
+        value: {
+          deviceCode,
+          userCode,
+          verifyUrl,
+          verifyUrlWithCode: ready !== '' ? ready : withCode(verifyUrl, userCode),
+          expiresAt: Date.now() + seconds * 1000,
+          intervalMs: Math.max(interval * 1000, DEFAULT_INTERVAL_MS),
+        },
+      }
     }
 
-    const at = body(res.text)
-    const deviceCode = word(at, 'device_code')
-    const userCode = word(at, 'user_code')
-    const verifyUrl = word(at, 'verification_url') || word(at, 'verification_uri')
-
-    if (deviceCode === '' || userCode === '' || verifyUrl === '') {
-      return { ok: false, problem: `${what}: Google ответил не по форме` }
-    }
-
-    const ready = word(at, 'verification_url_complete') || word(at, 'verification_uri_complete')
-    const seconds = count(at, 'expires_in', 1800)
-    const interval = count(at, 'interval', DEFAULT_INTERVAL_MS / 1000)
-
-    Logger('API', 'Вход в Google: код для устройства получен')
-
-    return {
-      ok: true,
-      value: {
-        deviceCode,
-        userCode,
-        verifyUrl,
-        verifyUrlWithCode: ready !== '' ? ready : withCode(verifyUrl, userCode),
-        expiresAt: Date.now() + seconds * 1000,
-        intervalMs: Math.max(interval * 1000, DEFAULT_INTERVAL_MS),
-      },
-    }
+    Logger('WARN', 'Вход в Google: ни одна область доступа не принята')
+    return { ok: false, problem: `${what}: ${SCOPE_HINT}` }
   } catch (e) {
     Logger('WARN', 'Вход в Google: код для устройства не получен', e)
     return { ok: false, problem: offline(e, what) }
