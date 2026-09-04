@@ -24,11 +24,19 @@
 // экрану не нужна. И главное: ничего из этой сводки не попадает в файлы
 // выпуска датасета и попасть не должно — это подсказка на один запуск,
 // а не источник данных.
+//
+// ПРО ОПТОВЫЙ ВОПРОС. Метке доступности нужен один бит: есть ли вход к тайтлу.
+// Поштучно это запрос на плитку, то есть минута на полсотни плиток при нашем
+// же ограничителе темпа. Поэтому askPresence кладёт в один вопрос два десятка
+// номеров и не просит ни сезонов, ни серий, ни сводки. Поддержку перечня
+// служба нигде не обещает, поэтому она не берётся на веру, а проверяется
+// на живом ответе (см. kodikPresence).
 
 import { Bridge, type HttpResponse } from '@/bridge'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
 import type {
+  PresenceMap,
   VideoEpisode,
   VideoRequest,
   VideoSource,
@@ -59,6 +67,18 @@ const RETRY_DELAY_MS = 1500
 
 /** Сколько выборка озвучек живёт в памяти: за одно открытие её спросят трижды. */
 const VOICES_MEMORY_MS = 600000
+
+/** По скольку номеров уходит в один оптовый вопрос. */
+const PRESENCE_IDS = 20
+
+/** Сколько записей просим на странице оптового ответа: потолок службы. */
+const PRESENCE_LIMIT = 100
+
+/** Дальше этой страницы ответ не дочитываем: тогда «нет» просто не ставится. */
+const PRESENCE_PAGES = 3
+
+/** Сколько раз пробуем доказать перечень, прежде чем перейти на поштучный опрос. */
+const PRESENCE_TRIES = 3
 
 /** Перебор сдвига шифра: все варианты, кроме тождественного. */
 const SHIFTS: number[] = Array.from({ length: 25 }, (_, i) => i + 1)
@@ -106,6 +126,8 @@ interface KodikResult {
   id?: string | null
   type?: string | null
   link?: string | null
+  /** Номер Шикимори: по нему оптовый ответ раскладывается обратно по тайтлам. */
+  shikimori_id?: string | number | null
   translation?: KodikTranslation | null
   episodes_count?: number | null
   seasons?: Record<string, KodikSeason | null> | null
@@ -114,6 +136,8 @@ interface KodikResult {
 
 interface KodikSearchResponse {
   results?: KodikResult[] | null
+  /** Приезжает, когда записей больше запрошенного: готовый адрес следующей страницы. */
+  next_page?: string | null
 }
 
 /** Ответ /ftor: карта высота → список адресов, где нужен первый. */
@@ -156,6 +180,13 @@ interface KodikFound {
   material: KodikMaterial | null
 }
 
+/** Что дал один оптовый вопрос: какие номера нашлись и дочитан ли ответ. */
+interface KodikSeen {
+  found: Set<number>
+  /** Ответ дочитан до последней страницы. Нет — «нет» из него не следует. */
+  complete: boolean
+}
+
 /** Подписи и признаки со страницы серии — всё, что нужно для /ftor. */
 interface PageFields {
   d: string
@@ -174,6 +205,12 @@ const pendingFound = new Map<number, Promise<KodikFound>>()
 
 /** Удачный сдвиг прошлого разбора. Ноль — ещё ни разу не встречался. */
 let knownShift = 0
+
+/** Понимает ли служба перечень номеров. null — ещё не выяснено на живом ответе. */
+let manyIds: boolean | null = null
+
+/** Сколько раз перечень не подтвердился: после трёх переходим на поштучный опрос. */
+let manyTries = 0
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -581,6 +618,117 @@ async function loadVoices(shikimoriId: number): Promise<KodikVoiceRow[]> {
 }
 
 /**
+ * Один оптовый вопрос: какие из этих номеров служба вообще знает. Ни сезонов,
+ * ни серий, ни сводки — ответ короткий, и на сотню записей его хватает.
+ *
+ * null — служба не ответила вовсе: это молчание, а не «нет».
+ */
+async function askIds(ids: readonly number[]): Promise<KodikSeen | null> {
+  const found = new Set<number>()
+  const query = [
+    'token=' + TOKEN,
+    'shikimori_id=' + ids.join(','),
+    'limit=' + String(PRESENCE_LIMIT),
+  ].join('&')
+
+  let url = `${SEARCH_BASE}/search?${query}`
+  let answered = false
+
+  for (let page = 0; page < PRESENCE_PAGES && url !== ''; page += 1) {
+    const res = await send({ method: 'GET', url }, 'наличие')
+    if (res === null) return answered ? { found, complete: false } : null
+
+    answered = true
+
+    const body = parseJson<KodikSearchResponse>(res.text, 'наличие')
+    if (body === null) return { found, complete: false }
+
+    for (const item of body.results ?? []) {
+      const id = Number(item.shikimori_id)
+      if (Number.isFinite(id) && id > 0) found.add(id)
+    }
+
+    url = typeof body.next_page === 'string' ? body.next_page : ''
+  }
+
+  // Осталась непрочитанная страница: найденному верим, ненайденному — нет.
+  return { found, complete: url === '' }
+}
+
+/**
+ * Наличие входа сразу про многих. Ключ ответа — номер Шикимори; номера,
+ * про который служба не высказалась, в ответе просто нет.
+ *
+ * Перечень номеров в одном вопросе служба нигде не обещает, а ошибиться тут
+ * дорого: если перечень не понят и ответ пуст, поспешный вывод перечеркнул бы
+ * два десятка тайтлов разом. Поэтому «да» принимается всегда (запись с этим
+ * номером и есть вход), а «нет» — только после того, как перечень доказан
+ * живым ответом: пришло два разных номера или один, но не первый в списке.
+ * Пока не доказан, непришедшие номера переспрашиваются поштучно.
+ */
+export async function kodikPresence(ids: readonly number[]): Promise<Map<number, boolean>> {
+  const out = new Map<number, boolean>()
+  const queue = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))]
+  const singles: number[] = []
+
+  while (queue.length > 0) {
+    const chunk = queue.splice(0, manyIds === false ? 1 : PRESENCE_IDS)
+    const answer = await askIds(chunk)
+    if (answer === null) continue
+
+    for (const id of chunk) {
+      if (answer.found.has(id)) out.set(id, true)
+    }
+
+    const only = chunk.length === 1 ? chunk[0] : undefined
+    if (only !== undefined) {
+      if (answer.complete && !answer.found.has(only)) out.set(only, false)
+      continue
+    }
+
+    if (manyIds === null) {
+      const hits = chunk.filter((id) => answer.found.has(id))
+      const proven = hits.length > 1 || (hits.length === 1 && hits[0] !== chunk[0])
+
+      if (proven) {
+        manyIds = true
+        Logger('API', `Kodik: перечень номеров принят, спрашиваю по ${PRESENCE_IDS} за раз`)
+      } else {
+        manyTries += 1
+        if (manyTries >= PRESENCE_TRIES) {
+          manyIds = false
+          Logger('WARN', 'Kodik: перечень номеров не подтвердился, перехожу на поштучный опрос')
+        }
+
+        for (const id of chunk) {
+          if (!answer.found.has(id)) singles.push(id)
+        }
+        continue
+      }
+    }
+
+    if (!answer.complete) continue
+
+    for (const id of chunk) {
+      if (!out.has(id)) out.set(id, false)
+    }
+  }
+
+  // Остаток недоказанных пачек: по одному номеру за вопрос, зато без догадок.
+  for (const id of singles) {
+    if (out.has(id)) continue
+
+    const answer = await askIds([id])
+    if (answer === null) continue
+
+    if (answer.found.has(id)) out.set(id, true)
+    else if (answer.complete) out.set(id, false)
+  }
+
+  return out
+}
+
+/**
  * Сводка по тайтлу. Своих запросов не делает: либо отдаёт уже полученное,
  * либо тянет тот же поиск, что нужен для озвучек. Null — служба тайтл
  * не знает или material_data не заполнила; это не сбой.
@@ -666,6 +814,35 @@ export const kodikSource: VideoSource = {
     return rows.map((row) => ({ id: row.id, label: row.label, episodes: row.episodes.length }))
   },
 
+  /** Один запрос на два десятка тайтлов: подробности метке доступности не нужны. */
+  presenceCost: 'batch',
+
+  async askPresence(reqs: readonly VideoRequest[]): Promise<PresenceMap> {
+    // Номер Шикимори — единственный вход. Тайтл без него службе не адресуем:
+    // его отсутствие в ответе означало бы лишь то, что мы не смогли спросить.
+    const byShiki = new Map<number, number[]>()
+
+    for (const req of reqs) {
+      const id = req.shikimoriId
+      if (id === null || id <= 0) continue
+
+      const known = byShiki.get(id)
+      if (known) known.push(req.anilistId)
+      else byShiki.set(id, [req.anilistId])
+    }
+
+    const out: PresenceMap = new Map()
+    if (byShiki.size === 0) return out
+
+    const answer = await kodikPresence([...byShiki.keys()])
+
+    for (const [shikimoriId, state] of answer) {
+      for (const anilistId of byShiki.get(shikimoriId) ?? []) out.set(anilistId, state)
+    }
+
+    return out
+  },
+
   async listEpisodes(req: VideoRequest, voiceId: string): Promise<VideoEpisode[]> {
     const id = req.shikimoriId
     if (id === null || id <= 0) return []
@@ -721,4 +898,6 @@ export function forgetKodikVoices(): void {
   foundMemory.clear()
   pendingFound.clear()
   knownShift = 0
+  manyIds = null
+  manyTries = 0
 }
