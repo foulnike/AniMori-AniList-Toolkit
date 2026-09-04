@@ -2,12 +2,13 @@
 // а здесь лежит всё, что превращает запись памяти в готовую плитку:
 // сборка, порядок показа и доборы обложек с названиями.
 // Модуль один сознательно: веер мелких файлов труднее держать в согласии.
-import { ref, type Ref } from 'vue'
+import { onScopeDispose, ref, type Ref } from 'vue'
 
 import { setupVideoSources } from '@/api/video-sources'
 import { notOutYet, partsOut, peekLook, warmLooks, type MediaLook } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import {
+  onPlayableChange,
   peekPlayable,
   primePlayable,
   warmPlayable,
@@ -23,16 +24,6 @@ import type { SortName } from './lists-keep'
 
 /** По скольку тайтлов просить названия за заход: источники отвечают по одному. */
 const TITLE_CHUNK = 10
-
-/**
- * Скольким строкам добирать метку доступности сетью за один заход. Склад
- * поднимается для всех показанных даром, а в сеть идёт верх списка. Шесть
- * десятков — не произвол: оптовый источник отвечает про два десятка тайтлов
- * одним запросом, так что шестьдесят строк стоят трёх запросов, а не шестидесяти.
- * Дорогие источники ядро придерживает своим бюджетом само. Остальные строки
- * доберутся следующим заходом или из склада.
- */
-const PLAY_DEPTH = 60
 
 /** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
 export interface Row {
@@ -114,7 +105,7 @@ function titleOf(entry: SnapshotEntry): string {
 /**
  * Чем спрашивать источники: номер MAL и названия по убыванию пригодности.
  * Номер снимка не выдумывается — записи, сделанные до его появления, идут
- * с null, и метка «нет видео» такому тайтлу не поставится никогда.
+ * с null, и спрашивать о них будет только тот источник, что ищет словами.
  */
 function playAskOf(entry: SnapshotEntry, look: MediaLook | null): PlayAsk {
   const names = [
@@ -205,6 +196,12 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
   let titleRun = 0
   let playRun = 0
 
+  // Метки доступности приходят по одной и долго: список на полторы сотни
+  // строк ядро обходит минутами. Подписка рисует каждый ответ по мере
+  // готовности, и полка заполняется на глазах, а не одним рывком в конце.
+  const unwatch = onPlayableChange(redraw)
+  onScopeDispose(unwatch)
+
   /**
    * Добирает обложки для показанных плиток. Сотня строк стоит двух
    * запросов, а возврат в ту же закладку — ни одного.
@@ -266,7 +263,13 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
 
   /**
    * Добирает метки доступности. Сначала склад — он отвечает даром и разом
-   * по всем показанным строкам, — и только потом сеть, и то верхним строкам.
+   * по всем показанным строкам, — и только потом сеть.
+   *
+   * В сеть уходят все неизвестные строки, а не верх списка: очередь одна на
+   * приложение, она сама держит порядок и сама придерживает темп. Прежний
+   * потолок именно тем и вредил: хвост списка не спрашивался никогда, и метки
+   * обрывались на первом десятке постеров.
+   *
    * Без метки список живой: плитка про доступность просто молчит.
    */
   async function fillPlay(): Promise<void> {
@@ -283,7 +286,6 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
 
       const wanted = rows.value
         .filter((row) => peekPlayable(row.mediaId) === null)
-        .slice(0, PLAY_DEPTH)
         .map((row) => row.ask)
 
       if (wanted.length === 0) return
@@ -291,6 +293,8 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
       // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
       setupVideoSources()
 
+      // Ответы рисует подписка; здесь ждётся конец захода ради флажка
+      // в подвале: пока он горит, человек видит, что метки ещё едут.
       await warmPlayable(wanted)
       if (mine !== playRun) return
 
