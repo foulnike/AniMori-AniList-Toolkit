@@ -438,50 +438,99 @@ const hasTags = computed(
 }
 
 /* Счёт частей и метка доступности живут в одном углу, поэтому строка счёта
-   уступает ей полосу справа: иначе «12 / 24» уезжало бы под треугольник. */
+   уступает ей полосу справа: иначе «12 / 24» уезжало бы под монетку. */
 .am-tile__own--play {
-  right: 32px;
+  right: 36px;
 }
 
 /* Метка доступности: маленький Play в правом нижнем углу. Слов нет вовсе:
    треугольник понятен без подписи, а прежняя пилюля «Есть видео» отнимала
-   половину верхнего ряда у меток о самом тайтле. */
+   половину верхнего ряда у меток о самом тайтле.
+
+   Оправа — та же стеклянная монетка, что у знаков повтора и заметки слева
+   вверху: угол разный, а язык меток на плитке один. Голый треугольник
+   терялся на светлых кадрах и читался опечаткой рядом с обрамлёнными
+   соседями. Акцент здесь оправдан: это единственная метка плитки, которая
+   обещает действие, а не сообщает сведение. */
 .am-tile__play {
   position: absolute;
-  right: 9px;
-  bottom: 9px;
+  right: 8px;
+  bottom: 8px;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   color: var(--am-on-art);
-  filter: drop-shadow(0 1px 3px var(--am-veil));
+  background:
+    radial-gradient(
+      circle at 32% 26%,
+      color-mix(in srgb, var(--am-accent) 55%, transparent),
+      transparent 72%
+    ),
+    color-mix(in srgb, var(--am-veil) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--am-accent) 52%, transparent);
+  border-radius: var(--am-r-cap);
+  box-shadow: 0 2px 10px rgb(var(--am-accent-rgb) / 0.3);
+  backdrop-filter: blur(8px) saturate(1.2);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease),
+    box-shadow var(--am-mid) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
 }
 
 /* Сам знак. clip-path, а не рамки: так треугольник остаётся ровно в центре
-   своего квадрата и поверх него можно положить перечёркивание. */
+   своей монетки и поверх него можно положить перечёркивание. Полпикселя
+   вправо — правка оптическая: у треугольника центр тяжести левее середины. */
 .am-tile__play::before {
   grid-area: 1 / 1;
-  width: 11px;
-  height: 13px;
+  width: 8px;
+  height: 10px;
   content: '';
   background: currentcolor;
   clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translateX(0.5px);
 }
 
-/* «Нет в каталоге»: тот же знак, но серый и перечёркнутый. Это отсутствие
-   в нашем плеере, а не свойство тайтла: красным здесь кричать не о чем. */
+/* Под курсором монетка перетекает в лепесток и чуть приподнимается —
+   ровно то же движение, что у самого постера и у знаков слева. */
+.am-tile__hit:hover .am-tile__play,
+.am-tile__hit:focus-visible .am-tile__play {
+  border-color: color-mix(in srgb, var(--am-accent) 80%, transparent);
+  border-radius: var(--am-r-drop);
+  box-shadow: 0 4px 16px rgb(var(--am-accent-rgb) / 0.45);
+  transform: translateY(-1px);
+}
+
+/* «Нет в каталоге»: та же монетка, но погашенная — серое стекло, приглушённый
+   знак и черта поверх. Это отсутствие в нашем плеере, а не свойство тайтла:
+   красным здесь кричать не о чем, и в ряду плиток такая метка обязана молчать. */
 .am-tile__play--none {
-  color: color-mix(in srgb, var(--am-on-art) 42%, transparent);
+  color: color-mix(in srgb, var(--am-on-art) 46%, transparent);
+  background: color-mix(in srgb, var(--am-veil) 58%, transparent);
+  border-color: color-mix(in srgb, var(--am-on-art) 16%, transparent);
+  box-shadow: none;
 }
 
+.am-tile__hit:hover .am-tile__play--none,
+.am-tile__hit:focus-visible .am-tile__play--none {
+  color: color-mix(in srgb, var(--am-on-art) 72%, transparent);
+  border-color: color-mix(in srgb, var(--am-on-art) 30%, transparent);
+  box-shadow: none;
+}
+
+/* Черта идёт по диагонали монетки от края до края: короткий штрих поверх
+   треугольника читался царапиной на картинке. Темная обводка отделяет её
+   от знака под ней, иначе два светлых слоя слипаются в пятно. */
 .am-tile__play--none::after {
   grid-area: 1 / 1;
-  width: 20px;
-  height: 2px;
+  width: 17px;
+  height: 1.5px;
   content: '';
   background: color-mix(in srgb, var(--am-on-art) 66%, transparent);
   border-radius: 1px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--am-veil) 55%, transparent);
   transform: rotate(-45deg);
 }
 
@@ -592,6 +641,8 @@ const hasTags = computed(
 @media (prefers-reduced-motion: reduce) {
   .am-tile__hit:hover .am-tile__art,
   .am-tile__hit:focus-visible .am-tile__art,
+  .am-tile__hit:hover .am-tile__play,
+  .am-tile__hit:focus-visible .am-tile__play,
   .am-tile--hidable:hover .am-tile__tags,
   .am-tile--hidable:focus-within .am-tile__tags,
   .am-tile__hide:hover > span,
