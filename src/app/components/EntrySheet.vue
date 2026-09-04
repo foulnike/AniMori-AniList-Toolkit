@@ -4,9 +4,23 @@
 // Исключение — черновик комментария: отдавать его на каждую букву нельзя.
 // Правка ложится в память списка и никуда не уезжает: окну о хранении
 // и сети знать незачем.
+//
+// ПОТОЛОК СЧЁТА СЕРИЙ САМ МЕНЯЕТ ЗАКЛАДКУ
+//
+// У счёта серий, кроме шага, есть два прыжка к краям: ⇤ ставит ноль,
+// ⇥ ведёт до потолка. Дойдя до потолка, закладка сама переходит
+// в «Просмотрено» и получает дату конца — это заменило кнопку
+// «Всё пройдено» в подвале: она делала то же самое, но стояла далеко
+// от самого счёта, которым человек и отмечает просмотр.
+//
+// Онгоингу закладка не ставится. Потолок счёта — это partsTotal, а он
+// у идущего сезона равен не обещанному итогу, а числу уже вышедших
+// серий: досмотреть вышедшее не значит закончить историю.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { partsWord, statusList, statusWord } from '../labels'
+
+import SakuraBloom from './SakuraBloom.vue'
 
 /** Шаг оценки. Десятибалльная шкала у AniList дробная, половины достаточно. */
 const SCORE_STEP = 0.5
@@ -23,6 +37,8 @@ const props = defineProps<{
   score10: number
   progress: number
   partsTotal: number | null
+  /** Идёт ли показ: у онгоинга потолок счёта — вышедшее, а не итог истории. */
+  ongoing?: boolean
   repeat: number
   startedAt: string | null
   completedAt: string | null
@@ -51,6 +67,9 @@ const nowStatus = computed(() => statusWord(props.status === '' ? null : props.s
 const partsText = computed(() =>
   props.partsTotal === null ? String(props.progress) : `${props.progress} из ${props.partsTotal}`,
 )
+
+/** Подпись прыжка к потолку: у онгоинга это край вышедшего, а не конец. */
+const endHint = computed(() => (props.ongoing === true ? 'До вышедшего' : 'До конца'))
 
 /** Доля пройденного для полосы. */
 const donePart = computed(() => {
@@ -107,11 +126,43 @@ function setScore(value: number): void {
   if (value !== props.score10) emit('score', value)
 }
 
-/** Счёт серий. Выше известного итога не пускаем: больше, чем есть, не посмотришь. */
+/**
+ * Закладка и дата конца по достижении потолка счёта.
+ * Дату ставим только когда её нет: чужую отметку затирать нельзя.
+ * Онгоинг сюда не доходит: у него потолок — последняя вышедшая серия.
+ */
+function finishParts(): void {
+  if (props.ongoing === true) return
+  if (props.status !== 'COMPLETED') emit('status', 'COMPLETED')
+  if (props.completedAt === null) emit('completedAt', today())
+}
+
+/** Счёт серий шагом. Выше известного итога не пускаем: больше, чем есть, не посмотришь. */
 function bumpProgress(delta: number): void {
+  const total = props.partsTotal
   const next = props.progress + delta
-  const fixed = Math.max(0, props.partsTotal === null ? next : Math.min(props.partsTotal, next))
-  if (fixed !== props.progress) emit('progress', fixed)
+  const fixed = Math.max(0, total === null ? next : Math.min(total, next))
+  if (fixed === props.progress) return
+
+  emit('progress', fixed)
+  if (total !== null && fixed >= total) finishParts()
+}
+
+/** Прыжок к началу счёта. Закладку не трогает: ноль серий — это не «брошено». */
+function resetParts(): void {
+  if (props.progress !== 0) emit('progress', 0)
+}
+
+/**
+ * Прыжок к потолку: счёт до края и закладка вслед. Закладка ставится и когда
+ * счёт уже на потолке: нажатие на ⇥ — это и есть просьба закончить.
+ */
+function fillParts(): void {
+  const total = props.partsTotal
+  if (total === null) return
+
+  if (total !== props.progress) emit('progress', total)
+  finishParts()
 }
 
 /** Пересмотры. Потолка у них нет, а ниже нуля уходить бессмысленно. */
@@ -145,19 +196,6 @@ function sendNotes(): void {
   emit('notes', asked)
 }
 
-/**
- * Отметка пройденного: счёт до итога, закладка и дата конца в одно нажатие.
- * Дату ставим только когда её нет: чужую отметку затирать нельзя.
- */
-function markDone(): void {
-  if (props.partsTotal !== null && props.partsTotal > props.progress) {
-    emit('progress', props.partsTotal)
-  }
-
-  if (props.status !== 'COMPLETED') emit('status', 'COMPLETED')
-  if (props.completedAt === null) emit('completedAt', today())
-}
-
 function onClose(): void {
   sendNotes()
   emit('close')
@@ -188,7 +226,16 @@ onBeforeUnmount(() => {
           <h3 class="am-sheet__name">{{ title }}</h3>
         </div>
 
-        <button v-tip="'Закрыть'" class="am-sheet__close" type="button" @click="onClose">
+        <!-- Подпись кнопкам нужна своя: знак спрятан от чтецов, а подсказка
+             живёт отдельным слоем в body и именем кнопки не становится. -->
+        <button
+          v-tip="'Закрыть'"
+          class="am-sheet__close"
+          type="button"
+          aria-label="Закрыть"
+          @click="onClose"
+        >
+          <SakuraBloom />
           <span aria-hidden="true">×</span>
         </button>
       </header>
@@ -213,12 +260,26 @@ onBeforeUnmount(() => {
         <section class="am-field am-field--wide">
           <span class="am-field__name">Оценка</span>
           <div class="am-step-row">
-            <button v-tip="'Меньше'" class="am-step" type="button" @click="bumpScore(-SCORE_STEP)">
-              −
+            <button
+              v-tip="'Меньше'"
+              class="am-step"
+              type="button"
+              aria-label="Меньше"
+              @click="bumpScore(-SCORE_STEP)"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">−</span>
             </button>
             <span class="am-step__value">{{ markText(score10) }}</span>
-            <button v-tip="'Больше'" class="am-step" type="button" @click="bumpScore(SCORE_STEP)">
-              +
+            <button
+              v-tip="'Больше'"
+              class="am-step"
+              type="button"
+              aria-label="Больше"
+              @click="bumpScore(SCORE_STEP)"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">+</span>
             </button>
           </div>
 
@@ -239,13 +300,51 @@ onBeforeUnmount(() => {
 
         <section class="am-field">
           <span class="am-field__name">{{ partsName }}</span>
-          <div class="am-step-row">
-            <button v-tip="'Меньше'" class="am-step" type="button" @click="bumpProgress(-1)">
-              −
+
+          <!-- Прыжок к потолку живёт только при известном потолке: без итога
+               ехать некуда, и кнопка-обманка в ряду хуже её отсутствия. -->
+          <div class="am-step-row am-step-row--ends">
+            <button
+              v-tip="'В начало'"
+              class="am-step"
+              type="button"
+              aria-label="В начало"
+              @click="resetParts"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">⇤</span>
+            </button>
+            <button
+              v-tip="'Меньше'"
+              class="am-step"
+              type="button"
+              aria-label="Меньше"
+              @click="bumpProgress(-1)"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">−</span>
             </button>
             <span class="am-step__value">{{ partsText }}</span>
-            <button v-tip="'Больше'" class="am-step" type="button" @click="bumpProgress(1)">
-              +
+            <button
+              v-tip="'Больше'"
+              class="am-step"
+              type="button"
+              aria-label="Больше"
+              @click="bumpProgress(1)"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">+</span>
+            </button>
+            <button
+              v-if="partsTotal !== null"
+              v-tip="endHint"
+              class="am-step"
+              type="button"
+              :aria-label="endHint"
+              @click="fillParts"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">⇥</span>
             </button>
           </div>
 
@@ -257,11 +356,27 @@ onBeforeUnmount(() => {
         <section class="am-field">
           <span class="am-field__name">Пересмотры</span>
           <div class="am-step-row">
-            <button v-tip="'Меньше'" class="am-step" type="button" @click="bumpRepeat(-1)">
-              −
+            <button
+              v-tip="'Меньше'"
+              class="am-step"
+              type="button"
+              aria-label="Меньше"
+              @click="bumpRepeat(-1)"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">−</span>
             </button>
             <span class="am-step__value">{{ repeat }}</span>
-            <button v-tip="'Больше'" class="am-step" type="button" @click="bumpRepeat(1)">+</button>
+            <button
+              v-tip="'Больше'"
+              class="am-step"
+              type="button"
+              aria-label="Больше"
+              @click="bumpRepeat(1)"
+            >
+              <SakuraBloom />
+              <span aria-hidden="true">+</span>
+            </button>
           </div>
         </section>
 
@@ -318,15 +433,6 @@ onBeforeUnmount(() => {
       </div>
 
       <footer class="am-sheet__foot">
-        <button
-          v-if="partsTotal !== null"
-          class="am-btn am-btn--soft"
-          type="button"
-          @click="markDone"
-        >
-          Всё пройдено
-        </button>
-
         <span class="am-bar__gap" />
 
         <button class="am-btn" type="button" @click="onClose">Готово</button>
@@ -414,9 +520,20 @@ onBeforeUnmount(() => {
 }
 
 /* Цель нажатия в 44 пикселя: мелкое на телевизоре просто не поймать.
-   В покое круг, под курсором лепесток: форма отвечает на наведение,
-   а не тянет взгляд в покое больше содержимого окна. */
+   Своей одежды у кнопки больше нет — круг и распускающуюся сакуру рисует
+   вложенный слой, а кнопка остаётся прямоугольной: так при ней остаются
+   и попадание курсора по всей цели, и кольцо фокуса.
+
+   Оттенки цветка берутся от --am-hover: это тон приподнятого управления
+   в теме, тот самый, которым кнопка красилась под курсором раньше.
+   Тень мелкая, --am-sh-1: над стеклом окна нужен намёк на слой,
+   а не тот же плотный провал, что над постером. */
 .am-sheet__close {
+  --am-bloom-deep: var(--am-hover);
+  --am-bloom-petal: color-mix(in srgb, var(--am-sakura) 30%, var(--am-hover));
+  --am-bloom-shade: var(--am-sh-1);
+
+  position: relative;
   display: grid;
   flex: none;
   place-items: center;
@@ -429,25 +546,24 @@ onBeforeUnmount(() => {
   line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
+  background: none;
+  border: 0;
+
+  /* Ничего не красит: держит круглым только кольцо :focus-visible,
+     у которого свой outline-offset. */
   border-radius: var(--am-r-cap);
-  transition:
-    color var(--am-fast) var(--am-ease),
-    background-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease);
+  transition: color var(--am-fast) var(--am-ease);
 }
 
 .am-sheet__close:hover,
 .am-sheet__close:focus-visible {
   color: var(--am-text);
-  background: var(--am-fill-2);
-  border-radius: var(--am-r-drop);
 }
 
-/* Символ поднимается вместе с формой, но своим слоем: центровку держит
-   place-items родителя, и сдвиг её не сбивает. */
+/* Знак поднят над цветком: тот лежит своим слоем, а по правилам рисования
+   слой накрывает обычное содержимое. Центровку держит place-items родителя. */
 .am-sheet__close > span {
+  position: relative;
   display: block;
   transition: transform var(--am-fast) var(--am-ease);
 }
@@ -574,7 +690,21 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+/* Пять кнопок в ряду вместо трёх: при общем шаге 12 они выдавливали
+   само число счёта в две строки на узком окне. */
+.am-step-row--ends {
+  gap: 8px;
+}
+
+/* Круг и сакура под курсором — от вложенного слоя, поэтому своей заливки
+   и оправы у шага больше нет. position здесь не украшение: слой цветка
+   стоит absolute и без якоря уехал бы к краю окна. */
 .am-step {
+  --am-bloom-deep: var(--am-hover);
+  --am-bloom-petal: color-mix(in srgb, var(--am-sakura) 30%, var(--am-hover));
+  --am-bloom-shade: var(--am-sh-1);
+
+  position: relative;
   display: grid;
   place-items: center;
   width: var(--am-touch);
@@ -583,21 +713,23 @@ onBeforeUnmount(() => {
   font: inherit;
   font-size: 20px;
   line-height: 1;
-  color: var(--am-text);
+  color: var(--am-dim);
   cursor: pointer;
-  background: var(--am-fill-2);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-m);
-  transition:
-    background-color var(--am-fast) var(--am-ease),
-    border-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease);
+  background: none;
+  border: 0;
+  border-radius: var(--am-r-cap);
+  transition: color var(--am-fast) var(--am-ease);
 }
 
-.am-step:hover {
-  background: var(--am-hover);
-  border-color: rgb(var(--am-accent-rgb) / 0.5);
-  border-radius: var(--am-r-cap);
+.am-step:hover,
+.am-step:focus-visible {
+  color: var(--am-text);
+}
+
+/* Тот же подъём знака над цветком, что и у кнопки закрытия. */
+.am-step > span {
+  position: relative;
+  display: block;
 }
 
 .am-step__value {
