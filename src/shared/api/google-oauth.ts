@@ -179,8 +179,8 @@ function offline(e: unknown, what: string): string {
     typeof e === 'object' && e !== null && 'kind' in e ? (e as { kind: unknown }).kind : ''
 
   if (kind === 'timeout') return `${what}: Google не ответил вовремя`
-  return `${what}: запрос до Google не дошёл — проверьте сеть
- */
+  return `${what}: запрос до Google не дошёл — проверьте сеть`
+}
 
 /**
  * Страница подтверждения с вписанным кодом. Нужна только QR: человек
@@ -362,7 +362,7 @@ export async function refreshAccess(
       value: { access, accessUntil: Date.now() + count(at, 'expires_in', 3600) * 1000 },
     }
   } catch (e) {
-    Logger('WARN', 'Гоогл: пропуск не продлён', e)
+    Logger('WARN', 'Google: пропуск не продлён', e)
     return { ok: false, problem: offline(e, what) }
   }
 }
