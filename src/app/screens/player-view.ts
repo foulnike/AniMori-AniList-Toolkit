@@ -1,4 +1,4 @@
-// Данные экрана просмотра: карточка тайтла, перебор источников, озвучки,
+// Данные экрана просмотра: карточка аниме, перебор источников, озвучки,
 // серии и ссылки. За экраном остаётся разметка и само воспроизведение.
 //
 // О источниках здесь знают только то, что они есть в реестре: ни Aniliberty,
@@ -86,7 +86,7 @@ function describe(e: unknown): string {
 }
 
 /**
- * Собирает состояние просмотра вокруг номера тайтла из адреса.
+ * Собирает состояние просмотра вокруг номера аниме из адреса.
  * Номер показа гасит ответы, пришедшие уже к другому выбору.
  */
 export function usePlayer(mediaId: Ref<number>): PlayerView {
@@ -112,7 +112,7 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
       peekRussianName(mediaId.value) ??
       card.value?.romaji ??
       card.value?.english ??
-      `Тайтл #${mediaId.value}`
+      `Аниме #${mediaId.value}`
     )
   })
 
@@ -137,7 +137,7 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
     }))
   })
 
-  /** Что известно о тайтле до обращения к источникам. */
+  /** Что известно об аниме до обращения к источникам. */
   function request(): VideoRequest | null {
     const found = card.value
     if (found === null) return null
@@ -290,7 +290,7 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
       if (mine !== run) return
 
       if (!found) {
-        trouble.value = 'Сервер не отдал этот тайтл. Попробуйте позже.'
+        trouble.value = 'Сервер не отдал это аниме. Попробуйте позже.'
         return
       }
 
@@ -304,7 +304,7 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
 
       voices.value = rows
       if (rows.length === 0) {
-        trouble.value = 'Ни один источник не знает этого тайтла.'
+        trouble.value = 'Ни один источник не знает этого аниме.'
         return
       }
 
@@ -371,7 +371,7 @@ export function usePlayer(mediaId: Ref<number>): PlayerView {
   }
 
   /**
-   * Уход на карточку тайтла.
+   * Уход на карточку аниме.
    *
    * Пришли с неё — делаем шаг назад, а не шаг вперёд на тот же адрес:
    * иначе в истории копится «карточка → плеер → карточка», и кнопка «назад»
