@@ -22,21 +22,12 @@
 // секунды: иначе переключение на 480p выглядело бы как потеря просмотра.
 //
 // ЗАСЛОНКА ГОВОРИТ ПРАВДУ И ГАСИТ КАДР
-// Отсутствие ссылки раньше читалось одним способом — «Серия не выбрана», —
-// а случаев три: ещё не спрашивали, уже спрашиваем и спросить нечего.
-// Смена озвучки — второй случай, и надпись врала: серия выбрана, просто
-// ссылка ещё не приехала.
-//
-// Вторая половина того же краевого случая: под заслонкой продолжал играть
-// прежний поток. Панель и нажатие по кадру в это время спрятаны, то есть
-// остановить звук было нечем вовсе. Теперь поднявшаяся заслонка гасит кадр
-// и сбрасывает часы: полоса времени больше не показывает длину прошлой
-// серии. Запускать новый поток руками не надо: player-hls сам жмёт play()
-// после разбора манифеста.
-//
-// Место остановки записывается до сброса, а ключ забывается после: тогда
-// «Переспросить» садится на только что записанную секунду, а не на ноль
-// от погашенного тега.
+// Отсутствие ссылки читалось одним способом — «Серия не выбрана», — а случаев
+// три: ещё не спрашивали, уже спрашиваем и спросить нечего. Смена озвучки —
+// второй случай, и надпись врала. Заодно под заслонкой продолжал играть
+// прежний поток: панель и нажатие по кадру спрятаны, остановить звук было
+// нечем. Теперь поднявшаяся заслонка гасит кадр и сбрасывает часы, а новый
+// поток запускает сам player-hls после разбора манифеста.
 import {
   computed,
   h,
@@ -248,9 +239,9 @@ const coverStyle = computed<{ backgroundImage: string }>(() => ({
 const veil = computed<boolean>(() => busy.value || trouble.value !== '' || stream.value === null)
 
 /**
- * Что написано на заслонке. Случаев без ссылки три, и путать их нельзя:
- * при смене озвучки серия выбрана и ждёт ссылки, а надпись «Серия
- * не выбрана» читалась как сброс выбора.
+ * Что написано на заслонке. Случаев без ссылки три, и путать их нельзя: при
+ * смене озвучки серия выбрана и ждёт ссылки, а «Серия не выбрана» читалось
+ * как сброс выбора.
  */
 const veilWord = computed<string>(() => {
   if (trouble.value !== '') return trouble.value
@@ -260,11 +251,7 @@ const veilWord = computed<string>(() => {
   return 'Беру ссылку на серию…'
 })
 
-/**
- * Крутится ли колесо на заслонке. Не только при поиске источников: ждание
- * ссылки после смены озвучки тоже ожидание, и без колеса экран выглядел
- * замёрзшим.
- */
+/** Колесо крутится и в ожидании ссылки: без него экран выглядел замёрзшим. */
 const veilSpin = computed<boolean>(
   () => trouble.value === '' && (busy.value || stream.value === null),
 )
@@ -417,18 +404,13 @@ function start(url: string): void {
 }
 
 /**
- * Поднялась заслонка — кадру играть нечего. Звук из-за заслонки был
- * самым заметным из краевых случаев: органы управления в это время
- * спрятаны, и остановить его человеку было нечем.
- *
- * Порядок важен: сначала записываем место остановки — для этого нужны
- * живые секунда и длина, — и только потом гасим тег и числа. Ключ
- * забывается последним: иначе «Переспросить» счёл бы серию той же
+ * Поднялась заслонка — кадру играть нечего. Порядок важен: сначала пишем место
+ * остановки, для этого нужны живые секунда и длина, и только потом гасим тег
+ * и числа. Ключ забывается последним: иначе «Переспросить» счёл бы серию той же
  * и сел на ноль погашенного тега.
  */
 function stopFrame(): void {
   const el = videoEl.value
-
   if (el !== null && spot !== '') rememberSpot(spot, Math.floor(el.currentTime), total.value)
 
   playback?.close()
@@ -447,8 +429,8 @@ function stopFrame(): void {
     resumeTimer = 0
   }
 
-  // Панель возвращается на место и меню гаснут: иначе после заслонки
-  // она осталась бы уехавшей до первого движения мыши.
+  // Панель возвращается на место: иначе после заслонки она осталась бы
+  // уехавшей до первого движения мыши.
   calm.value = false
   menu.value = ''
 }
@@ -782,8 +764,8 @@ const rightKeys = computed<Key[]>(() => [
 
 /** Одно место, где желание превращается в действие. */
 function act(intent: PlayerIntent): void {
-  // Под заслонкой играть нечего: пускаем только выход и размер кадра.
-  // Клавиши доходят с окна, а не с кнопок, и скрытая панель их не держит.
+  // Под заслонкой играть нечего: пускаем только выход и размер кадра. Клавиши
+  // доходят с окна, а не с кнопок, и спрятанная панель их не держит.
   if (veil.value && intent !== 'exit' && intent !== 'fullscreen') return
 
   switch (intent) {
@@ -902,4 +884,372 @@ watch(mediaId, () => {
   void load()
 })
 
-// Заслонка поднялась — гаси
+// Заслонка поднялась — гасим кадр. Одна проверка на все три причины: поиск
+// источников, ожидание ссылки и отказ потока.
+watch(veil, (on) => {
+  if (on) stopFrame()
+})
+
+watch(
+  () => stream.value?.preferred.url ?? '',
+  (url) => {
+    if (url !== '') start(url)
+  },
+)
+
+// Прокрутка страницы под театром: колесо мыши уводило бы её вслепую,
+// и, выйдя из полного экрана, человек оказывался бы не там, где ушёл.
+watch(wide, (on) => {
+  document.body.style.overflow = on ? 'hidden' : ''
+})
+
+onBeforeUnmount(() => {
+  const el = videoEl.value
+  if (el !== null) {
+    if (spot !== '') rememberSpot(spot, Math.floor(el.currentTime), total.value)
+    el.removeEventListener('timeupdate', onTime)
+    el.removeEventListener('ended', onEnded)
+    el.removeEventListener('play', onPlay)
+    el.removeEventListener('pause', onPause)
+    el.removeEventListener('durationchange', onMeta)
+    el.removeEventListener('progress', onProgress)
+    el.removeEventListener('waiting', onWaiting)
+    el.removeEventListener('playing', onRolling)
+    el.removeEventListener('seeked', onRolling)
+  }
+
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('pointerdown', onDown)
+  if (calmTimer !== 0) window.clearTimeout(calmTimer)
+  if (resumeTimer !== 0) window.clearTimeout(resumeTimer)
+  document.body.style.overflow = ''
+
+  // Отложенная запись уход с экрана не переживёт: просим записать сейчас.
+  flushWatchKeep()
+
+  // Уходим с экрана — возвращаем окно: полный экран был нужен кадру, не спискам.
+  void wantWindowWide(false)
+
+  playback?.close()
+  playback = null
+})
+</script>
+
+<template>
+  <section class="am-page">
+    <div v-if="mediaId === 0" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⊛</span>
+      <span>Смотреть нечего: в адресе нет номера аниме.</span>
+      <span>Откройте карточку и нажмите «Смотреть».</span>
+    </div>
+
+    <!-- В театре узел уезжает в body: рамка приложения перестаёт быть его
+         предком, и её стёкла со своими слоями в кадр больше не попадают. -->
+    <Teleport to="body" :disabled="!wide">
+      <div
+        v-if="mediaId !== 0"
+        ref="rootEl"
+        class="am-play"
+        :class="{ 'am-play--wide': wide, 'am-play--calm': calm }"
+        @pointermove="wake"
+      >
+        <div class="am-play__main">
+          <div class="am-play__head" data-zone="head">
+            <button class="am-play__back" type="button" data-tip="Назад к карточке" @click="doExit">
+              <Icon :line="LINE.left" />
+              <span class="am-play__back-word">Карточка</span>
+            </button>
+
+            <div class="am-play__title">
+              <h2 class="am-play__name">{{ mainTitle }}</h2>
+              <p v-if="subLine" class="am-play__sub">{{ subLine }}</p>
+            </div>
+          </div>
+
+          <div class="am-play__stage" @dblclick="doFullscreen">
+            <video ref="videoEl" class="am-play__frame" playsinline preload="metadata"></video>
+
+            <button
+              v-if="!veil"
+              class="am-play__tap"
+              type="button"
+              :aria-label="playing ? 'Пауза' : 'Смотреть'"
+              @click="doToggle"
+            ></button>
+
+            <!-- Центр кадра. Оба знака центрует сетка обёртки, а не сдвиг
+                 трансформацией: кольцу нужен свой поворот, и два разных списка
+                 трансформаций браузер сводил в одну матрицу — знак уезжал. -->
+            <div v-if="!veil" class="am-play__mid" aria-hidden="true">
+              <span v-if="!playing" class="am-play__hold">
+                <Icon :d="SIGN.play" />
+              </span>
+
+              <span v-else-if="stalled" class="am-play__wait" />
+            </div>
+
+            <div v-if="veil" class="am-play__veil">
+              <span v-if="cover" class="am-play__blur" :style="coverStyle" aria-hidden="true" />
+              <span v-if="veilSpin" class="am-play__spin" aria-hidden="true" />
+              <p v-if="veilWord" class="am-play__word">{{ veilWord }}</p>
+              <button v-if="trouble && !busy" class="am-play__act" type="button" @click="refresh">
+                Переспросить
+              </button>
+            </div>
+
+            <!-- Плашка продолжения: сообщает и тут же даёт передумать. -->
+            <div v-if="resumeAt > 0 && !veil" class="am-play__resume">
+              <span>Продолжили с {{ clockText(resumeAt) }}</span>
+              <button class="am-play__resume-key" type="button" @click="doRestart">Сначала</button>
+            </div>
+
+            <button v-if="skip && !veil" class="am-play__skip" type="button" @click="doSkip">
+              {{ skip.label }}
+            </button>
+
+            <div
+              v-show="!veil"
+              class="am-play__deck"
+              data-zone="bar"
+              @pointerenter="deckHot = true"
+              @pointerleave="deckHot = false"
+            >
+              <!-- Полоса времени своей строкой во всю ширину: в общем ряду
+                   она сжималась до обрубка между кнопками. -->
+              <div class="am-play__seek">
+                <div
+                  class="am-play__line"
+                  tabindex="0"
+                  role="slider"
+                  aria-label="Время серии"
+                  :aria-valuemin="0"
+                  :aria-valuemax="totalWhole"
+                  :aria-valuenow="at"
+                  :aria-valuetext="clockText(at)"
+                  @pointerdown="onLineDown"
+                  @pointermove="onLineMove"
+                  @pointerleave="onLineOut"
+                  @keydown="onLineKey"
+                  @keydown.space.prevent.stop="doToggle"
+                  @keydown.enter.prevent.stop="doToggle"
+                >
+                  <span class="am-play__buf" :style="{ width: shareReady + '%' }" />
+                  <span class="am-play__fill" :style="{ width: shareAt + '%' }" />
+                  <span class="am-play__knob" :style="{ left: shareAt + '%' }" />
+                </div>
+
+                <span
+                  v-if="hoverShare >= 0 && total > 0"
+                  class="am-play__bubble"
+                  :style="{ left: hoverShare + '%' }"
+                  aria-hidden="true"
+                  >{{ hoverText }}</span
+                >
+              </div>
+
+              <div class="am-play__row">
+                <div class="am-play__clip">
+                  <button
+                    v-for="key in leftKeys"
+                    :key="key.tip"
+                    class="am-play__key"
+                    :class="{ 'am-play__key--main': key.main === true }"
+                    type="button"
+                    :data-tip="key.tip"
+                    :aria-label="key.tip"
+                    :disabled="key.off === true"
+                    @click="key.run()"
+                  >
+                    <Icon :d="key.sign" :line="key.line" />
+                  </button>
+
+                  <!-- Ползунок громкости раскрывается по наведению: постоянная
+                       полоса рядом с кнопкой звука занимала место молча. -->
+                  <div class="am-play__sound">
+                    <button
+                      class="am-play__key"
+                      type="button"
+                      :data-tip="muted ? 'Включить звук' : 'Заглушить'"
+                      :aria-label="muted ? 'Включить звук' : 'Заглушить'"
+                      @click="toggleMute"
+                    >
+                      <Icon :d="SIGN.sound" :line="muted ? LINE.cross : LINE.waves" />
+                    </button>
+
+                    <div
+                      class="am-play__vol"
+                      tabindex="0"
+                      role="slider"
+                      aria-label="Громкость"
+                      :aria-valuemin="0"
+                      :aria-valuemax="100"
+                      :aria-valuenow="volumeShare"
+                      @pointerdown="onVolumeDown"
+                      @pointermove="onVolumeMove"
+                      @keydown="onVolumeKey"
+                    >
+                      <span class="am-play__vol-fill" :style="{ width: volumeShare + '%' }" />
+                      <span class="am-play__vol-knob" :style="{ left: volumeShare + '%' }" />
+                    </div>
+                  </div>
+
+                  <span class="am-play__clock">
+                    {{ clockText(at) }}
+                    <span class="am-play__clock-all">/ {{ clockText(total) }}</span>
+                  </span>
+                </div>
+
+                <div class="am-play__clip am-play__clip--end">
+                  <!-- Скорость списком, а не ползунком: доли вроде 1,15×
+                       на ползунке ловятся только случайно. -->
+                  <div class="am-play__pick">
+                    <ul v-if="menu === 'rate'" class="am-play__menu">
+                      <li v-for="value in RATES" :key="value">
+                        <button
+                          class="am-play__opt"
+                          :class="{ 'am-play__opt--on': value === rate }"
+                          type="button"
+                          @click="takeRate(value)"
+                        >
+                          <span class="am-play__opt-tick">
+                            <Icon v-if="value === rate" :line="LINE.tick" />
+                          </span>
+                          <span>{{ value === NORMAL_RATE ? 'Обычная' : rateLabel(value) }}</span>
+                        </button>
+                      </li>
+                    </ul>
+
+                    <button
+                      class="am-play__key am-play__key--word"
+                      :class="{ 'am-play__key--on': rate !== NORMAL_RATE }"
+                      type="button"
+                      data-tip="Скорость"
+                      :aria-expanded="menu === 'rate'"
+                      @click="menu = menu === 'rate' ? '' : 'rate'"
+                    >
+                      {{ rateLabel(rate) }}
+                    </button>
+                  </div>
+
+                  <div v-if="qualities.length > 0" class="am-play__pick">
+                    <ul v-if="menu === 'quality'" class="am-play__menu">
+                      <li v-for="quality in qualities" :key="quality.height">
+                        <button
+                          class="am-play__opt"
+                          :class="{ 'am-play__opt--on': quality.on }"
+                          type="button"
+                          @click="takeHeight(quality.height)"
+                        >
+                          <span class="am-play__opt-tick">
+                            <Icon v-if="quality.on" :line="LINE.tick" />
+                          </span>
+                          <span>{{ quality.label }}</span>
+                        </button>
+                      </li>
+                    </ul>
+
+                    <button
+                      class="am-play__key am-play__key--word"
+                      type="button"
+                      data-tip="Качество"
+                      :aria-expanded="menu === 'quality'"
+                      @click="menu = menu === 'quality' ? '' : 'quality'"
+                    >
+                      {{ qualityNow }}
+                    </button>
+                  </div>
+
+                  <button
+                    v-if="wide"
+                    class="am-play__key"
+                    :class="{ 'am-play__key--on': listOpen }"
+                    type="button"
+                    data-tip="Серии и озвучки"
+                    aria-label="Серии и озвучки"
+                    :aria-pressed="listOpen"
+                    @click="listOpen = !listOpen"
+                  >
+                    <Icon :line="LINE.rows" />
+                  </button>
+
+                  <button
+                    v-for="key in rightKeys"
+                    :key="key.tip"
+                    class="am-play__key"
+                    type="button"
+                    :data-tip="key.tip"
+                    :aria-label="key.tip"
+                    @click="key.run()"
+                  >
+                    <Icon :d="key.sign" :line="key.line" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- В театре списки живут ящиком по кнопке, а не поверх кадра: висеть
+             на видео всю серию им незачем. Вне театра это обычная колонка. -->
+        <aside v-if="!wide || listOpen" class="am-play__side">
+          <div class="am-play__box">
+            <h3 class="am-play__h">Озвучка</h3>
+
+            <ul v-if="voices.length > 0" class="am-play__list" data-zone="voices">
+              <li v-for="voice in voices" :key="voice.key">
+                <button
+                  class="am-play__item"
+                  :class="{ 'am-play__item--on': voice.key === voiceKey }"
+                  type="button"
+                  @click="pickVoice(voice.key)"
+                >
+                  <span class="am-play__word-cut">{{ voice.label }}</span>
+                  <span class="am-play__src">{{ voice.sourceLabel }}</span>
+                  <span v-if="voice.episodes > 0" class="am-play__time">
+                    серий: {{ voice.episodes }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+
+            <p v-else class="am-play__none">Озвучек нет.</p>
+          </div>
+
+          <div class="am-play__box">
+            <h3 class="am-play__h">Серии</h3>
+
+            <ul v-if="episodes.length > 0" class="am-play__list" data-zone="episodes">
+              <li v-for="item in episodes" :key="item.number">
+                <button
+                  class="am-play__item"
+                  :class="{ 'am-play__item--on': item.number === episode }"
+                  type="button"
+                  @click="pickEpisode(item.number)"
+                >
+                  <span class="am-play__num">{{ item.number }}</span>
+                  <span class="am-play__word-cut">{{ item.title ?? 'Серия' }}</span>
+                  <span v-if="timeText(item.durationSec)" class="am-play__time">
+                    {{ timeText(item.durationSec) }}
+                  </span>
+
+                  <!-- Полоска просмотра: видно, где человек остановился,
+                       не открывая серию. -->
+                  <span v-if="seenShare(item.number) > 0" class="am-play__seen" aria-hidden="true">
+                    <span
+                      class="am-play__seen-fill"
+                      :style="{ width: seenShare(item.number) + '%' }"
+                    />
+                  </span>
+                </button>
+              </li>
+            </ul>
+
+            <p v-else class="am-play__none">Серий пока нет.</p>
+          </div>
+        </aside>
+      </div>
+    </Teleport>
+  </section>
+</template>
+
+<style scoped src="./player-screen.css"></style>
