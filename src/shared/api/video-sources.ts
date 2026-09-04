@@ -5,6 +5,13 @@
 //
 // Порядок вызовов здесь — это и порядок перебора на экране: сначала открытый
 // API без подписей и без сроков, и только потом цепочки, которые приходится раскручивать.
+//
+// ПРО canAskPresence. Метка доступности ставит «нет видео» только тогда, когда
+// высказались все источники, кому тайтл вообще можно адресовать. Кому можно —
+// решает входной ключ службы: Kodik входит по номеру Шикимори и тайтл без номера
+// не спросишь вовсе, а Aniliberty ищет словами и без названия бессилен.
+// Объявления стоят здесь, при сборке: это знание про состав реестра, и ядру
+// оно ни к чему, а клиентам довольно своих забот.
 
 import { registerVideoSource } from '../core/video'
 import { anilibertySource } from './aniliberty'
@@ -20,8 +27,17 @@ let done = false
 export function setupVideoSources(): void {
   if (done) return
 
-  registerVideoSource(anilibertySource)
-  registerVideoSource(kodikSource)
+  registerVideoSource({
+    ...anilibertySource,
+    /** Вход только по названию: без единого имени вопроса службе не составить. */
+    canAskPresence: (req) => req.titles.length > 0,
+  })
+
+  registerVideoSource({
+    ...kodikSource,
+    /** Вход только по номеру Шикимори: тайтл без номера службе не адресуем. */
+    canAskPresence: (req) => req.shikimoriId !== null && req.shikimoriId > 0,
+  })
 
   done = true
 }
