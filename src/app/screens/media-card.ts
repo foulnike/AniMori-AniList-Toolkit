@@ -4,7 +4,7 @@
 //
 // Состояние списка берётся из памяти коллекции, а не из ответа: список
 // односторонний, правки живут только здесь, и правда тоже здесь.
-import { computed, nextTick, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, nextTick, onScopeDispose, ref, type ComputedRef, type Ref } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
 import { setupVideoSources } from '@/api/video-sources'
@@ -20,6 +20,7 @@ import {
   type RussianTitle,
 } from '@/core/media-title'
 import {
+  onPlayableChange,
   peekPlayable,
   primePlayable,
   warmPlayable,
@@ -33,18 +34,6 @@ import { Logger } from '@/utils/logger'
 import { formatWord, statusWord } from '../labels'
 import { mediaLinks, type MediaLink } from '../media-links'
 import { navigate } from '../router'
-
-/**
- * Скольким частям франшизы добирать метку доступности сетью. Со склада
- * поднимается вся полка даром, а в сеть идёт начало дерева.
- *
- * Сорок частей — потолок любого известного дерева, и такая глубина стала
- * посильной только с оптовым вопросом: два десятка номеров уходят к источнику
- * одним запросом, и вся франшиза закрывается двумя-тремя. Прежние восемь
- * стояли здесь ровно потому, что каждая часть стоила запроса к каждому
- * источнику, и полка подлиннее не доходила до конца никогда.
- */
-const PLAY_DEPTH = 40
 
 /** Оценка площадки для героя. */
 export interface Rating {
@@ -167,6 +156,17 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   /** Номер показа: ответ на старый тайтл пришёл не вовремя и ему места нет. */
   let run = 0
+
+  // Ответы очереди приходят вразброд и по одному, а часть из них — чужие
+  // вопросы с других экранов про те же самые части: подписка показывает
+  // каждый такой ответ сразу, а не в конце своего захода.
+  const stopPlayWatch = onPlayableChange(() => {
+    playStamp.value += 1
+  })
+
+  // Очередь живёт дольше карточки: неснятая подписка держала бы всю её
+  // область в памяти и била бы счётчик уже закрытого показа.
+  onScopeDispose(stopPlayWatch)
 
   /**
    * Своя запись из памяти. Счётчик правок в зависимостях не случаен:
@@ -426,10 +426,12 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
 
   /**
    * Метки доступности частям франшизы. Сначала склад — он отвечает даром
-   * и разом по всей полке, — и только потом сеть, и то первым частям.
+   * и разом по всей полке, — и только потом сеть.
    *
    * Полка франшизы — то место, где метка полезнее всего: человек смотрит
-   * на дерево именно чтобы решить, что смотреть дальше.
+   * на дерево именно чтобы решить, что смотреть дальше, и обрыв меток
+   * на середине дерева читался бы как «дальше ничего нет». Потому спрашивается
+   * вся полка: очередь ядра сама держит темп и оптовый вопрос.
    */
   async function warmFranchisePlay(
     mine: number,
@@ -443,8 +445,6 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     const asks: PlayAsk[] = []
 
     for (const work of works) {
-      if (asks.length >= PLAY_DEPTH) break
-
       const id = work.mediaId
       if (id === null || work.type === 'MANGA') continue
       if (peekPlayable(id) !== null) continue
