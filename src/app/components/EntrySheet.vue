@@ -5,6 +5,20 @@
 // Правка ложится в память списка и никуда не уезжает: окну о хранении
 // и сети знать незачем.
 //
+// ОКНО ВИСИТ НА BODY, А НЕ ВНУТРИ ЭКРАНА
+//
+// Затемнение стоит fixed на всё окно браузера, но fixed мерится от окна
+// только пока над ним нет предка с трансформом, фильтром или размытием
+// подложки: любой такой предок забирает отсчёт себе. В длинном списке
+// окно правки из-за этого встало посередине всего списка и уехало далеко
+// за нижний край видимого — до него приходилось доскроллить.
+//
+// Поэтому окно телепортируется в body. Искать конкретного виновника среди
+// предков смысла нет: завтра над списком появится ещё одно стекло, и всё
+// вернётся. Заодно окно перестаёт зависеть от z-index соседей и от обрезки
+// прокруткой. Тема при переносе не теряется: data-am-skin стоит на корне
+// документа, то есть выше body.
+//
 // ПОТОЛОК СЧЁТА СЕРИЙ САМ МЕНЯЕТ ЗАКЛАДКУ
 //
 // У счёта серий, кроме шага, есть два прыжка к краям: ⇤ ставит ноль,
@@ -227,201 +241,208 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="am-sheet" role="dialog" aria-modal="true" @click.self="onClose">
-    <div class="am-sheet__box">
-      <header class="am-sheet__top">
-        <div class="am-sheet__text">
-          <span class="am-sheet__kicker">{{ nowStatus ?? 'Не в списке' }}</span>
-          <h3 class="am-sheet__name">{{ title }}</h3>
+  <!-- Перенос в body: причина в шапке файла, коротко — fixed внутри экрана
+       мерился от списка, а не от окна браузера. -->
+  <Teleport to="body">
+    <div class="am-sheet" role="dialog" aria-modal="true" @click.self="onClose">
+      <div class="am-sheet__box">
+        <header class="am-sheet__top">
+          <div class="am-sheet__text">
+            <span class="am-sheet__kicker">{{ nowStatus ?? 'Не в списке' }}</span>
+            <h3 class="am-sheet__name">{{ title }}</h3>
+          </div>
+
+          <!-- Подпись кнопкам нужна своя: знак спрятан от чтецов, а подсказка
+               живёт отдельным слоем в body и именем кнопки не становится. -->
+          <button
+            v-tip="'Закрыть'"
+            class="am-sheet__close"
+            type="button"
+            aria-label="Закрыть"
+            @click="onClose"
+          >
+            <SakuraBloom />
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <div class="am-sheet__body">
+          <section class="am-field am-field--wide">
+            <span class="am-field__name">Закладка</span>
+            <div class="am-picks">
+              <button
+                v-for="item in statuses"
+                :key="item.key"
+                class="am-pick"
+                :class="{ 'am-pick--on': item.key === status }"
+                type="button"
+                @click="emit('status', item.key)"
+              >
+                {{ item.title }}
+              </button>
+            </div>
+          </section>
+
+          <section class="am-field am-field--wide">
+            <span class="am-field__name">Оценка</span>
+            <div class="am-step-row">
+              <button
+                v-tip="'Меньше'"
+                class="am-step"
+                type="button"
+                aria-label="Меньше"
+                @click="bumpScore(-SCORE_STEP)"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">−</span>
+              </button>
+              <span class="am-step__value">{{ markText(score10) }}</span>
+              <button
+                v-tip="'Больше'"
+                class="am-step"
+                type="button"
+                aria-label="Больше"
+                @click="bumpScore(SCORE_STEP)"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">+</span>
+              </button>
+            </div>
+
+            <div class="am-picks am-picks--mid">
+              <button
+                v-for="mark in QUICK_MARKS"
+                :key="mark"
+                class="am-pick am-pick--num"
+                :class="{ 'am-pick--on': mark === score10 }"
+                :style="markStyle(mark)"
+                type="button"
+                @click="setScore(mark)"
+              >
+                {{ mark }}
+              </button>
+            </div>
+          </section>
+
+          <section class="am-field">
+            <span class="am-field__name">{{ partsName }}</span>
+
+            <!-- Прыжок к потолку живёт только при известном потолке: без итога
+                 ехать некуда, и кнопка-обманка в ряду хуже её отсутствия. -->
+            <div class="am-step-row am-step-row--ends">
+              <button
+                v-tip="'В начало'"
+                class="am-step"
+                type="button"
+                aria-label="В начало"
+                @click="resetParts"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">⇤</span>
+              </button>
+              <button
+                v-tip="'Меньше'"
+                class="am-step"
+                type="button"
+                aria-label="Меньше"
+                @click="bumpProgress(-1)"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">−</span>
+              </button>
+              <span class="am-step__value">{{ partsText }}</span>
+              <button
+                v-tip="'Больше'"
+                class="am-step"
+                type="button"
+                aria-label="Больше"
+                @click="bumpProgress(1)"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">+</span>
+              </button>
+              <button
+                v-if="partsTotal !== null"
+                v-tip="endHint"
+                class="am-step"
+                type="button"
+                :aria-label="endHint"
+                @click="fillParts"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">⇥</span>
+              </button>
+            </div>
+
+            <span class="am-line">
+              <span class="am-line__fill" :style="{ width: donePart }" />
+            </span>
+          </section>
+
+          <section class="am-field">
+            <span class="am-field__name">Пересмотры</span>
+            <div class="am-step-row">
+              <button
+                v-tip="'Меньше'"
+                class="am-step"
+                type="button"
+                aria-label="Меньше"
+                @click="bumpRepeat(-1)"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">−</span>
+              </button>
+              <span class="am-step__value">{{ repeat }}</span>
+              <button
+                v-tip="'Больше'"
+                class="am-step"
+                type="button"
+                aria-label="Больше"
+                @click="bumpRepeat(1)"
+              >
+                <SakuraBloom />
+                <span aria-hidden="true">+</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="am-field">
+            <span class="am-field__name">Начато</span>
+            <DatePick :value="startedAt" title="Начато" @pick="onStarted" />
+          </section>
+
+          <section class="am-field">
+            <span class="am-field__name">Закончено</span>
+            <DatePick :value="completedAt" title="Закончено" @pick="onCompleted" />
+          </section>
+
+          <section class="am-field am-field--wide">
+            <span class="am-field__name">Комментарий</span>
+            <textarea
+              v-model="draft"
+              class="am-input am-note"
+              rows="3"
+              placeholder="Личная заметка, остаётся в вашем списке"
+              @blur="sendNotes"
+            />
+          </section>
         </div>
 
-        <!-- Подпись кнопкам нужна своя: знак спрятан от чтецов, а подсказка
-             живёт отдельным слоем в body и именем кнопки не становится. -->
-        <button
-          v-tip="'Закрыть'"
-          class="am-sheet__close"
-          type="button"
-          aria-label="Закрыть"
-          @click="onClose"
-        >
-          <SakuraBloom />
-          <span aria-hidden="true">×</span>
-        </button>
-      </header>
+        <footer class="am-sheet__foot">
+          <span class="am-bar__gap" />
 
-      <div class="am-sheet__body">
-        <section class="am-field am-field--wide">
-          <span class="am-field__name">Закладка</span>
-          <div class="am-picks">
-            <button
-              v-for="item in statuses"
-              :key="item.key"
-              class="am-pick"
-              :class="{ 'am-pick--on': item.key === status }"
-              type="button"
-              @click="emit('status', item.key)"
-            >
-              {{ item.title }}
-            </button>
-          </div>
-        </section>
-
-        <section class="am-field am-field--wide">
-          <span class="am-field__name">Оценка</span>
-          <div class="am-step-row">
-            <button
-              v-tip="'Меньше'"
-              class="am-step"
-              type="button"
-              aria-label="Меньше"
-              @click="bumpScore(-SCORE_STEP)"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">−</span>
-            </button>
-            <span class="am-step__value">{{ markText(score10) }}</span>
-            <button
-              v-tip="'Больше'"
-              class="am-step"
-              type="button"
-              aria-label="Больше"
-              @click="bumpScore(SCORE_STEP)"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">+</span>
-            </button>
-          </div>
-
-          <div class="am-picks am-picks--mid">
-            <button
-              v-for="mark in QUICK_MARKS"
-              :key="mark"
-              class="am-pick am-pick--num"
-              :class="{ 'am-pick--on': mark === score10 }"
-              :style="markStyle(mark)"
-              type="button"
-              @click="setScore(mark)"
-            >
-              {{ mark }}
-            </button>
-          </div>
-        </section>
-
-        <section class="am-field">
-          <span class="am-field__name">{{ partsName }}</span>
-
-          <!-- Прыжок к потолку живёт только при известном потолке: без итога
-               ехать некуда, и кнопка-обманка в ряду хуже её отсутствия. -->
-          <div class="am-step-row am-step-row--ends">
-            <button
-              v-tip="'В начало'"
-              class="am-step"
-              type="button"
-              aria-label="В начало"
-              @click="resetParts"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">⇤</span>
-            </button>
-            <button
-              v-tip="'Меньше'"
-              class="am-step"
-              type="button"
-              aria-label="Меньше"
-              @click="bumpProgress(-1)"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">−</span>
-            </button>
-            <span class="am-step__value">{{ partsText }}</span>
-            <button
-              v-tip="'Больше'"
-              class="am-step"
-              type="button"
-              aria-label="Больше"
-              @click="bumpProgress(1)"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">+</span>
-            </button>
-            <button
-              v-if="partsTotal !== null"
-              v-tip="endHint"
-              class="am-step"
-              type="button"
-              :aria-label="endHint"
-              @click="fillParts"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">⇥</span>
-            </button>
-          </div>
-
-          <span class="am-line">
-            <span class="am-line__fill" :style="{ width: donePart }" />
-          </span>
-        </section>
-
-        <section class="am-field">
-          <span class="am-field__name">Пересмотры</span>
-          <div class="am-step-row">
-            <button
-              v-tip="'Меньше'"
-              class="am-step"
-              type="button"
-              aria-label="Меньше"
-              @click="bumpRepeat(-1)"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">−</span>
-            </button>
-            <span class="am-step__value">{{ repeat }}</span>
-            <button
-              v-tip="'Больше'"
-              class="am-step"
-              type="button"
-              aria-label="Больше"
-              @click="bumpRepeat(1)"
-            >
-              <SakuraBloom />
-              <span aria-hidden="true">+</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="am-field">
-          <span class="am-field__name">Начато</span>
-          <DatePick :value="startedAt" title="Начато" @pick="onStarted" />
-        </section>
-
-        <section class="am-field">
-          <span class="am-field__name">Закончено</span>
-          <DatePick :value="completedAt" title="Закончено" @pick="onCompleted" />
-        </section>
-
-        <section class="am-field am-field--wide">
-          <span class="am-field__name">Комментарий</span>
-          <textarea
-            v-model="draft"
-            class="am-input am-note"
-            rows="3"
-            placeholder="Личная заметка, остаётся в вашем списке"
-            @blur="sendNotes"
-          />
-        </section>
+          <button class="am-btn" type="button" @click="onClose">Готово</button>
+        </footer>
       </div>
-
-      <footer class="am-sheet__foot">
-        <span class="am-bar__gap" />
-
-        <button class="am-btn" type="button" @click="onClose">Готово</button>
-      </footer>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
-/* Окно поверх экрана: затемнение гасит всё лишнее. */
+/* Окно поверх экрана: затемнение гасит всё лишнее.
+
+   Живёт в body (см. шапку файла), поэтому inset здесь честно значит
+   «весь видимый прямоугольник окна браузера», а не «весь длинный список». */
 .am-sheet {
   position: fixed;
   inset: 0;
