@@ -6,6 +6,11 @@
 // путь к релизу — поиск по названию, а чтобы он не приводил в чужой сезон,
 // совпадение требуется точное после нормализации, а год служит разводящим
 // признаком. Найденный номер релиза кладётся в mediaCache и больше не ищется.
+//
+// Метке доступности нужен только один бит, и ради него релиз целиком не читается:
+// askPresence останавливается на совпадении в поиске — это на запрос меньше на тайтл.
+// Совпадение и промах ложатся на тот же склад ALIB1_, что читает плеер, поэтому
+// вопрос метки потом экономит запрос самому плееру.
 
 import { Bridge, type HttpResponse } from '@/bridge'
 import { CACHE_TIME } from '../core/constants'
@@ -14,6 +19,7 @@ import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
 import type { MediaCacheRecord } from '../core/types'
 import type {
+  PresenceMap,
   VideoEpisode,
   VideoRequest,
   VideoSource,
@@ -86,6 +92,11 @@ interface AniMatchRecord {
 const releaseMemory = new Map<string, { at: number; release: AniRelease }>()
 const pendingRelease = new Map<string, Promise<AniRelease | null>>()
 const pendingMatch = new Map<number, Promise<AniRelease | null>>()
+
+/** Ключ склада соответствия. Один на плеер и на метку доступности. */
+function matchKey(anilistId: number): string {
+  return `ALIB1_${anilistId}`
+}
 
 /** Общий запрос к API. Никогда не отклоняется: любая неудача — null и запись в журнал. */
 async function apiGet<T>(path: string, note: string, attempt = 0): Promise<T | null> {
@@ -224,7 +235,7 @@ async function findRelease(req: VideoRequest): Promise<AniRelease | null> {
 }
 
 async function findReleaseUncached(req: VideoRequest): Promise<AniRelease | null> {
-  const cacheKey = `ALIB1_${req.anilistId}`
+  const cacheKey = matchKey(req.anilistId)
   const cached = await dbGet<MediaCacheRecord<AniMatchRecord>>('mediaCache', cacheKey)
 
   if (cached) {
@@ -246,6 +257,60 @@ async function findReleaseUncached(req: VideoRequest): Promise<AniRelease | null
 
   // Поиск отдаёт карточку без эпизодов, поэтому релиз читается целиком.
   return loadRelease(key)
+}
+
+/**
+ * Есть ли у службы этот тайтл. От findRelease отличается тем, что не читает релиз
+ * целиком: метке хватает совпадения в поиске, а список серий ей ни к чему.
+ *
+ * null — служба не ответила ни на одно название. Молчание не «нет»: 404
+ * и оборванная сеть приходят сюда одинаково, и ошибиться отказом дороже,
+ * чем промолчать.
+ */
+async function presenceOf(req: VideoRequest): Promise<boolean | null> {
+  const cacheKey = matchKey(req.anilistId)
+  const cached = await dbGet<MediaCacheRecord<AniMatchRecord>>('mediaCache', cacheKey)
+
+  if (cached) {
+    const found = cached.data.release
+    const fresh = found
+      ? Date.now() - cached.ts < CACHE_TIME
+      : Date.now() - cached.ts < MISS_RETRY_MS
+    // Склад отвечает даром: тайтл, уже открывавшийся в плеере, не стоит запроса.
+    if (fresh) return found !== null
+  }
+
+  const wanted = req.titles.map(plain).filter(Boolean)
+  if (wanted.length === 0) return null
+
+  let answered = false
+
+  for (const title of req.titles.slice(0, SEARCH_TRIES)) {
+    const found = await apiGet<AniSearchResponse>(
+      '/app/search/releases?query=' + encodeURIComponent(title),
+      'наличие ' + title,
+    )
+    if (found === null) continue
+
+    answered = true
+
+    const list = Array.isArray(found) ? found : (found?.data ?? [])
+    const hit = list.find((r) => r && matches(r, wanted, req.year))
+    if (!hit) continue
+
+    void dbSet('mediaCache', {
+      key: cacheKey,
+      data: { release: releaseKey(hit) || null },
+      ts: Date.now(),
+    })
+    return true
+  }
+
+  if (!answered) return null
+
+  // Промах ложится на склад тем же порядком, что и у плеера: переспросим через сутки.
+  void dbSet('mediaCache', { key: cacheKey, data: { release: null }, ts: Date.now() })
+  return false
 }
 
 /** Часть ссылок приходит путём без хоста — доставляем его сами. */
@@ -298,6 +363,22 @@ export const anilibertySource: VideoSource = {
 
     // Озвучка у службы всегда одна — своя собственная.
     return [{ id: releaseKey(release), label: NET_LABEL_ANILIBERTY, episodes: episodes.length }]
+  },
+
+  /** Вход только по названию, поэтому вопрос стоит запроса на тайтл. */
+  presenceCost: 'each',
+
+  async askPresence(reqs: readonly VideoRequest[]): Promise<PresenceMap> {
+    const out: PresenceMap = new Map()
+
+    // Подряд, а не разом: ограничитель темпа всё равно выстроит запросы
+    // в очередь, а последовательный проход не плодит висящих обещаний.
+    for (const req of reqs) {
+      const state = await presenceOf(req)
+      if (state !== null) out.set(req.anilistId, state)
+    }
+
+    return out
   },
 
   async listEpisodes(_req: VideoRequest, voiceId: string): Promise<VideoEpisode[]> {
