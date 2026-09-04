@@ -89,8 +89,17 @@ const repeatHint = computed(() => `Повторных проходов: ${props.
  * Метка доступности. У анонса её нет вовсе: там смотреть нечего по самой
  * природе тайтла, и об этом уже сказано меткой анонса. Две метки об одном
  * рядом читались бы как спор.
+ *
+ * Сидит она в правом нижнем углу постера, а не среди меток слева: там
+ * говорят о самом тайтле, а доступность — про наш плеер, и её место рядом
+ * с кнопкой просмотра, а не рядом с оценкой.
  */
 const playMark = computed<PlayState | null>(() => (props.soon ? null : props.play))
+
+/** Подсказка метки: сам знак без подписи, всё словами говорится здесь. */
+const playHint = computed(() =>
+  playMark.value === 'yes' ? 'Можно посмотреть' : 'Нет в каталоге',
+)
 
 /** Есть ли вообще что показывать в левом верхнем углу. */
 const hasTags = computed(
@@ -99,8 +108,7 @@ const hasTags = computed(
     props.adult ||
     props.soon ||
     props.repeat > 0 ||
-    props.note !== null ||
-    playMark.value !== null,
+    props.note !== null,
 )
 </script>
 
@@ -127,22 +135,6 @@ const hasTags = computed(
             {{ soonWord() }}
           </span>
 
-          <span
-            v-if="playMark === 'yes'"
-            v-tip="'Можно посмотреть: тайтл есть у источников видео'"
-            class="am-tile__tag am-tile__tag--play"
-          >
-            Есть видео
-          </span>
-
-          <span
-            v-else-if="playMark === 'no'"
-            v-tip="'Ни один источник этот тайтл не отдаёт'"
-            class="am-tile__tag am-tile__tag--none"
-          >
-            Нет видео
-          </span>
-
           <span v-if="mark" class="am-tile__tag">{{ mark }}</span>
 
           <span v-if="repeat > 0" v-tip="repeatHint" class="am-tile__tag am-tile__tag--sign">
@@ -163,7 +155,22 @@ const hasTags = computed(
           :class="{ 'am-tile__live--low': score !== null }"
         />
 
-        <span v-if="own" class="am-tile__own">{{ own }}</span>
+        <span
+          v-if="own"
+          class="am-tile__own"
+          :class="{ 'am-tile__own--play': playMark !== null }"
+        >
+          {{ own }}
+        </span>
+
+        <span
+          v-if="playMark !== null"
+          v-tip="playHint"
+          class="am-tile__play"
+          :class="{ 'am-tile__play--none': playMark === 'no' }"
+          role="img"
+          :aria-label="playHint"
+        />
 
         <span v-if="done > 0" class="am-tile__line">
           <span class="am-tile__fill" :style="{ width: donePart }" />
@@ -342,22 +349,6 @@ const hasTags = computed(
   border-color: color-mix(in srgb, var(--am-accent) 66%, transparent);
 }
 
-/* «Есть видео» — тем же зелёным, что и точка идущего сезона: в обоих случаях
-   речь об одном и том же, о «прямо сейчас». */
-.am-tile__tag--play {
-  color: var(--am-on-art);
-  background: color-mix(in srgb, var(--am-good) 52%, transparent);
-  border-color: color-mix(in srgb, var(--am-good) 62%, transparent);
-}
-
-/* «Нет видео» тише всех прочих меток: это отсутствие, а не свойство тайтла,
-   и кричать о нём поверх постера незачем. Красным — тем более: тайтл
-   ни в чём не виноват. */
-.am-tile__tag--none {
-  color: color-mix(in srgb, var(--am-on-art) 62%, transparent);
-  border-color: color-mix(in srgb, var(--am-on-art) 10%, transparent);
-}
-
 /* Знаки пересмотра и заметки — круглые монетки без подписей: ряд пилюль
    разной длины читался как список оценок. Счёт и текст — в подсказке. */
 .am-tile__tag--sign {
@@ -444,6 +435,54 @@ const hasTags = computed(
   text-overflow: ellipsis;
   white-space: nowrap;
   text-shadow: 0 1px 4px var(--am-veil);
+}
+
+/* Счёт частей и метка доступности живут в одном углу, поэтому строка счёта
+   уступает ей полосу справа: иначе «12 / 24» уезжало бы под треугольник. */
+.am-tile__own--play {
+  right: 32px;
+}
+
+/* Метка доступности: маленький Play в правом нижнем углу. Слов нет вовсе:
+   треугольник понятен без подписи, а прежняя пилюля «Есть видео» отнимала
+   половину верхнего ряда у меток о самом тайтле. */
+.am-tile__play {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--am-on-art);
+  filter: drop-shadow(0 1px 3px var(--am-veil));
+}
+
+/* Сам знак. clip-path, а не рамки: так треугольник остаётся ровно в центре
+   своего квадрата и поверх него можно положить перечёркивание. */
+.am-tile__play::before {
+  grid-area: 1 / 1;
+  width: 11px;
+  height: 13px;
+  content: '';
+  background: currentcolor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* «Нет в каталоге»: тот же знак, но серый и перечёркнутый. Это отсутствие
+   в нашем плеере, а не свойство тайтла: красным здесь кричать не о чем. */
+.am-tile__play--none {
+  color: color-mix(in srgb, var(--am-on-art) 42%, transparent);
+}
+
+.am-tile__play--none::after {
+  grid-area: 1 / 1;
+  width: 20px;
+  height: 2px;
+  content: '';
+  background: color-mix(in srgb, var(--am-on-art) 66%, transparent);
+  border-radius: 1px;
+  transform: rotate(-45deg);
 }
 
 .am-tile__line {
