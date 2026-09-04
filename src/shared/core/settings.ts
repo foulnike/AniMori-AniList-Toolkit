@@ -22,9 +22,11 @@ export type AppearanceName = 'dark' | 'light' | 'amoled'
  * Где живёт облачная копия списка — этап 6. Значение 'none' означает «нигде»:
  * облако выключено, и наружу по своей воле не уходит ни один запрос.
  *
- * Место хранится строкой, а не флажком «включено», и второй провайдер это
- * оправдал: Google Drive стал ещё одним значением, а не вторым ключом
- * с отдельной логикой включения.
+ * Рабочее место осталось одно: Google Drive убран из программы целиком.
+ * Значение 'google' оставлено нарочно: у тех, кто его выбирал, оно лежит
+ * в хранилище, и панель облака по нему говорит человеку, что место пора
+ * переставить. Выкинуть его из типа значило бы молча подставить человеку
+ * другое облако вместо выбранного.
  */
 export type CloudPlace = 'none' | 'yandex' | 'google'
 
@@ -110,9 +112,11 @@ export interface AniMoriSettings {
    * Пропуск (токен OAuth) Яндекс Диска. Пустая строка значит «место выбрано,
    * но входа нет»: сохранять и забирать копию нечем.
    *
-   * Ключ только для Яндекса: там человек вставляет готовый пропуск руками.
-   * У Google пропусков руками не выдают вовсе, и его вход живёт в трёх
-   * ключах ниже.
+   * Пропуск человек вставляет руками: Яндекс выдаёт его сам, и своего
+   * приложения внутри программы для этого не нужно.
+   *
+   * Чтение копии по публичной ссылке обходится без этого ключа вовсе —
+   * ровно тем оно и полезно на устройстве, где набирать пропуск нечем.
    *
    * Лежит в хранилище окна открытым текстом, как и остальные настройки, —
    * это файл store в приватном каталоге приложения на этой машине. Пропуск
@@ -148,39 +152,12 @@ export interface AniMoriSettings {
    * часы, и разница в минуту читалась бы как чужая правка. Здесь лежит
    * ровно та строка, которую отдало облако, и сравнение идёт знак в знак.
    *
-   * Метка принадлежит ТЕКУЩЕМУ месту: у Яндекса и Google это разные файлы
-   * с разными часами. При смене места её обязан очищать тот, кто место
-   * меняет, иначе первая же запись на новом месте увидит чужую копию.
-   * Лишний вопрос тут дешевле молчаливой перезаписи, но и он ни к чему.
+   * Метка принадлежит ТЕКУЩЕМУ пропуску: с другим пропуском это может
+   * быть другой Диск с другим файлом и другими часами. Очищать её обязан
+   * тот, кто меняет место или пропуск, иначе первая же запись увидит
+   * чужую копию — или, что хуже, примет чужую за свою.
    */
   cloudSeenModified: string
-  /**
-   * Идентификатор клиента OAuth для входа в Google с устройства. Пустая
-   * строка значит «сборка без своего клиента»: экран тогда честно просит
-   * вставить свой, а не притворяется, что вход сломался.
-   *
-   * Клиент нужен именно типа «ТВ и устройства с ограниченным вводом»:
-   * другому типу Google не даёт кода для устройства, и вход по QR с ним
-   * не заработает вовсе.
-   */
-  cloudGoogleClient: string
-  /**
-   * «Секрет» того же клиента. Слово в кавычках намеренно: у клиента для
-   * устройств секрета нет и быть не может — программа раздаётся людям,
-   * и вынуть строку из неё может любой. Так прямо и сказано в RFC 8252,
-   * а Google всё равно требует её при обмене кода на пропуск. Лежит здесь
-   * не ради тайны, а потому что без неё обмен не проходит.
-   */
-  cloudGoogleSecret: string
-  /**
-   * Пропуск продления от Google — единственное, что имеет смысл хранить.
-   * Сам пропуск доступа живёт час и лежит только в памяти
-   * api/google-oauth.ts: писать на диск то, что стухнет к следующему
-   * запуску, незачем.
-   *
-   * Пустая строка значит «вход не пройден»: сохранять и забирать копию нечем.
-   */
-  cloudGoogleRefresh: string
   /** Производная: тайтлы включены, пока основной источник != 'off'. */
   translateTitles: boolean
 }
@@ -224,9 +201,6 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   cloudSavedAt: 0,
   cloudSavedCount: 0,
   cloudSeenModified: '',
-  cloudGoogleClient: '',
-  cloudGoogleSecret: '',
-  cloudGoogleRefresh: '',
   translateTitles: true,
 }
 
@@ -267,9 +241,6 @@ async function readSettings(): Promise<AniMoriSettings> {
     cloudSavedAt,
     cloudSavedCount,
     cloudSeenModified,
-    cloudGoogleClient,
-    cloudGoogleSecret,
-    cloudGoogleRefresh,
   ] = await Promise.all([
     storage.get('set_interface', DEFAULT_SETTINGS.translateInterface),
     storage.get<TitleSource>('set_title_primary'),
@@ -302,9 +273,6 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('am_cloud_saved_at', DEFAULT_SETTINGS.cloudSavedAt),
     storage.get('am_cloud_saved_count', DEFAULT_SETTINGS.cloudSavedCount),
     storage.get('am_cloud_seen_modified', DEFAULT_SETTINGS.cloudSeenModified),
-    storage.get('am_cloud_g_client', DEFAULT_SETTINGS.cloudGoogleClient),
-    storage.get('am_cloud_g_secret', DEFAULT_SETTINGS.cloudGoogleSecret),
-    storage.get('am_cloud_g_refresh', DEFAULT_SETTINGS.cloudGoogleRefresh),
   ])
 
   // Совместимость: старый set_titles применяется только при отсутствии нового ключа.
@@ -343,9 +311,6 @@ async function readSettings(): Promise<AniMoriSettings> {
     cloudSavedAt,
     cloudSavedCount,
     cloudSeenModified,
-    cloudGoogleClient,
-    cloudGoogleSecret,
-    cloudGoogleRefresh,
     translateTitles: titlePrimary !== 'off',
   }
 }
