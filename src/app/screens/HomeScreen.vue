@@ -17,7 +17,13 @@ import {
   type MediaLook,
 } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
-import { peekPlayable, warmPlayable, type PlayAsk } from '@/core/playable'
+import {
+  peekPlayable,
+  primePlayable,
+  warmPlayable,
+  type PlayAsk,
+  type PlayState,
+} from '@/core/playable'
 import { hideRec, motifShelf, recShelf, tasteShelf } from '@/core/recs'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
@@ -36,8 +42,12 @@ const TITLE_DEPTH = 12
 const TITLE_CHUNK = 6
 
 /**
- * Скольким верхним плиткам полки спрашивать доступность и сколько таких
- * вопросов позволено всей витрине за один заход.
+ * Скольким верхним плиткам полки спрашивать доступность у источников
+ * и сколько таких вопросов позволено всей витрине за один заход.
+ *
+ * Оба числа — про сеть и только про сеть. Склад ответов поднимается даром
+ * и разом по всей полке, поэтому однажды спрошенное показывается целиком,
+ * включая хвост ряда за прокруткой.
  *
  * Глубина — это то, что видно без прокрутки ряда. Бюджет — потолок на всё
  * сразу: шесть полок по четырнадцать плиток — это сотня тайтлов, а спросить
@@ -46,6 +56,13 @@ const TITLE_CHUNK = 6
  */
 const PLAY_DEPTH = 5
 const PLAY_BUDGET = 20
+
+/**
+ * Скольким плиткам своей полки спрашивать доступность сетью. Своя полка
+ * короткая и она про «что смотреть сейчас»: здесь метка нужнее всего,
+ * поэтому бюджет витрины её не касается.
+ */
+const OWN_PLAY_DEPTH = 6
 
 /** Сколько заглушек держать на время подъёма снимка. */
 const HOLD_COUNT = 7
@@ -63,6 +80,7 @@ interface Row {
   own: string | null
   done: number
   soon: boolean
+  play: PlayState | null
   cover: string | null
   color: string | null
   adult: boolean
@@ -98,6 +116,7 @@ let activeDefs: ShelfDef[] = []
 /** Номера идущих доборов: смена отбора гасит старую работу. */
 let lookRun = 0
 let titleRun = 0
+let playRun = 0
 let recsRun = 0
 
 /** Остаток бюджета вопросов о доступности: общий на все полки захода. */
@@ -125,6 +144,32 @@ function ownText(entry: SnapshotEntry, parts: number | null): string | null {
   return `${entry.progress} / ${parts} ${short}`
 }
 
+/**
+ * Вопрос об источниках по записи своей полки. Имён берётся столько, сколько
+ * есть: снимок хранит латиницу, облик — романдзи, датасет — русское имя,
+ * и любое из них может оказаться единственным, по которому источник найдёт
+ * тайтл. Номер MAL у записи бывает пустым: снимки до шестой версии его
+ * не хранили, и тогда Kodik остаётся ни при чём.
+ */
+function playAskOf(entry: SnapshotEntry): PlayAsk {
+  const look = peekLook(entry.mediaId)
+  const names = [
+    ...new Set([
+      entry.romaji ?? '',
+      entry.english ?? '',
+      look?.romaji ?? '',
+      peekRussianName(entry.mediaId) ?? '',
+    ]),
+  ]
+
+  return {
+    mediaId: entry.mediaId,
+    malId: entry.malId ?? null,
+    titles: names.filter((name) => name !== ''),
+    year: look?.seasonYear ?? undefined,
+  }
+}
+
 /** Строчка ряда с полки своего списка. */
 function toRow(entry: SnapshotEntry): Row {
   const look = peekLook(entry.mediaId)
@@ -147,6 +192,7 @@ function toRow(entry: SnapshotEntry): Row {
     own: ownText(entry, parts),
     done,
     soon: notOutYet(look),
+    play: peekPlayable(entry.mediaId),
     cover: look?.cover ?? null,
     color: look?.color ?? null,
     adult: entry.isAdult,
@@ -203,6 +249,40 @@ async function fillTitles(): Promise<void> {
   }
 }
 
+/**
+ * Ставит метку «Есть видео» на свою полку: сначала подъём склада по всей
+ * полке даром, потом вопрос источникам про верх ряда.
+ */
+async function fillOwnPlay(): Promise<void> {
+  const mine = ++playRun
+  if (ownEntries.length === 0) return
+
+  try {
+    const primed = await primePlayable(ownEntries.map((entry) => entry.mediaId))
+    if (mine !== playRun) return
+    if (primed > 0) redrawOwn()
+
+    const asks = ownEntries
+      .filter((entry) => peekPlayable(entry.mediaId) === null)
+      .slice(0, OWN_PLAY_DEPTH)
+      .map(playAskOf)
+
+    if (asks.length === 0) return
+
+    // Реестр источников собирает не ядро, а слой api, и до плеера человек
+    // может и не дойти. Повторный зов ничего не стоит: сборка идёт один раз.
+    setupVideoSources()
+
+    await warmPlayable(asks)
+    if (mine !== playRun) return
+
+    redrawOwn()
+  } catch (e) {
+    // Без ответа плитка останется без метки, а не с ложной: так и задумано.
+    Logger('WARN', 'Главная: метки своей полки не доехали', e)
+  }
+}
+
 /** Своя полка: продолжение просмотра и пересмотра. */
 function buildOwn(): void {
   ownEntries = selectEntries(
@@ -213,6 +293,7 @@ function buildOwn(): void {
   redrawOwn()
   void fillLooks()
   void fillTitles()
+  void fillOwnPlay()
 }
 
 /** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
@@ -288,15 +369,28 @@ async function warmRecTitles(mine: number, key: string): Promise<void> {
 }
 
 /**
- * Спрашивает источники про верх полки и ставит метку «Есть видео».
+ * Ставит метку «Есть видео» на полку витрины.
+ *
+ * Сначала склад: он отвечает даром и разом по всей полке, поэтому однажды
+ * спрошенное видно целиком и без сети. Потом сеть — верху ряда и в пределах
+ * общего бюджета захода: кто из полок приехал раньше, тот и тратит.
  *
  * Анонсы не спрашиваются вовсе: у них не вышло ни одной части, и ответ
- * известен заранее. Остальное идёт в пределах общего бюджета захода:
- * кто из полок приехал раньше, тот и тратит.
+ * известен заранее.
  */
 async function warmRecPlay(mine: number, key: string): Promise<void> {
   const items = staged.get(key)
-  if (items === undefined || playLeft <= 0) return
+  if (items === undefined) return
+
+  try {
+    const primed = await primePlayable(items.map((brief) => brief.mediaId))
+    if (mine !== recsRun) return
+    if (primed > 0) publish()
+  } catch (e) {
+    Logger('WARN', 'Главная: склад доступности не поднялся', e)
+  }
+
+  if (playLeft <= 0) return
 
   const asks: PlayAsk[] = items
     .slice(0, PLAY_DEPTH)
@@ -476,6 +570,7 @@ watch(homeGenre, () => {
             :own="row.own"
             :done="row.done"
             :soon="row.soon"
+            :play="row.play"
             :adult="row.adult"
             @open="open(row.mediaId)"
           />
