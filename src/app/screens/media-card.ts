@@ -1,4 +1,4 @@
-// Данные карточки тайтла: подробности с сервера, русская карточка,
+// Данные карточки аниме: подробности с сервера, русская карточка,
 // оценки площадок, франшиза и правки записи. За экраном осталась
 // разметка: в одном файле карточка перестала поддаваться правке.
 //
@@ -72,7 +72,6 @@ export interface MediaCardView {
   heroStyle: ComputedRef<{ backgroundImage: string }>
   donePart: ComputedRef<string>
   progressText: ComputedRef<string>
-  drifted: ComputedRef<boolean>
   about: ComputedRef<string>
   aboutLinks: ComputedRef<MediaLink[]>
   facts: ComputedRef<string[]>
@@ -121,8 +120,8 @@ export function dateText(value: string | null): string {
 }
 
 /**
- * Собирает всё состояние одной карточки вокруг номера тайтла из адреса.
- * Номер показа гасит ответы, пришедшие уже к другому тайтлу.
+ * Собирает всё состояние одной карточки вокруг номера аниме из адреса.
+ * Номер показа гасит ответы, пришедшие уже к другому аниме.
  */
 export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   const card = ref<MediaCard | null>(null)
@@ -148,13 +147,13 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   /** Счётчик добора имени из датасета: заставляет пересчитать заголовок. */
   const nameStamp = ref(0)
 
-  /** Полка франшизы: к текущему тайтлу она прокручивается сама. */
+  /** Полка франшизы: к нынешнему аниме она прокручивается сама. */
   const franList = ref<HTMLElement | null>(null)
 
   /** Счётчик правок этого показа: заставляет пересчитать взятое из памяти. */
   const editStamp = ref(0)
 
-  /** Номер показа: ответ на старый тайтл пришёл не вовремя и ему места нет. */
+  /** Номер показа: ответ на старое аниме пришёл не вовремя и ему места нет. */
   let run = 0
 
   // Ответы очереди приходят вразброд и по одному, а часть из них — чужие
@@ -178,7 +177,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   })
 
   /**
-   * Облик тайтла для записи списка: латинские имена и метка взрослого.
+   * Облик аниме для записи списка: латинские имена и метка взрослого.
    * Идёт вместе с правкой, иначе запись, созданная до переноса списка,
    * останется безымянной: имена и метку до сих пор приносил только
    * ответ сервера.
@@ -244,7 +243,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
       peekRussianName(mediaId.value) ??
       card.value?.romaji ??
       card.value?.english ??
-      `Тайтл #${mediaId.value}`
+      `Аниме #${mediaId.value}`
     )
   })
 
@@ -280,30 +279,6 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   const progressText = computed<string>(() =>
     partsTotal.value === null ? partsText.value : `${partsText.value} · ${donePart.value}`,
   )
-
-  /**
-   * Разошлось ли наше состояние с тем, что лежит на сайте.
-   *
-   * Расхождение теперь не временное, а постоянное: правки на сервер
-   * не уезжают вовсе, и после первой же правки здесь две копии записи
-   * живут отдельно. Говорится вслух именно поэтому: человек должен
-   * знать, что на сайте другие числа, прежде чем переносить список обратно.
-   */
-  const drifted = computed<boolean>(() => {
-    const server = card.value?.ownEntry
-    const mine = own.value
-    if (!server || !mine) return false
-
-    return (
-      server.status !== mine.status ||
-      server.score10 !== mine.score10 ||
-      server.progress !== mine.progress ||
-      server.repeat !== mine.repeat ||
-      server.startedAt !== mine.startedAt ||
-      server.completedAt !== mine.completedAt ||
-      server.notes !== mine.notes
-    )
-  })
 
   /**
    * Описание как приехало: разметку разбирает RichText, ему нужен исходник.
@@ -529,7 +504,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
       if (mine !== run) return
 
       if (!found) {
-        trouble.value = 'Сервер не отдал этот тайтл. Попробуйте позже.'
+        trouble.value = 'Сервер не отдал это аниме. Попробуйте позже.'
         return
       }
 
@@ -621,7 +596,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     return work.mediaId === null ? null : peekPlayable(work.mediaId)
   }
 
-  /** Переход на карточку части франшизы: текущая и несопоставленная не ведут. */
+  /** Переход на карточку части франшизы: нынешняя и несопоставленная не ведут. */
   function openFranchiseWork(work: FranchiseWork): void {
     if (work.mediaId === null || work.mediaId === mediaId.value) return
     navigate('media', { id: String(work.mediaId) })
@@ -691,7 +666,6 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     heroStyle,
     donePart,
     progressText,
-    drifted,
     about,
     aboutLinks,
     facts,
