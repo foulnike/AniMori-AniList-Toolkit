@@ -223,7 +223,7 @@ async function loadProxyOption(): Promise<TauriProxyOption> {
     const url = proxyUrl(config)
 
     if (config.enabled && !url) {
-      // Инвариант 4: иначе включённый тумблер врᑑт, а трафик идёт напрямую.
+      // Инвариант 4: иначе включённый тумблер врёт, а трафик идёт напрямую.
       console.warn(
         '[AniMori] Прокси включён, но адрес или порт заданы неверно — запросы идут напрямую',
       )
@@ -300,6 +300,17 @@ async function sendRequest(options: HttpRequestOptions): Promise<TauriResponse> 
 
     const name = e instanceof Error ? e.name : ''
     if (name === 'AbortError') throw new BridgeHttpError('abort', url)
+
+    // ПРИЧИНА ОБЯЗАНА ПОПАСТЬ В ЖУРНАЛ
+    // BridgeHttpError несёт только вид сбоя, и вызывающий говорит человеку
+    // «проверьте сеть» одинаково в двух совсем разных случаях: сеть вправду
+    // молчит — или адрес не перечислен в src-tauri/capabilities/default.json,
+    // и тогда плагин отклоняет запрос до всякого соединения словами
+    // «url not allowed on the configured scope». Второе стоило человеку вечера
+    // с ВПН на облачной копии: в окне сетевой сбой, а в списке разрешений
+    // не хватало одного хоста загрузчика Диска. Отсюда строка с самой ошибкой:
+    // она попадает в консоль окна и сразу называет виновника.
+    console.error('[AniMori] Запрос не ушёл', url, e)
 
     throw new BridgeHttpError('network', url)
   } finally {
