@@ -4,6 +4,17 @@
 // Своих данных не добывает: сотня плиток ушла бы в сеть сотню раз.
 // Метка доступности приходит готовой из core/playable по той же причине:
 // спрашивать источники сама плитка не вправе.
+//
+// НАВЕДЕНИЕ ЖИВЁТ НА ВСЕЙ ПЛИТКЕ, А НЕ НА КНОПКЕ ОТКРЫТИЯ
+// Крестик «не интересует» лежит рядом с кнопкой открытия, а не внутри неё:
+// кнопку в кнопку вложить нельзя. Пока правила наведения висели на кнопке
+// открытия, движок считал переход курсора на крестик уходом с плитки: постер
+// оседал, блик откатывался, название теряло цвет ровно в тот миг, когда до
+// крестика оставался пиксель. Теперь весь отклик висит на самом <li>: он занимает
+// ту же коробку, что кнопка открытия, и накрывает крестик заодно.
+// Клавиатурный случай — :has(:focus-visible), а не :focus-within: последний срабатывал
+// бы и на обычном нажатии мышью, оставляя постер приподнятым после ухода
+// курсора.
 import { computed, ref, watch } from 'vue'
 
 import type { PlayState } from '@/core/playable'
@@ -181,11 +192,14 @@ const hasTags = computed(
       <span v-if="facts" class="am-tile__facts">{{ facts }}</span>
     </button>
 
+    <!-- Знак «✕» спрятан от чтения с экрана, а подсказка v-tip рисуется своей
+         плашкой в body и имени кнопке не даёт — отсюда явный aria-label. -->
     <button
       v-if="hidable"
       v-tip="'Не интересует'"
       class="am-tile__hide"
       type="button"
+      aria-label="Не интересует"
       @click="emit('hide')"
     >
       <span aria-hidden="true">✕</span>
@@ -236,8 +250,8 @@ const hasTags = computed(
 
 /* Под курсором форма перетекает в «каплю»: движение самого края заметнее
    любой тени и не требует ни одного лишнего слова. */
-.am-tile__hit:hover .am-tile__art,
-.am-tile__hit:focus-visible .am-tile__art {
+.am-tile:hover .am-tile__art,
+.am-tile:has(:focus-visible) .am-tile__art {
   border-color: color-mix(in srgb, var(--am-accent) 55%, transparent);
   border-radius: var(--am-r-drop);
   box-shadow:
@@ -246,7 +260,7 @@ const hasTags = computed(
   transform: translateY(-6px) scale(1.015);
 }
 
-.am-tile__hit:hover .am-tile__name {
+.am-tile:hover .am-tile__name {
   color: var(--am-accent);
 }
 
@@ -296,7 +310,7 @@ const hasTags = computed(
   pointer-events: none;
 }
 
-.am-tile__hit:hover .am-tile__sheen {
+.am-tile:hover .am-tile__sheen {
   transform: translateX(130%);
 }
 
@@ -310,16 +324,17 @@ const hasTags = computed(
   max-width: calc(100% - 46px);
   transition:
     opacity var(--am-fast) var(--am-ease),
-    transform var(--am-fast) var(--am-ease);
+    transform var(--am-mid) var(--am-ease);
 }
 
 /* Крестик витрины занимает тот же левый угол, что метки, поэтому на
    время наведения метки уступают ему место: две стеклянные пилюли
-   внахлёст не читаются ни одна. */
+   внахлёст не читаются ни одна. Уходят они влево, а не вверх: так это
+   читается «метки посторонились», а не «метки улетели». */
 .am-tile--hidable:hover .am-tile__tags,
-.am-tile--hidable:focus-within .am-tile__tags {
+.am-tile--hidable:has(:focus-visible) .am-tile__tags {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateX(-6px);
 }
 
 /* Метки — стекло, а не плотные пилюли: на светлых обложках чёрные плашки
@@ -365,7 +380,7 @@ const hasTags = computed(
     border-radius var(--am-mid) var(--am-ease);
 }
 
-.am-tile__hit:hover .am-tile__tag--sign {
+.am-tile:hover .am-tile__tag--sign {
   color: var(--am-on-art);
   border-color: color-mix(in srgb, var(--am-on-art) 26%, transparent);
   border-radius: var(--am-r-drop);
@@ -437,100 +452,96 @@ const hasTags = computed(
   text-shadow: 0 1px 4px var(--am-veil);
 }
 
-/* Счёт частей и метка доступности живут в одном углу, поэтому строка счёта
-   уступает ей полосу справа: иначе «12 / 24» уезжало бы под монетку. */
+/* Счёт частей и метка доступности стоят в одной строке, поэтому счёт
+   уступает ей полосу справа: иначе «12 / 24» уезжало бы под знак. */
 .am-tile__own--play {
-  right: 36px;
+  right: 28px;
 }
 
 /* Метка доступности: маленький Play в правом нижнем углу. Слов нет вовсе:
-   треугольник понятен без подписи, а прежняя пилюля «Есть видео» отнимала
+   треугольник понятен без подписи, а пилюля «Есть видео» отнимала бы
    половину верхнего ряда у меток о самом тайтле.
 
-   Оправа — та же стеклянная монетка, что у знаков повтора и заметки слева
-   вверху: угол разный, а язык меток на плитке один. Голый треугольник
-   терялся на светлых кадрах и читался опечаткой рядом с обрамлёнными
-   соседями. Акцент здесь оправдан: это единственная метка плитки, которая
-   обещает действие, а не сообщает сведение. */
+   ОПРАВЫ НЕТ НАРОЧНО
+   Раньше здесь сидела стеклянная монета с акцентным градиентом, оправой
+   и цветным свечением — единственный объёмный предмет на плоском постере,
+   и в полке из четырнадцати плиток глаз цеплялся за ряд кружков раньше,
+   чем за сами обложки. Оправа бралась от знаков повтора и заметки, но те
+   стоят в другом углу и в другом ряду. Ближайший сосед метки — счёт частей
+   слева в той же строке, а он без всякой подложки и держится на тени.
+   Знак теперь собран так же: голый треугольник с мягкой тенью. Тень закрывает
+   старую претензию к голому знаку — потерю на светлых кадрах, — но не добавляет
+   на картинку ни одной лишней границы.
+
+   Отклик ушёл в наведение: в покое знак молчит, под курсором наливается
+   светом и берёт акцентный ореол. Акцент именно ореолом, а не цветом самого
+   знака: --am-accent в светлой теме тёмно-синий и на тёмной завесе сел бы
+   по контрасту. */
 .am-tile__play {
+  --am-play-shade: drop-shadow(0 1px 3px var(--am-veil));
+
   position: absolute;
-  right: 8px;
-  bottom: 8px;
+  right: 10px;
+  bottom: 13px;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  color: var(--am-on-art);
-  background:
-    radial-gradient(
-      circle at 32% 26%,
-      color-mix(in srgb, var(--am-accent) 55%, transparent),
-      transparent 72%
-    ),
-    color-mix(in srgb, var(--am-veil) 66%, transparent);
-  border: 1px solid color-mix(in srgb, var(--am-accent) 52%, transparent);
-  border-radius: var(--am-r-cap);
-  box-shadow: 0 2px 10px rgb(var(--am-accent-rgb) / 0.3);
-  backdrop-filter: blur(8px) saturate(1.2);
+  width: 12px;
+  height: 14px;
+  color: color-mix(in srgb, var(--am-on-art) 86%, transparent);
+  filter: var(--am-play-shade);
   transition:
     color var(--am-fast) var(--am-ease),
-    border-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease),
-    box-shadow var(--am-mid) var(--am-ease),
-    transform var(--am-fast) var(--am-ease);
+    filter var(--am-mid) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
 }
 
 /* Сам знак. clip-path, а не рамки: так треугольник остаётся ровно в центре
-   своей монетки и поверх него можно положить перечёркивание. Полпикселя
+   своей клетки и поверх него можно положить перечёркивание. Полпикселя
    вправо — правка оптическая: у треугольника центр тяжести левее середины. */
 .am-tile__play::before {
   grid-area: 1 / 1;
-  width: 8px;
-  height: 10px;
+  width: 9px;
+  height: 11px;
   content: '';
   background: currentcolor;
   clip-path: polygon(0 0, 100% 50%, 0 100%);
   transform: translateX(0.5px);
 }
 
-/* Под курсором монетка перетекает в лепесток и чуть приподнимается —
-   ровно то же движение, что у самого постера и у знаков слева. */
-.am-tile__hit:hover .am-tile__play,
-.am-tile__hit:focus-visible .am-tile__play {
-  border-color: color-mix(in srgb, var(--am-accent) 80%, transparent);
-  border-radius: var(--am-r-drop);
-  box-shadow: 0 4px 16px rgb(var(--am-accent-rgb) / 0.45);
-  transform: translateY(-1px);
+.am-tile:hover .am-tile__play,
+.am-tile:has(:focus-visible) .am-tile__play {
+  color: var(--am-on-art);
+  filter: var(--am-play-shade) drop-shadow(0 0 7px rgb(var(--am-accent-rgb) / 0.55));
+  transform: scale(1.12);
 }
 
-/* «Нет в каталоге»: та же монетка, но погашенная — серое стекло, приглушённый
-   знак и черта поверх. Это отсутствие в нашем плеере, а не свойство тайтла:
-   красным здесь кричать не о чем, и в ряду плиток такая метка обязана молчать. */
+/* «Нет в каталоге»: тот же знак, только погашенный и перечёркнутый. Это
+   отсутствие в нашем плеере, а не свойство тайтла: красным здесь кричать
+   не о чем, и в ряду плиток такая метка обязана молчать — оттого у неё нет
+   ни акцентного ореола, ни роста под курсором. */
 .am-tile__play--none {
-  color: color-mix(in srgb, var(--am-on-art) 46%, transparent);
-  background: color-mix(in srgb, var(--am-veil) 58%, transparent);
-  border-color: color-mix(in srgb, var(--am-on-art) 16%, transparent);
-  box-shadow: none;
+  color: color-mix(in srgb, var(--am-on-art) 40%, transparent);
 }
 
-.am-tile__hit:hover .am-tile__play--none,
-.am-tile__hit:focus-visible .am-tile__play--none {
-  color: color-mix(in srgb, var(--am-on-art) 72%, transparent);
-  border-color: color-mix(in srgb, var(--am-on-art) 30%, transparent);
-  box-shadow: none;
+.am-tile:hover .am-tile__play--none,
+.am-tile:has(:focus-visible) .am-tile__play--none {
+  color: color-mix(in srgb, var(--am-on-art) 62%, transparent);
+  filter: var(--am-play-shade);
+  transform: none;
 }
 
-/* Черта идёт по диагонали монетки от края до края: короткий штрих поверх
-   треугольника читался царапиной на картинке. Темная обводка отделяет её
-   от знака под ней, иначе два светлых слоя слипаются в пятно. */
+/* Черта идёт по диагонали от края до края: короткий штрих поверх
+   треугольника читался царапиной на картинке. Тёмная обводка отделяет её
+   от знака под ней: без оправы два светлых слоя одного цвета слиплись бы
+   в сплошное пятно. */
 .am-tile__play--none::after {
   grid-area: 1 / 1;
   width: 17px;
   height: 1.5px;
   content: '';
-  background: color-mix(in srgb, var(--am-on-art) 66%, transparent);
+  background: currentcolor;
   border-radius: 1px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--am-veil) 55%, transparent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--am-veil) 78%, transparent);
   transform: rotate(-45deg);
 }
 
@@ -575,7 +586,12 @@ const hasTags = computed(
    идущего сезона — ровно то, по чему выбирают тайтл в витрине.
    Показ идёт прозрачностью, а не переключением display: с none на inline-flex
    браузер успевал показать символ по базовой линии — крестик сидел
-   на полпикселя ниже центра. */
+   на полпикселя ниже центра.
+
+   Появляется он не на месте, а вырастает из самого угла постера: кружок,
+   возникший из ничего прямо под курсором, читался случайным попаданием,
+   а не предложением действия. Точка роста — верхний левый угол, оттуда
+   же уходят метки. */
 .am-tile__hide {
   position: absolute;
   top: 8px;
@@ -597,11 +613,14 @@ const hasTags = computed(
   border-radius: var(--am-r-cap);
   opacity: 0;
   backdrop-filter: blur(8px);
+  transform: translate(-4px, -4px) scale(0.84);
+  transform-origin: top left;
   transition:
     opacity var(--am-fast) var(--am-ease),
     visibility var(--am-fast) var(--am-ease),
     background-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease);
+    border-radius var(--am-mid) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
 }
 
 /* Цель нажатия расширена до 44 пикселей невидимой окантовкой. */
@@ -612,9 +631,10 @@ const hasTags = computed(
 }
 
 .am-tile:hover .am-tile__hide,
-.am-tile:focus-within .am-tile__hide {
+.am-tile:has(:focus-visible) .am-tile__hide {
   visibility: visible;
   opacity: 1;
+  transform: none;
 }
 
 /* Форма такая же, как у кнопок закрытия в окнах: круг в покое,
@@ -639,18 +659,19 @@ const hasTags = computed(
 
 /* Спокойное движение: системная просьба сильнее наших красот. */
 @media (prefers-reduced-motion: reduce) {
-  .am-tile__hit:hover .am-tile__art,
-  .am-tile__hit:focus-visible .am-tile__art,
-  .am-tile__hit:hover .am-tile__play,
-  .am-tile__hit:focus-visible .am-tile__play,
+  .am-tile:hover .am-tile__art,
+  .am-tile:has(:focus-visible) .am-tile__art,
+  .am-tile:hover .am-tile__play,
+  .am-tile:has(:focus-visible) .am-tile__play,
   .am-tile--hidable:hover .am-tile__tags,
-  .am-tile--hidable:focus-within .am-tile__tags,
+  .am-tile--hidable:has(:focus-visible) .am-tile__tags,
+  .am-tile__hide,
   .am-tile__hide:hover > span,
   .am-tile__hide:focus-visible > span {
     transform: none;
   }
 
-  .am-tile__hit:hover .am-tile__sheen {
+  .am-tile:hover .am-tile__sheen {
     transform: translateX(-130%);
   }
 
