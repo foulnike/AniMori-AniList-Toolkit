@@ -69,7 +69,7 @@ const SHELF_MIN = 3
 /** Сколько плиток добирать в ленту за одно «Показать ещё». */
 const FEED_WANT = 24
 
-/** Плитка своей полки. Тот же вид, что в списках: вид тайтла везде один. */
+/** Плитка своей полки. Тот же вид, что в списках: вид аниме везде один. */
 interface Row {
   mediaId: number
   title: string
@@ -215,7 +215,7 @@ function ownText(entry: SnapshotEntry, parts: number | null): string | null {
  * Вопрос об источниках по записи своей полки. Имён берётся столько, сколько
  * есть: снимок хранит латиницу, облик — романдзи, датасет — русское имя,
  * и любое из них может оказаться единственным, по которому источник найдёт
- * тайтл. Номер MAL у записи бывает пустым: снимки до шестой версии его
+ * аниме. Номер MAL у записи бывает пустым: снимки до шестой версии его
  * не хранили, и тогда Kodik остаётся ни при чём.
  */
 function playAskOf(entry: SnapshotEntry): PlayAsk {
@@ -253,7 +253,7 @@ function toRow(entry: SnapshotEntry): Row {
       entry.romaji ??
       entry.english ??
       look?.romaji ??
-      `Тайтл #${entry.mediaId}`,
+      `Аниме #${entry.mediaId}`,
     facts: factsText(look),
     mark: entry.score10 > 0 ? `★ ${entry.score10.toFixed(1)}` : null,
     own: ownText(entry, parts),
@@ -370,8 +370,8 @@ function buildOwn(): void {
 }
 
 /** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
-    и по нему же решается, кому достанется тайтл при повторе. Под отбором
-    каруселей нет вовсе — там всё говорит лента подбора. */
+    и по нему же решается, кому достанется аниме при повторе. Под отбором
+    каруселей нет вовсе — там всь говорит лента подбора. */
 function shelfDefs(): ShelfDef[] {
   if (picked.value) return []
 
@@ -385,7 +385,7 @@ function shelfDefs(): ShelfDef[] {
 }
 
 /** Собирает полки в показ: приехавшее встаёт на своё место в порядке состава.
-    Тайтл показывается ровно на одной полке: «тренд», «лучшее» и жанровые
+    Аниме показывается ровно на одной полке: «тренд», «лучшее» и жанровые
     подборки у каталога пересекаются почти наполовину, и витрина читалась
     одним и тем же рядом под разными заголовками. */
 function publish(): void {
@@ -406,7 +406,7 @@ function publish(): void {
   recs.value = out
 }
 
-// Очередь доступности отвечает вразброд и по одному тайтлу, причём один
+// Очередь доступности отвечает вразброд и по одному аниме, причём один
 // и тот же ответ часто касается разом и своей полки, и витрины, и ленты:
 // рисуем всё три.
 const stopPlayWatch = onPlayableChange(() => {
@@ -617,7 +617,7 @@ function onMore(): void {
   void growFeed(feedRun)
 }
 
-/** Прячет тайтл из витрины и ленты: из памяти сразу, в хранилище — вдогонку. */
+/** Прячет аниме из витрины и ленты: из памяти сразу, в хранилище — вдогонку. */
 function hideOne(mediaId: number): void {
   void hideRec(mediaId)
 
@@ -746,7 +746,7 @@ watch(
 
         <div class="am-hey__acts">
           <button class="am-btn am-btn--soft" type="button" @click="toLists">Мои списки</button>
-          <button class="am-btn am-btn--ghost" type="button" @click="toSearch">Найти тайтл</button>
+          <button class="am-btn am-btn--ghost" type="button" @click="toSearch">Найти аниме</button>
         </div>
       </div>
     </div>
@@ -920,7 +920,7 @@ watch(
         <span>Когда сеть вернётся, здесь появятся рекомендации.</span>
 
         <div class="am-empty__acts">
-          <button class="am-btn" type="button" @click="toSearch">Найти тайтл</button>
+          <button class="am-btn" type="button" @click="toSearch">Найти аниме</button>
           <button class="am-btn am-btn--ghost" type="button" @click="toSettings">
             Перенести список с AniList
           </button>
@@ -1054,125 +1054,4 @@ watch(
 
 /* Центровка автоотступами, а не justify-content: когда лента шире экрана,
    автоотступ обращается в нуль и начало ряда остаётся доступным прокруткой,
-   а центрованный флекс в этом случае срезал бы первые жанры насовсем. */
-.am-choose__row {
-  display: flex;
-  gap: 8px;
-  width: max-content;
-  margin-inline: auto;
-}
-
-.am-choose .am-chip {
-  flex: 0 0 auto;
-}
-
-/* Что сейчас в отборе: снимается по одному нажатием на сам чип. */
-.am-now {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.am-now__off {
-  margin-left: 2px;
-  font-size: 13px;
-  opacity: 0.7;
-}
-
-/* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
-.am-empty__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 6px;
-}
-
-/* «Показать ещё» по центру под сеткой: у края страницы кнопку
-   приходилось бы искать глазами после каждой порции. */
-.am-more {
-  display: flex;
-  justify-content: center;
-  padding: 6px 0 10px;
-}
-
-.am-shelf {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  animation: am-shelf-in var(--am-slow) var(--am-ease) both;
-}
-
-@keyframes am-shelf-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Своя полка важнее советов каталога, поэтому лежит на стекле:
-   раньше все полки были одного веса и глаз не знал, где своё. */
-.am-shelf--mine {
-  padding: 16px 18px 8px;
-  background: var(--am-glass);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-drop);
-  box-shadow: inset 0 1px 0 var(--am-edge);
-  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
-}
-
-/* Заголовок полки с акцентной засечкой: шесть одинаковых заголовков
-   подряд читались сплошным текстом. */
-.am-shelf .am-h2 {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.am-shelf .am-h2::before {
-  width: 3px;
-  height: 15px;
-  content: '';
-  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
-  border-radius: var(--am-r-cap);
-}
-
-.am-rail {
-  justify-content: start;
-}
-
-.am-hold {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.am-hold__art {
-  display: block;
-  aspect-ratio: 2 / 3;
-}
-
-.am-hold__line {
-  display: block;
-  width: 72%;
-  height: 12px;
-  border-radius: var(--am-r-s);
-}
-
-/* На узком экране кнопка отбора уходит над лентой жанров: рядом им тесно,
-   и лента сжималась до двух чипов. */
-@media (max-width: 560px) {
-  .am-sift {
-    flex-wrap: wrap;
-  }
-
-  .am-choose {
-    flex-basis: 100%;
-  }
-}
-</style>
+   а центрованный флекс в этом случае ср
