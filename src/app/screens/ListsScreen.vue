@@ -5,14 +5,28 @@
 //
 // Переноса списка с AniList на экране нет: он живёт в настройках, рядом
 // со входом и очисткой склада, и там же человек выбирает способ переноса.
+//
+// ПРАВКА ЗАПИСИ ИДЁТ ИЗ САМОГО СПИСКА
+//
+// Закладку, оценку и счёт серий правят чаще всего и подряд у нескольких
+// записей, а раньше за каждой надо было идти в карточку и возвращаться
+// назад — два перехода и сетевая карточка ради одного нажатия.
+// Теперь то же окно правки открывается поверх списка.
+//
+// Запись в окно берётся из памяти коллекции, а не из строки показа:
+// в строке лежит уже одетое значение вроде «★ 8.5», а окну нужно само число.
+// Название же запоминается при открытии: правка закладки выкидывает запись
+// из нынешней закладки, и шапка открытого окна иначе опустела бы на месте.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { initCollection } from '@/core/collection'
+import { editEntry, getEntry, initCollection } from '@/core/collection'
 import { countByStatus, countEntries, selectEntries } from '@/core/collection-view'
+import { partsOut, peekLook } from '@/core/media-looks'
 import { searchOwnList } from '@/core/media-search'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
 
+import EntrySheet from '../components/EntrySheet.vue'
 import MediaRow from '../components/MediaRow.vue'
 import MediaTile from '../components/MediaTile.vue'
 import PickBox from '../components/PickBox.vue'
@@ -70,6 +84,9 @@ const VIEW_TABS: ReadonlyArray<{ key: ViewName; title: string; icon: string }> =
   { key: 'wide', title: 'Строки с постером', icon: '▤' },
 ]
 
+/** Виды правки, доступные со списка. Удаление записи сюда не входит. */
+type EntryEdit = 'status' | 'score' | 'progress' | 'repeat' | 'startedAt' | 'completedAt' | 'notes'
+
 /** Идёт ли работа со списком: подъём снимка с диска. */
 const busy = ref(true)
 
@@ -101,6 +118,15 @@ const picked = ref(0)
 /** Метка конца списка: по её появлению в окне заказывается добор. */
 const tailMark = ref<HTMLElement | null>(null)
 
+/** Номер записи в правке. Ноль — окно закрыто. */
+const editId = ref(0)
+
+/** Название для шапки окна: запоминается при открытии, см шапку файла. */
+const editName = ref('')
+
+/** Счётчик правок: мап коллекции вне реактивности Vue и пересчёт не закажет. */
+const editStamp = ref(0)
+
 /** Закладки статуса. Список теперь одного вида, и подписи у него одни. */
 const statusTabs = statusList()
 
@@ -114,6 +140,23 @@ const hasMore = computed(() => picked.value > rows.value.length)
 
 /** Сколько ещё скрыто: число на кнопке честнее голого «ещё». */
 const restCount = computed(() => Math.max(0, picked.value - rows.value.length))
+
+/** Запись в правке из памяти коллекции. undefined — окно не показывается. */
+const editRow = computed<SnapshotEntry | undefined>(() => {
+  void editStamp.value
+  return editId.value > 0 ? getEntry(editId.value) : undefined
+})
+
+/** Облик правимого аниме из склада: оттуда берётся потолок счёта серий. */
+const editLook = computed(() => (editId.value > 0 ? peekLook(editId.value) : null))
+
+/** Сколько серий уже вышло. Без облика потолка нет, и окно его не выдумывает. */
+const editParts = computed<number | null>(() =>
+  editLook.value === null ? null : partsOut(editLook.value),
+)
+
+/** Идёт ли показ: онгоингу окно не ставит «Просмотрено» на потолке счёта. */
+const editOngoing = computed<boolean>(() => (editLook.value?.airingEpisode ?? null) !== null)
 
 /**
  * Найденные записи последнего поиска. Не реактивные сознательно:
@@ -269,6 +312,65 @@ function open(mediaId: number): void {
   navigate('media', { id: String(mediaId) })
 }
 
+/** Открытие окна правки прямо из списка. */
+function openEdit(row: Row): void {
+  editName.value = row.title
+  editId.value = row.mediaId
+}
+
+function closeEdit(): void {
+  editId.value = 0
+}
+
+/**
+ * Кладёт одну правку в память и пересобирает показ. Синхронно и без сети,
+ * ровно как с карточки: облик здесь не нужен, запись уже есть и имена в ней тоже.
+ *
+ * Полная пересборка, а не правка одной строки: правка закладки выкидывает
+ * запись из нынешнего отбора, правка оценки меняет порядок, а счётчики
+ * закладок сверху должны сойтись тут же. Окно остаётся открытым: запись
+ * оно берёт из коллекции, а не из выкинутой строки.
+ */
+function sendEdit(kind: EntryEdit, value: string | number): void {
+  if (editId.value === 0) return
+
+  try {
+    editEntry(editId.value, kind, value)
+    editStamp.value += 1
+    redraw()
+  } catch (e) {
+    trouble.value = describe(e)
+  }
+}
+
+function onEditStatus(value: string): void {
+  sendEdit('status', value)
+}
+
+function onEditScore(value: number): void {
+  sendEdit('score', value)
+}
+
+function onEditProgress(value: number): void {
+  sendEdit('progress', value)
+}
+
+function onEditRepeat(value: number): void {
+  sendEdit('repeat', value)
+}
+
+function onEditStarted(value: string): void {
+  sendEdit('startedAt', value)
+}
+
+function onEditCompleted(value: string): void {
+  sendEdit('completedAt', value)
+}
+
+function onEditNotes(value: string): void {
+  sendEdit('notes', value)
+}
+
 onMounted(() => {
   // Смотритель за концом списка: добор заказывается заранее, до самого края.
   // На старых окружениях смотрителя может не быть: останется кнопка.
@@ -397,7 +499,7 @@ onBeforeUnmount(() => {
     <div v-else-if="total === 0" class="am-empty">
       <span class="am-empty__mark" aria-hidden="true">⊘</span>
       <span>Записей пока нет.</span>
-      <span>Добавьте тайтл из поиска или перенесите список с AniList в настройках.</span>
+      <span>Добавьте аниме из поиска или перенесите список с AniList в настройках.</span>
     </div>
 
     <div v-else-if="searchBusy && rows.length === 0" class="am-empty">
@@ -432,7 +534,9 @@ onBeforeUnmount(() => {
         :own="row.own"
         :done="row.done"
         :adult="row.adult"
+        editable
         @open="open(row.mediaId)"
+        @edit="openEdit(row)"
       />
     </ul>
 
@@ -452,7 +556,9 @@ onBeforeUnmount(() => {
         :done="row.done"
         :adult="row.adult"
         :art="view === 'wide'"
+        editable
         @open="open(row.mediaId)"
+        @edit="openEdit(row)"
       />
     </ul>
 
@@ -469,6 +575,31 @@ onBeforeUnmount(() => {
       <template v-if="titlesBusy"> · названия…</template>
       <template v-if="playBusy"> · доступность…</template>
     </p>
+
+    <!-- То же окно, что на карточке. Признак онгоинга и потолок счёта берутся
+         из склада обликов: если облик ещё не доехал, потолка нет и прыжка
+         к концу счёта тоже — это штатно и честнее выдуманного итога. -->
+    <EntrySheet
+      v-if="editRow"
+      :title="editName"
+      :status="editRow.status"
+      :score10="editRow.score10"
+      :progress="editRow.progress"
+      :parts-total="editParts"
+      :ongoing="editOngoing"
+      :repeat="editRow.repeat"
+      :started-at="editRow.startedAt"
+      :completed-at="editRow.completedAt"
+      :notes="editRow.notes"
+      @close="closeEdit"
+      @status="onEditStatus"
+      @score="onEditScore"
+      @progress="onEditProgress"
+      @repeat="onEditRepeat"
+      @started-at="onEditStarted"
+      @completed-at="onEditCompleted"
+      @notes="onEditNotes"
+    />
   </section>
 </template>
 
