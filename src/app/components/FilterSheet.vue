@@ -363,14 +363,9 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <label class="am-search">
+            <label class="am-search am-part__hunt">
               <span class="am-search__mark" aria-hidden="true">⌕</span>
-              <input
-                v-model="hunt"
-                class="am-search__field"
-                type="search"
-                placeholder="Найти тэг"
-              />
+              <input v-model="hunt" class="am-input" type="search" placeholder="Найти тэг" />
             </label>
 
             <p v-if="tagsBusy" class="am-dim">Поднимаем справочник тэгов…</p>
@@ -402,9 +397,12 @@ onBeforeUnmount(() => {
                   <span v-if="groupCount(group) > 0" class="am-fold__num">
                     {{ groupCount(group) }}
                   </span>
-                  <span class="am-fold__arrow" :class="{ 'am-fold__arrow--on': openGroup === group.key }" aria-hidden="true">
-                    ⌄
-                  </span>
+                  <span
+                    class="am-fold__arrow"
+                    :class="{ 'am-fold__arrow--on': openGroup === group.key }"
+                    aria-hidden="true"
+                    >⌄</span
+                  >
                 </button>
 
                 <div v-if="openGroup === group.key" class="am-wrap am-fold__body">
@@ -513,7 +511,7 @@ onBeforeUnmount(() => {
             Сбросить
           </button>
           <span class="am-bar__gap" />
-          <button class="am-btn" type="button" @click="onApply">Готово</button>
+          <button class="am-btn am-btn--soft" type="button" @click="onApply">Готово</button>
         </footer>
       </div>
     </div>
@@ -627,8 +625,16 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+/* Общий заголовок держит нижний отступ, а здесь расстояниями ведает gap. */
 .am-part .am-h3 {
   margin: 0;
+}
+
+/* Поле поиска в колонке тянется на всю ширину: у общего .am-search
+   расчёт на ряд контролок, а не на столбец раздела. */
+.am-part__hunt {
+  flex: 0 0 auto;
+  width: 100%;
 }
 
 /* Выбранное отделено линией: строка «что уже набрано» читается первой. */
@@ -644,7 +650,7 @@ onBeforeUnmount(() => {
 }
 
 .am-chip__off {
-  margin-left: 6px;
+  margin-left: 2px;
   font-size: 13px;
   opacity: 0.7;
 }
@@ -680,7 +686,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: none;
   border: 0;
-  transition: background var(--am-fast) var(--am-ease);
+  transition: background-color var(--am-fast) var(--am-ease);
 }
 
 .am-fold__hit:hover {
@@ -730,7 +736,7 @@ onBeforeUnmount(() => {
 }
 
 /* На узком экране меню становится нижним листом: коробка по центру
-   на телефоне оставляет полосы пустоты сверху и снизу. */
+   на телефоне оставляла бы полосы пустоты сверху и снизу. */
 @media (max-width: 640px) {
   .am-sheet {
     align-items: flex-end;
@@ -744,16 +750,6 @@ onBeforeUnmount(() => {
     border-bottom: 0;
     border-left: 0;
     border-radius: var(--am-r-drop) var(--am-r-drop) 0 0;
-    animation-name: am-sheet-up;
-  }
-
-  @keyframes am-sheet-up {
-    from {
-      transform: translateY(24px);
-    }
-    to {
-      transform: none;
-    }
   }
 }
 
