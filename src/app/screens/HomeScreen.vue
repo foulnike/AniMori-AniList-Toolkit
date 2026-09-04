@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Главная — витрина рекомендаций (пункт 3.11). Своя полка идёт из памяти
 // коллекции, витрина каталога — через core/recs: сети экран не знает.
-// Статистика с главной убрана: сводке найдётся своё место отдельно.
-import { onMounted, ref, watch } from 'vue'
+// Статистика с главной убрана: сводке найдầтся своё место отдельно.
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
 import { setupVideoSources } from '@/api/video-sources'
@@ -18,6 +18,7 @@ import {
 } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import {
+  onPlayableChange,
   peekPlayable,
   primePlayable,
   warmPlayable,
@@ -40,29 +41,6 @@ const SHELF_SIZE = 14
 /** Скольким плиткам добирать русские названия и по скольку за заход. */
 const TITLE_DEPTH = 12
 const TITLE_CHUNK = 6
-
-/**
- * Скольким верхним плиткам полки спрашивать доступность у источников
- * и сколько таких вопросов позволено всей витрине за один заход.
- *
- * Оба числа — про сеть и только про сеть. Склад ответов поднимается даром
- * и разом по всей полке, поэтому однажды спрошенное показывается целиком,
- * включая хвост ряда за прокруткой.
- *
- * Глубина — это то, что видно без прокрутки ряда. Бюджет — потолок на всё
- * сразу: шесть полок по четырнадцать плиток — это сотня тайтлов, а спросить
- * про каждый надо два источника. Метка, за которую платят двумя сотнями
- * запросов на открытие окна, стоит дороже, чем помогает.
- */
-const PLAY_DEPTH = 5
-const PLAY_BUDGET = 20
-
-/**
- * Скольким плиткам своей полки спрашивать доступность сетью. Своя полка
- * короткая и она про «что смотреть сейчас»: здесь метка нужнее всего,
- * поэтому бюджет витрины её не касается.
- */
-const OWN_PLAY_DEPTH = 6
 
 /** Сколько заглушек держать на время подъёма снимка. */
 const HOLD_COUNT = 7
@@ -118,9 +96,6 @@ let lookRun = 0
 let titleRun = 0
 let playRun = 0
 let recsRun = 0
-
-/** Остаток бюджета вопросов о доступности: общий на все полки захода. */
-let playLeft = 0
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -251,7 +226,11 @@ async function fillTitles(): Promise<void> {
 
 /**
  * Ставит метку «Есть видео» на свою полку: сначала подъём склада по всей
- * полке даром, потом вопрос источникам про верх ряда.
+ * полке даром, потом вопрос источникам про всё остальное.
+ *
+ * Полка короткая — четырнадцать постеров, — и она про «что смотреть
+ * сейчас»: резать её по шести было нечем оправдать даже при старом
+ * штучном вопросе, а с очередью и оптом — тем более.
  */
 async function fillOwnPlay(): Promise<void> {
   const mine = ++playRun
@@ -264,7 +243,6 @@ async function fillOwnPlay(): Promise<void> {
 
     const asks = ownEntries
       .filter((entry) => peekPlayable(entry.mediaId) === null)
-      .slice(0, OWN_PLAY_DEPTH)
       .map(playAskOf)
 
     if (asks.length === 0) return
@@ -345,6 +323,13 @@ function publish(): void {
   recs.value = out
 }
 
+// Очередь доступности отвечает вразброд и по одному тайтлу, причём один
+// и тот же ответ часто касается разу и своей полки, и витрины: рисуем обе.
+const stopPlayWatch = onPlayableChange(() => {
+  redrawOwn()
+  publish()
+})
+
 /** Добирает русские названия плиткам полки витрины. */
 async function warmRecTitles(mine: number, key: string): Promise<void> {
   const items = staged.get(key)
@@ -371,9 +356,12 @@ async function warmRecTitles(mine: number, key: string): Promise<void> {
 /**
  * Ставит метку «Есть видео» на полку витрины.
  *
- * Сначала склад: он отвечает даром и разом по всей полке, поэтому однажды
- * спрошенное видно целиком и без сети. Потом сеть — верху ряда и в пределах
- * общего бюджета захода: кто из полок приехал раньше, тот и тратит.
+ * Сначала склад: он отвечает даром и разом по всей полке, потом сеть —
+ * всем остальным плиткам без потолка и без общего бюджета захода.
+ * Именно эти два потолка давали «десяток меток и тишина»: двадцать
+ * вопросов на шесть полок заканчивались на второй же полке. Темп теперь
+ * держит очередь ядра: она одна на приложение, спрашивает оптом и сама
+ * раскладывает вопросы во времени.
  *
  * Анонсы не спрашиваются вовсе: у них не вышло ни одной части, и ответ
  * известен заранее.
@@ -390,16 +378,11 @@ async function warmRecPlay(mine: number, key: string): Promise<void> {
     Logger('WARN', 'Главная: склад доступности не поднялся', e)
   }
 
-  if (playLeft <= 0) return
-
   const asks: PlayAsk[] = items
-    .slice(0, PLAY_DEPTH)
     .filter((brief) => brief.status !== SOON_STATUS && peekPlayable(brief.mediaId) === null)
-    .slice(0, playLeft)
     .map(toPlayAsk)
 
   if (asks.length === 0) return
-  playLeft -= asks.length
 
   try {
     // Реестр источников собирает не ядро, а слой api, и до плеера человек может
@@ -430,7 +413,6 @@ function loadRecs(): void {
   recs.value = []
   activeDefs = shelfDefs()
   recsPending.value = true
-  playLeft = PLAY_BUDGET
 
   const tasks = activeDefs.map((def) =>
     def
@@ -497,6 +479,17 @@ onMounted(() => {
     buildOwn()
     loadRecs()
   })()
+})
+
+onBeforeUnmount(() => {
+  lookRun++
+  titleRun++
+  playRun++
+  recsRun++
+
+  // Очередь живёт дольше экрана: неснятая подписка держала бы всю витрину
+  // в памяти и пересобирала её на каждый ответ чужого экрана.
+  stopPlayWatch()
 })
 
 // Страж busy не пускает пересборку до подъёма снимка: иначе витрина встанет на пустом списке.
