@@ -1,6 +1,19 @@
 // Витрина каталога для главной: сезон, тренды, лучшее и подбор по жанрам,
-// советы «по мотивам» и жанры тайтлов для профиля вкуса (пункт 3.11).
+// советы «по мотивам», жанры тайтлов для профиля вкуса (пункт 3.11)
+// и постраничная лента подбора под отбор хозяина.
 // Отдельно от anilist-media.ts: тот у потолка, а дело здесь самостоятельное.
+//
+// ТРИ ПОЛКИ ОДНИМ ЗАПРОСОМ
+// Сезон, тренд и лучшее друг от друга не зависят, но провод у них общий:
+// клиент держит паузу между запросами и одно окно лимита на всё приложение,
+// и три похода подряд стоили секунд ожидания на ровном месте. GraphQL умеет
+// несколько выборок за раз через псевдонимы — этим пачка и пользуется.
+//
+// ОТБОР СОБИРАЕТСЯ, А НЕ ПЕРЕЧИСЛЯЕТСЯ
+// Запрос ленты складывается из кусков: лишняя переменная в объявлении роняет
+// весь запрос, поэтому объявляются ровно те, что вписаны в отбор. Значения
+// уходят переменными всегда: имена жанров и тэгов приходят из чужого
+// справочника, и склейке в текст запроса тут не место.
 
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
@@ -14,6 +27,10 @@ const SEED_PAGE = 25
 
 /** Потолок страницы у AniList — пятьдесят записей за запрос. */
 const LOOKUP_PAGE_SIZE = 50
+
+/** Размер страницы ленты: три-четыре ряда сетки. Меньше выглядит огрызком
+    после чистки своего и скрытого, больше томит ожиданием. */
+const FEED_PAGE_SIZE = 30
 
 // Поля плитки без записи хозяина: свои метки витрина ставит по памяти (3.14).
 // Вид тайтла спрашивается не ради показа, а ради отбора: в советах сервера
@@ -43,6 +60,11 @@ const BRIEF_FIELDS = `
         color
       }`
 
+/** Те же поля куском для запросов с несколькими выборками: три полки
+    в одном запросе иначе повторяли бы их трижды. */
+const BRIEF_FRAGMENT = `fragment Brief on Media {${BRIEF_FIELDS}
+}`
+
 /** Виды полок витрины: отбор и порядок зашиты в запрос, а не в вызов. */
 export type ShelfKind = 'airing' | 'trending' | 'top' | 'genre'
 
@@ -70,6 +92,28 @@ ${BRIEF_FIELDS}
 }`
 }
 
+/** Три полки каталога за один поход. Псевдонимы обязательны: без них
+    сервер увидел бы три одинаковых поля Page и оставил последнее. */
+const PACK_QUERY = `${BRIEF_FRAGMENT}
+
+query ($perPage: Int!, $season: MediaSeason, $seasonYear: Int) {
+  airing: Page(page: 1, perPage: $perPage) {
+    media(type: ANIME, season: $season, seasonYear: $seasonYear, sort: [POPULARITY_DESC]) {
+      ...Brief
+    }
+  }
+  trending: Page(page: 1, perPage: $perPage) {
+    media(type: ANIME, sort: [TRENDING_DESC]) {
+      ...Brief
+    }
+  }
+  top: Page(page: 1, perPage: $perPage) {
+    media(type: ANIME, sort: [SCORE_DESC]) {
+      ...Brief
+    }
+  }
+}`
+
 const RECS_QUERY = `query ($id: Int!, $perPage: Int!) {
   Media(id: $id) {
     recommendations(sort: RATING_DESC, page: 1, perPage: $perPage) {
@@ -94,6 +138,16 @@ const GENRE_QUERY = `query ($ids: [Int], $perPage: Int!) {
   }
 }`
 
+/** Справочник тэгов каталога. Переменных нет вовсе: список один на всех. */
+const TAGS_QUERY = `query {
+  MediaTagCollection {
+    name
+    category
+    isAdult
+    isGeneralSpoiler
+  }
+}`
+
 /** Ближайшая серия: номер и срок выхода в секундах. */
 interface AiringReply {
   episode?: number | null
@@ -115,9 +169,17 @@ interface BriefReply {
   coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
 }
 
-interface ShelfReply {
-  Page?: { media?: Array<BriefReply | null> | null } | null
+/** Одна выборка страницы: и у полки, и у каждой доли пачки вид общий. */
+interface PageReply {
+  pageInfo?: { hasNextPage?: boolean | null } | null
+  media?: Array<BriefReply | null> | null
 }
+
+interface ShelfReply {
+  Page?: PageReply | null
+}
+
+type PackReply = Partial<Record<PackKind, PageReply | null>>
 
 interface RecsReply {
   Media?: {
@@ -135,10 +197,97 @@ interface GenreReply {
   } | null
 }
 
+interface TagReply {
+  name?: string | null
+  category?: string | null
+  isAdult?: boolean | null
+  isGeneralSpoiler?: boolean | null
+}
+
+interface TagsReply {
+  MediaTagCollection?: Array<TagReply | null> | null
+}
+
 /** Совет сервера: плитка и вес связи. Вес нужен склейке повторов. */
 export interface ServerRec {
   brief: MediaBrief
   rating: number
+}
+
+/** Виды полок пачки: три независимые выборки одним походом в сеть. */
+export type PackKind = 'airing' | 'trending' | 'top'
+
+/** Пачка полок каталога. Пустая доля значит «эта полка не встанет». */
+export type ShelfPack = Record<PackKind, MediaBrief[]>
+
+const PACK_KINDS: readonly PackKind[] = ['airing', 'trending', 'top']
+
+/** Тэг каталога: имя для запроса, раздел для меню, метка взрослого. */
+export interface CatalogTag {
+  name: string
+  category: string
+  adult: boolean
+}
+
+/** Порядок ленты. Ключи свои: перечисление сервера наружу не выносится. */
+export type FeedSort = 'score' | 'popular' | 'trending' | 'new'
+
+const FEED_SORT: Readonly<Record<FeedSort, string>> = {
+  score: 'SCORE_DESC',
+  popular: 'POPULARITY_DESC',
+  trending: 'TRENDING_DESC',
+  new: 'START_DATE_DESC',
+}
+
+/**
+ * Отбор подбора: что показывать в ленте главной.
+ * Пустые списки и пустые годы значат «весь каталог».
+ */
+export interface CatalogPick {
+  genres: string[]
+  tags: string[]
+  formats: string[]
+  yearFrom: number | null
+  yearTo: number | null
+  sort: FeedSort
+}
+
+/** Страница ленты: плитки и признак продолжения. */
+export interface FeedPage {
+  items: MediaBrief[]
+  hasNext: boolean
+}
+
+/** Отбор по умолчанию: весь каталог по оценке. */
+export function emptyPick(): CatalogPick {
+  return { genres: [], tags: [], formats: [], yearFrom: null, yearTo: null, sort: 'score' }
+}
+
+/**
+ * Сужен ли отбор. Порядок сюда не входит сознательно: смена сортировки
+ * меняет ленту, но не значит, что хозяин что-то отобрал, и прятать из-за
+ * неё полки витрины было бы неожиданно.
+ */
+export function pickIsSet(pick: CatalogPick): boolean {
+  return (
+    pick.genres.length > 0 ||
+    pick.tags.length > 0 ||
+    pick.formats.length > 0 ||
+    pick.yearFrom !== null ||
+    pick.yearTo !== null
+  )
+}
+
+/** Ключ отбора для памяти запуска: одинаковый отбор — одна загрузка. */
+export function pickKey(pick: CatalogPick): string {
+  return [
+    pick.genres.slice().sort().join('+'),
+    pick.tags.slice().sort().join('+'),
+    pick.formats.slice().sort().join('+'),
+    pick.yearFrom ?? '',
+    pick.yearTo ?? '',
+    pick.sort,
+  ].join('|')
 }
 
 /** Целое положительное или `null`: чужие пустоты в нули превращать нельзя. */
@@ -184,6 +333,18 @@ function toBrief(item: BriefReply | null | undefined): MediaBrief | null {
   }
 }
 
+/** Плитки из ответа одной выборки. Мусор и манга отсеиваются по пути. */
+function toBriefs(media: Array<BriefReply | null> | null | undefined): MediaBrief[] {
+  if (!Array.isArray(media)) return []
+
+  const items: MediaBrief[] = []
+  for (const item of media) {
+    const brief = toBrief(item)
+    if (brief) items.push(brief)
+  }
+  return items
+}
+
 /** Текущий сезон года для полки «Сейчас выходит». */
 export function currentSeason(): { season: string; seasonYear: number } {
   const now = new Date()
@@ -207,14 +368,152 @@ export async function fetchShelf(kind: ShelfKind, genres?: string[]): Promise<Me
     return []
   }
 
-  const items: MediaBrief[] = []
-  for (const item of media) {
-    const brief = toBrief(item)
-    if (brief) items.push(brief)
-  }
-
+  const items = toBriefs(media)
   Logger('API', `Витрина «${kind}»: пришло ${items.length}`)
   return items
+}
+
+/**
+ * Сезон, тренд и лучшее одним походом. Отказ роняет всю пачку разом —
+ * это и есть плата за один запрос вместо трёх, но полки каталога всё
+ * равно приходили или не приходили вместе: провод и лимит у них общие.
+ */
+export async function fetchShelfPack(): Promise<ShelfPack> {
+  const vars: Record<string, unknown> = { perPage: SHELF_SIZE, ...currentSeason() }
+  const reply = await anilistQuery<PackReply>(PACK_QUERY, vars)
+
+  const pack: ShelfPack = { airing: [], trending: [], top: [] }
+  for (const kind of PACK_KINDS) {
+    const media = reply.data?.[kind]?.media
+    if (!Array.isArray(media)) {
+      Logger('WARN', `Витрина «${kind}»: сервер ответил пустотой`, reply.errors)
+      continue
+    }
+    pack[kind] = toBriefs(media)
+  }
+
+  Logger(
+    'API',
+    `Витрина пачкой: сезон ${pack.airing.length}, тренд ${pack.trending.length}, ` +
+      `лучшее ${pack.top.length}`,
+  )
+  return pack
+}
+
+/**
+ * Запрос страницы ленты под отбор. Объявление переменных собирается вместе
+ * с условием: незанятая переменная — ошибка запроса целиком.
+ *
+ * Год приходит границами нечёткой даты: у AniList это целое вида ГГГГММДД,
+ * и «с 2010 года» записывается как 20100000, а «по 2015» — как 20151231.
+ */
+function feedQuery(pick: CatalogPick, page: number): { query: string; vars: Record<string, unknown> } {
+  const decls = ['$page: Int!', '$perPage: Int!']
+  const where = ['type: ANIME']
+  const vars: Record<string, unknown> = { page, perPage: FEED_PAGE_SIZE }
+
+  if (pick.genres.length > 0) {
+    decls.push('$genres: [String]')
+    where.push('genre_in: $genres')
+    vars.genres = pick.genres
+  }
+
+  if (pick.tags.length > 0) {
+    decls.push('$tags: [String]')
+    where.push('tag_in: $tags')
+    vars.tags = pick.tags
+  }
+
+  if (pick.formats.length > 0) {
+    decls.push('$formats: [MediaFormat]')
+    where.push('format_in: $formats')
+    vars.formats = pick.formats
+  }
+
+  if (pick.yearFrom !== null) {
+    decls.push('$from: FuzzyDateInt')
+    where.push('startDate_greater: $from')
+    vars.from = pick.yearFrom * 10000
+  }
+
+  if (pick.yearTo !== null) {
+    decls.push('$till: FuzzyDateInt')
+    where.push('startDate_lesser: $till')
+    vars.till = pick.yearTo * 10000 + 1231
+  }
+
+  // Порядок вписывается словом из закрытого списка: переменной сюда нельзя,
+  // сервер ждёт перечисление, а чужая строка в запросе — чужая строка.
+  where.push(`sort: [${FEED_SORT[pick.sort]}, ID_DESC]`)
+
+  const query = `${BRIEF_FRAGMENT}
+
+query (${decls.join(', ')}) {
+  Page(page: $page, perPage: $perPage) {
+    pageInfo {
+      hasNextPage
+    }
+    media(${where.join(', ')}) {
+      ...Brief
+    }
+  }
+}`
+
+  return { query, vars }
+}
+
+/**
+ * Страница ленты подбора. Отказ сети наверх не поднимается: лента живёт
+ * долго, и одна оборванная страница не повод показывать ошибку вместо
+ * уже набранного.
+ */
+export async function fetchFeed(pick: CatalogPick, page: number): Promise<FeedPage> {
+  const { query, vars } = feedQuery(pick, page)
+
+  const reply = await anilistQuery<ShelfReply>(query, vars)
+  const media = reply.data?.Page?.media
+  if (!Array.isArray(media)) {
+    Logger('WARN', `Лента подбора: пустой ответ на страницу ${page}`, reply.errors)
+    return { items: [], hasNext: false }
+  }
+
+  const items = toBriefs(media)
+  const hasNext = reply.data?.Page?.pageInfo?.hasNextPage === true
+  Logger('API', `Лента подбора: страница ${page}, пришло ${items.length}`)
+  return { items, hasNext }
+}
+
+/**
+ * Справочник тэгов каталога для меню отбора.
+ *
+ * Тэги-спойлеры выброшены: сам список читается до открытия карточки,
+ * и строка вроде «главный герой умирает» в меню отбора — испорченный тайтл
+ * ещё до выбора. Взрослые остаются с меткой: пускать их в показ решает
+ * не справочник, а политика показа взрослого.
+ */
+export async function fetchTags(): Promise<CatalogTag[]> {
+  const reply = await anilistQuery<TagsReply>(TAGS_QUERY, {})
+  const list = reply.data?.MediaTagCollection
+  if (!Array.isArray(list)) {
+    Logger('WARN', 'Тэги каталога: сервер ответил пустотой', reply.errors)
+    return []
+  }
+
+  const tags: CatalogTag[] = []
+  for (const item of list) {
+    const name = textOrNull(item?.name)
+    if (name === null || item?.isGeneralSpoiler === true) continue
+
+    tags.push({
+      name,
+      category: textOrNull(item?.category) ?? 'Другое',
+      adult: item?.isAdult === true,
+    })
+  }
+
+  tags.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+  Logger('API', `Тэги каталога: пришло ${tags.length}`)
+  return tags
 }
 
 /**
