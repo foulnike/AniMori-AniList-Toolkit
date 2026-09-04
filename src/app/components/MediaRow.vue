@@ -1,10 +1,18 @@
 <script setup lang="ts">
-// Строка списка: тот же тайтл, что на плитке, но в один этаж.
+// Строка списка: то же аниме, что на плитке, но в один этаж.
 // Два вида одним компонентом: без постера и с миниатюрой (флажок art).
 //
 // Отдельный компонент, а не режим MediaTile: плитка стоит на постере во всю
 // ширину колонки и держит метки поверх обложки, так что в строку её
 // разметка не переворачивается.
+//
+// КНОПКА ПРАВКИ — СЕСТРА СТРОКИ, А НЕ ЕЁ СОДЕРЖИМОЕ
+//
+// Сама строка — одна большая кнопка на всю ширину, а кнопку в кнопку
+// вложить нельзя: разметка такого не допускает, а браузер выкидывает
+// вложенную наружу и верстка рассыпается. Поэтому правка стоит соседом
+// внутри <li> и накрывает правый край собой, а строка раздвигает
+// себе отступ справа, чтобы правка не легла на оценку.
 const props = withDefaults(
   defineProps<{
     title: string
@@ -14,13 +22,15 @@ const props = withDefaults(
     mark?: string | null
     repeat?: number
     ongoing?: boolean
-    /** Анонс: тайтл объявлен, но ни одной серии ещё не вышло. */
+    /** Анонс: аниме объявлено, но ни одной серии ещё не вышло. */
     soon?: boolean
     own?: string | null
     done?: number
     adult?: boolean
     /** Показывать ли миниатюру постера слева. */
     art?: boolean
+    /** Есть ли что править: вне своих списков записи нет и кнопки тоже. */
+    editable?: boolean
   }>(),
   {
     facts: '',
@@ -34,10 +44,14 @@ const props = withDefaults(
     done: 0,
     adult: false,
     art: false,
+    editable: false,
   },
 )
 
-const emit = defineEmits<{ (e: 'open'): void }>()
+const emit = defineEmits<{
+  (e: 'open'): void
+  (e: 'edit'): void
+}>()
 
 /** Ширина полосы пройденного. Зажата в 0..1: пересмотр даёт больше единицы. */
 function barWidth(): string {
@@ -52,7 +66,10 @@ function barHint(): string {
 </script>
 
 <template>
-  <li class="am-row" :class="{ 'am-row--art': art, 'am-row--bar': done > 0 }">
+  <li
+    class="am-row"
+    :class="{ 'am-row--art': art, 'am-row--bar': done > 0, 'am-row--edit': editable }"
+  >
     <button v-tip="title" class="am-row__hit" type="button" @click="emit('open')">
       <img
         v-if="art && cover"
@@ -87,11 +104,30 @@ function barHint(): string {
         <span class="am-line__fill" :style="{ width: barWidth() }" />
       </span>
     </button>
+
+    <!-- Знак ползунков, а не карандаш: правятся параметры записи —
+         закладка, оценка, счёт — а не текст. -->
+    <button
+      v-if="editable"
+      v-tip="'Изменить запись'"
+      class="am-row__edit"
+      type="button"
+      aria-label="Изменить запись"
+      @click="emit('edit')"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M2.2 5.4h6.1M11.3 5.4h2.5M2.2 10.6h2.5M7.6 10.6h6.2" />
+        <circle cx="9.8" cy="5.4" r="1.7" />
+        <circle cx="6.1" cy="10.6" r="1.7" />
+      </svg>
+    </button>
   </li>
 </template>
 
 <style scoped>
+/* Якорь для правки: без него кнопка уехала бы к краю экрана. */
 .am-row {
+  position: relative;
   list-style: none;
 }
 
@@ -133,6 +169,12 @@ function barHint(): string {
   padding-bottom: 14px;
 }
 
+/* Отступ под правку держится всегда, а не только под курсором: иначе
+   название с оценкой дёргались при каждом наведении. */
+.am-row--edit .am-row__hit {
+  padding-right: 48px;
+}
+
 .am-row__hit:hover,
 .am-row__hit:focus-visible {
   background: var(--am-hover);
@@ -171,7 +213,7 @@ function barHint(): string {
 }
 
 /* Название в одну строку с отсечкой: ровный шаг строк важнее полного
-   имени у трёх самых длинных тайтлов: полное покажет подпись. */
+   имени у трёх самых длинных названий: полное покажет подпись. */
 .am-row__name {
   overflow: hidden;
   font-size: 13.5px;
@@ -232,12 +274,79 @@ function barHint(): string {
   left: 62px;
 }
 
+/* При кнопке правки полоса не дотягивается до края: иначе её конец
+   уходит под круг и сто процентов от девяноста не отличить. */
+.am-row--edit .am-row__line {
+  right: 48px;
+}
+
 .am-row__mark {
   flex: none;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--am-warn);
   font-variant-numeric: tabular-nums;
+}
+
+/* Правка лежит поверх правого края строки и просыпается под курсором.
+   Полностью прятать её нельзя: с клавиатуры до неё надо доезжать,
+   поэтому гаснет она прозрачностью, а не display: none. */
+.am-row__edit {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-2);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  opacity: 0;
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    opacity var(--am-fast) var(--am-ease);
+  transform: translateY(-50%);
+}
+
+/* У строки с полосой середина смещена вниз отступом под шкалу:
+   круг выравнивается по тексту, а не по всей высоте с полосой. */
+.am-row--bar .am-row__edit {
+  top: calc(50% - 4px);
+}
+
+.am-row:hover .am-row__edit,
+.am-row:focus-within .am-row__edit {
+  opacity: 1;
+}
+
+.am-row__edit:hover,
+.am-row__edit:focus-visible {
+  color: var(--am-accent);
+  background: var(--am-hover);
+  border-color: rgb(var(--am-accent-rgb) / 0.55);
+  opacity: 1;
+}
+
+.am-row__edit svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Где курсора нет вовсе — кнопка видна сразу: навести пальцем нельзя. */
+@media (hover: none) {
+  .am-row__edit {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
