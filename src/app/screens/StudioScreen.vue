@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Пункт 3.10: экран студии — её работы сеткой постеров внутри приложения.
 // Плитка и её сборка общие с поиском (tile-row.ts): вид тайтла везде один.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { fetchStudioWorks, STUDIO_PAGE_SIZE, type MediaBrief } from '@/api/anilist-media'
 import { setupVideoSources } from '@/api/video-sources'
@@ -9,7 +9,7 @@ import { hiddenCount, keepAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
-import { peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
+import { onPlayableChange, peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
 import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
@@ -23,13 +23,6 @@ const HOLD_COUNT = 18
 
 /** По скольку тайтлов просить русские названия за заход. */
 const TITLE_CHUNK = 20
-
-/**
- * Скольким верхним работам добирать метку доступности сетью. Склад поднимается
- * для всей сетки даром, а в сеть идёт только верх: работа стоит вопроса
- * к каждому источнику, и полная норма показа съела бы очередь темпа.
- */
-const PLAY_DEPTH = 10
 
 /** Сколько видимых постеров обязан дать один заход: три полных ряда. */
 const WANT = STUDIO_PAGE_SIZE
@@ -93,6 +86,10 @@ function describe(e: unknown): string {
 function redraw(): void {
   rows.value = briefs.map(toTileRow)
 }
+
+// Метки приходят из очереди по одной и вразброд: без подписки сетка ждала бы
+// конца всего захода, а у плодовитой студии это минуты.
+const stopPlayWatch = onPlayableChange(redraw)
 
 /** Сколько работ из набора видно после отбора 18+. */
 function shownCount(pool: readonly MediaBrief[]): number {
@@ -164,8 +161,12 @@ async function fillTitles(targetIds: readonly number[]): Promise<void> {
 
 /**
  * Добирает метки доступности. Сначала склад — он отвечает даром и разом по всей
- * сетке, — и только потом сеть, и то верхним работам. У старой студии половина
- * работ нашим источникам неизвестна, и метка отвечает на это до плеера.
+ * сетке, — и только потом сеть. У старой студии половина работ нашим
+ * источникам неизвестна, и метка отвечает на это до плеера.
+ *
+ * Спрашивается вся сетка, а не верх её: очередь ядра одна на приложение
+ * и сама держит темп, а заход здесь даёт три полных ряда постеров разом:
+ * десять верхних работ не набирали даже первого ряда.
  */
 async function fillPlay(): Promise<void> {
   const mine = ++playRun
@@ -178,7 +179,6 @@ async function fillPlay(): Promise<void> {
 
     const wanted = briefs
       .filter((brief) => peekPlayable(brief.mediaId) === null)
-      .slice(0, PLAY_DEPTH)
       .map((brief) => toPlayAsk(brief))
 
     if (wanted.length === 0) return
@@ -306,6 +306,16 @@ onMounted(() => {
   })()
 
   void load()
+})
+
+onBeforeUnmount(() => {
+  run++
+  titleRun++
+  playRun++
+
+  // Очередь живёт дольше экрана: неснятая подписка держала бы снятый показ
+  // и рисовала в никуда на каждый ответ источника.
+  stopPlayWatch()
 })
 
 // Переход между двумя студиями не пересобирает экран: грузим сами.
