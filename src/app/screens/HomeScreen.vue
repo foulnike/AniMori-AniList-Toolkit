@@ -1,9 +1,23 @@
 <script setup lang="ts">
 // Главная — витрина рекомендаций (пункт 3.11). Своя полка идёт из памяти
 // коллекции, витрина каталога — через core/recs: сети экран не знает.
-// Статистика с главной убрана: сводке найдầтся своё место отдельно.
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// Статистика с главной убрана: сводке найдётся своё место отдельно.
+//
+// ТРИ ПОЛКИ КАТАЛОГА ЕДУТ ОДНИМ ЗАПРОСОМ
+// «Сейчас выходит», «В тренде» и «Лучшее за всё время» берутся через
+// packShelf: у AniList в одном запросе можно спросить несколько страниц под
+// разными именами. Раньше это были три очереди к ограничителю подряд, и
+// нижние полки приезжали заметно позже верхних — это и читалось
+// «последовательной загрузкой».
+//
+// ОТБОР ПРЯЧЕТ КАРУСЕЛИ, А НЕ РЕЖЕТ ИХ ЧИСЛО
+// Пока отбор пуст, экран — витрина из пяти полок. Как только выбран хотя бы
+// один жанр, тэг, год или формат, каруселей нет вовсе: вместо них
+// вертикальная лента подбора с «Показать ещё». Прежнее поведение — пять
+// полок превращались в три — было задумано, но читалось пропажей.
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { emptyPick, pickIsSet, pickKey, type CatalogPick } from '@/api/anilist-catalog'
 import type { MediaBrief } from '@/api/anilist-media'
 import { setupVideoSources } from '@/api/video-sources'
 import { initCollection } from '@/core/collection'
@@ -12,6 +26,7 @@ import {
   notOutYet,
   partsOut,
   peekLook,
+  rememberBrief,
   SOON_STATUS,
   warmLooks,
   type MediaLook,
@@ -25,15 +40,17 @@ import {
   type PlayAsk,
   type PlayState,
 } from '@/core/playable'
-import { hideRec, motifShelf, recShelf, tasteShelf } from '@/core/recs'
+import { feedMore, hideRec, motifShelf, newFeed, packShelf, tasteShelf } from '@/core/recs'
 import type { SnapshotEntry } from '@/core/snapshot'
 import { Logger } from '@/utils/logger'
 
+import FilterSheet from '../components/FilterSheet.vue'
 import MediaTile from '../components/MediaTile.vue'
 import { formatWord, GENRE_CHOICES, genreWord, partsShort } from '../labels'
 import { navigate } from '../router'
+import { tagWord } from '../tag-words'
 import { toPlayAsk, toTileRow, type TileRow } from '../tile-row'
-import { homeGenre } from './home-keep'
+import { dropFeed, feedKeep, homePick } from './home-keep'
 
 /** Сколько постеров класть на свою полку. */
 const SHELF_SIZE = 14
@@ -48,6 +65,9 @@ const HOLD_COUNT = 7
 /** Ниже этого числа плиток полка не показывается: огрызок из одной-двух
     картинок после чистки повторов выглядит ошибкой загрузки. */
 const SHELF_MIN = 3
+
+/** Сколько плиток добирать в ленту за одно «Показать ещё». */
+const FEED_WANT = 24
 
 /** Плитка своей полки. Тот же вид, что в списках: вид тайтла везде один. */
 interface Row {
@@ -78,11 +98,23 @@ interface ShelfDef {
   load: () => Promise<MediaBrief[]>
 }
 
+/** Условие отбора в строке под шапкой: нажатие снимает именно его. */
+interface PickChip {
+  key: string
+  title: string
+  kind: 'genre' | 'tag' | 'format' | 'years'
+  value: string
+}
+
 const busy = ref(true)
 const trouble = ref('')
 const ownRows = ref<Row[]>([])
 const recs = ref<Shelf[]>([])
 const recsPending = ref(false)
+const sheetOpen = ref(false)
+const feedRows = ref<TileRow[]>([])
+const feedBusy = ref(false)
+const feedDone = ref(false)
 
 /** Записи своей полки вне реактивности: плитки пересобираются после добора. */
 let ownEntries: SnapshotEntry[] = []
@@ -96,10 +128,70 @@ let lookRun = 0
 let titleRun = 0
 let playRun = 0
 let recsRun = 0
+let feedRun = 0
+
+/** Стоит ли сейчас хоть одно условие отбора. */
+const picked = computed(() => pickIsSet(homePick.value))
+
+/** Сколько условий в отборе: число на кнопке «Фильтры». */
+const pickCount = computed(
+  () =>
+    homePick.value.genres.length +
+    homePick.value.tags.length +
+    homePick.value.formats.length +
+    (homePick.value.yearFrom !== null || homePick.value.yearTo !== null ? 1 : 0),
+)
+
+/** Заголовок ленты: под отбором это результат подбора, без него — добавка
+    к каруселям. */
+const feedTitle = computed(() => (picked.value ? 'Подбор' : 'Ещё рекомендации'))
+
+/** Показывать ли раздел ленты вообще. */
+const feedShown = computed(
+  () => feedBusy.value || feedRows.value.length > 0 || (picked.value && feedDone.value),
+)
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
+
+/** Годы отбора одной подписью. */
+function yearsWord(pick: CatalogPick): string {
+  if (pick.yearFrom !== null && pick.yearTo !== null) {
+    return pick.yearFrom === pick.yearTo
+      ? String(pick.yearFrom)
+      : `${pick.yearFrom}\u2013${pick.yearTo}`
+  }
+  if (pick.yearFrom !== null) return `с ${pick.yearFrom}`
+  return `по ${pick.yearTo}`
+}
+
+/** Условия отбора строкой чипов: видно, чем сужен подбор, и снимается
+    по одному, не открывая меню. */
+const pickChips = computed<PickChip[]>(() => {
+  const pick = homePick.value
+  const out: PickChip[] = []
+
+  for (const genre of pick.genres) {
+    out.push({ key: `g:${genre}`, title: genreWord(genre) ?? genre, kind: 'genre', value: genre })
+  }
+  for (const tag of pick.tags) {
+    out.push({ key: `t:${tag}`, title: tagWord(tag), kind: 'tag', value: tag })
+  }
+  for (const format of pick.formats) {
+    out.push({
+      key: `f:${format}`,
+      title: formatWord(format) ?? format,
+      kind: 'format',
+      value: format,
+    })
+  }
+  if (pick.yearFrom !== null || pick.yearTo !== null) {
+    out.push({ key: 'y', title: yearsWord(pick), kind: 'years', value: '' })
+  }
+
+  return out
+})
 
 /** Короткая подпись под названием: вид и год. */
 function factsText(look: MediaLook | null): string {
@@ -179,6 +271,11 @@ function redrawOwn(): void {
   ownRows.value = ownEntries.map(toRow)
 }
 
+/** Пересобирает плитки ленты подбора из набранного. */
+function drawFeed(): void {
+  feedRows.value = feedKeep.items.map(toTileRow)
+}
+
 /** Добирает обложки своей полки: снимок картинок не хранит. */
 async function fillLooks(): Promise<void> {
   const mine = ++lookRun
@@ -241,9 +338,7 @@ async function fillOwnPlay(): Promise<void> {
     if (mine !== playRun) return
     if (primed > 0) redrawOwn()
 
-    const asks = ownEntries
-      .filter((entry) => peekPlayable(entry.mediaId) === null)
-      .map(playAskOf)
+    const asks = ownEntries.filter((entry) => peekPlayable(entry.mediaId) === null).map(playAskOf)
 
     if (asks.length === 0) return
 
@@ -275,29 +370,17 @@ function buildOwn(): void {
 }
 
 /** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
-    и по нему же решается, кому достанется тайтл при повторе. Нажатый жанр —
-    явная просьба хозяина, поэтому он впереди всего и замещает три полки
-    каталога. */
+    и по нему же решается, кому достанется тайтл при повторе. Под отбором
+    каруселей нет вовсе — там всё говорит лента подбора. */
 function shelfDefs(): ShelfDef[] {
-  const genre = homeGenre.value
-  if (genre !== '') {
-    return [
-      {
-        key: 'genre',
-        title: `Жанр: ${genreWord(genre) ?? genre}`,
-        load: () => recShelf('genre', [genre]),
-      },
-      { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf() },
-      { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf() },
-    ]
-  }
+  if (picked.value) return []
 
   return [
     { key: 'taste', title: 'Под ваш вкус', load: () => tasteShelf() },
     { key: 'motif', title: 'По мотивам вашего списка', load: () => motifShelf() },
-    { key: 'airing', title: 'Сейчас выходит', load: () => recShelf('airing') },
-    { key: 'trending', title: 'В тренде', load: () => recShelf('trending') },
-    { key: 'top', title: 'Лучшее за всё время', load: () => recShelf('top') },
+    { key: 'airing', title: 'Сейчас выходит', load: () => packShelf('airing') },
+    { key: 'trending', title: 'В тренде', load: () => packShelf('trending') },
+    { key: 'top', title: 'Лучшее за всё время', load: () => packShelf('top') },
   ]
 }
 
@@ -324,10 +407,12 @@ function publish(): void {
 }
 
 // Очередь доступности отвечает вразброд и по одному тайтлу, причём один
-// и тот же ответ часто касается разу и своей полки, и витрины: рисуем обе.
+// и тот же ответ часто касается разом и своей полки, и витрины, и ленты:
+// рисуем всё три.
 const stopPlayWatch = onPlayableChange(() => {
   redrawOwn()
   publish()
+  drawFeed()
 })
 
 /** Добирает русские названия плиткам полки витрины. */
@@ -406,13 +491,59 @@ async function warmRecShelf(mine: number, key: string): Promise<void> {
   await warmRecPlay(mine, key)
 }
 
-/** Полки витрины: каждая встаёт сама по готовности. */
+/** Тот же добор для новой порции ленты: имена, потом склад, потом сеть. */
+async function warmFeed(mine: number, items: MediaBrief[]): Promise<void> {
+  const wanted = items
+    .filter((brief) => peekRussianName(brief.mediaId) === null)
+    .map((brief) => brief.mediaId)
+
+  try {
+    for (let from = 0; from < wanted.length; from += TITLE_CHUNK) {
+      if (mine !== feedRun) return
+
+      await prefetchRussianNames(wanted.slice(from, from + TITLE_CHUNK))
+      if (mine !== feedRun) return
+
+      drawFeed()
+    }
+  } catch (e) {
+    Logger('WARN', 'Главная: названия ленты добрать не вышло', e)
+  }
+
+  try {
+    const primed = await primePlayable(items.map((brief) => brief.mediaId))
+    if (mine !== feedRun) return
+    if (primed > 0) drawFeed()
+  } catch (e) {
+    Logger('WARN', 'Главная: склад доступности ленты не поднялся', e)
+  }
+
+  const asks: PlayAsk[] = items
+    .filter((brief) => brief.status !== SOON_STATUS && peekPlayable(brief.mediaId) === null)
+    .map(toPlayAsk)
+
+  if (asks.length === 0) return
+
+  try {
+    setupVideoSources()
+
+    await warmPlayable(asks)
+    if (mine !== feedRun) return
+
+    drawFeed()
+  } catch (e) {
+    Logger('WARN', 'Главная: метки ленты не доехали', e)
+  }
+}
+
+/** Полки витрины: каждая встаёт сама по готовности. Три полки каталога
+    делят один запрос, поэтому приезжают вместе, а не одна за другой. */
 function loadRecs(): void {
   const mine = ++recsRun
   staged.clear()
   recs.value = []
   activeDefs = shelfDefs()
-  recsPending.value = true
+  recsPending.value = activeDefs.length > 0
 
   const tasks = activeDefs.map((def) =>
     def
@@ -433,19 +564,116 @@ function loadRecs(): void {
   })
 }
 
-/** Прячет тайтл из витрины: из памяти сразу, в хранилище — вдогонку. */
+/** Добирает очередную порцию ленты. Обход помнит страницу и показанные
+    номера, поэтому «Показать ещё» не приводит повторов. */
+async function growFeed(mine: number): Promise<void> {
+  const run = feedKeep.run
+  if (run === null || feedBusy.value) return
+
+  feedBusy.value = true
+
+  try {
+    const got = await feedMore(run, FEED_WANT)
+    if (mine !== feedRun) return
+
+    // Обложки приехали вместе с ответом: кладём их в общую память даром,
+    // иначе списки и карточки полезут за тем же самым второй раз.
+    for (const brief of got) rememberBrief(brief)
+
+    feedKeep.items = [...feedKeep.items, ...got]
+    feedDone.value = run.done
+    drawFeed()
+
+    void warmFeed(mine, got)
+  } catch (e) {
+    Logger('WARN', 'Главная: лента подбора не доехала', e)
+  } finally {
+    if (mine === feedRun) feedBusy.value = false
+  }
+}
+
+/** Заводит ленту под нынешний отбор. Набранное переживает уход на карточку:
+    возврат к сотне постеров не должен начинаться с первой страницы. */
+function startFeed(): void {
+  const mine = ++feedRun
+  const key = pickKey(homePick.value)
+
+  if (feedKeep.key === key && feedKeep.run !== null && feedKeep.items.length > 0) {
+    feedDone.value = feedKeep.run.done
+    drawFeed()
+    return
+  }
+
+  dropFeed()
+  feedKeep.key = key
+  feedKeep.run = newFeed({ ...homePick.value })
+  feedRows.value = []
+  feedDone.value = false
+  void growFeed(mine)
+}
+
+/** Кнопка «Показать ещё». */
+function onMore(): void {
+  void growFeed(feedRun)
+}
+
+/** Прячет тайтл из витрины и ленты: из памяти сразу, в хранилище — вдогонку. */
 function hideOne(mediaId: number): void {
   void hideRec(mediaId)
+
   for (const items of staged.values()) {
     const at = items.findIndex((brief) => brief.mediaId === mediaId)
     if (at >= 0) items.splice(at, 1)
   }
   publish()
+
+  const inFeed = feedKeep.items.findIndex((brief) => brief.mediaId === mediaId)
+  if (inFeed >= 0) {
+    feedKeep.items.splice(inFeed, 1)
+    drawFeed()
+  }
 }
 
-/** Чип жанра: повторное нажатие снимает отбор. */
+/** Чип жанра под шапкой: быстрый отбор без меню. */
 function toggleGenre(genre: string): void {
-  homeGenre.value = homeGenre.value === genre ? '' : genre
+  const pick = homePick.value
+  homePick.value = {
+    ...pick,
+    genres: pick.genres.includes(genre)
+      ? pick.genres.filter((item) => item !== genre)
+      : [...pick.genres, genre],
+  }
+}
+
+/** Снимает одно условие отбора. */
+function dropChip(chip: PickChip): void {
+  const pick = homePick.value
+
+  if (chip.kind === 'genre') {
+    homePick.value = { ...pick, genres: pick.genres.filter((item) => item !== chip.value) }
+    return
+  }
+  if (chip.kind === 'tag') {
+    homePick.value = { ...pick, tags: pick.tags.filter((item) => item !== chip.value) }
+    return
+  }
+  if (chip.kind === 'format') {
+    homePick.value = { ...pick, formats: pick.formats.filter((item) => item !== chip.value) }
+    return
+  }
+
+  homePick.value = { ...pick, yearFrom: null, yearTo: null }
+}
+
+/** Сброс отбора: витрина возвращается к пяти полкам. */
+function resetPick(): void {
+  homePick.value = emptyPick()
+}
+
+/** Меню отдало готовый отбор целиком. */
+function onApply(pick: CatalogPick): void {
+  homePick.value = pick
+  sheetOpen.value = false
 }
 
 function open(mediaId: number): void {
@@ -478,6 +706,7 @@ onMounted(() => {
     busy.value = false
     buildOwn()
     loadRecs()
+    startFeed()
   })()
 })
 
@@ -486,17 +715,24 @@ onBeforeUnmount(() => {
   titleRun++
   playRun++
   recsRun++
+  feedRun++
 
   // Очередь живёт дольше экрана: неснятая подписка держала бы всю витрину
   // в памяти и пересобирала её на каждый ответ чужого экрана.
   stopPlayWatch()
 })
 
-// Страж busy не пускает пересборку до подъёма снимка: иначе витрина встанет на пустом списке.
-watch(homeGenre, () => {
-  if (busy.value) return
-  loadRecs()
-})
+// Страж busy не пускает пересборку до подъёма снимка: иначе витрина встанет
+// на пустом списке. Ключ отбора, а не сам объект: копия с теми же условиями
+// не должна гонять сеть заново.
+watch(
+  () => pickKey(homePick.value),
+  () => {
+    if (busy.value) return
+    loadRecs()
+    startFeed()
+  },
+)
 </script>
 
 <template>
@@ -517,21 +753,44 @@ watch(homeGenre, () => {
 
     <p v-if="trouble" class="am-error">{{ trouble }}</p>
 
-    <!-- Внутренний ряд нужен для центровки: сам прокрутчик шириной во всю
+    <!-- Ряд отбора: кнопка меню, быстрые жанры одной лентой и сброс.
+         Внутренний ряд нужен для центровки: сам прокрутчик шириной во всю
          страницу, а ряд — ровно по содержимому. -->
-    <div class="am-choose">
-      <div class="am-choose__row">
-        <button
-          v-for="genre in GENRE_CHOICES"
-          :key="genre"
-          class="am-chip"
-          :class="{ 'am-chip--on': homeGenre === genre }"
-          type="button"
-          @click="toggleGenre(genre)"
-        >
-          {{ genreWord(genre) }}
-        </button>
+    <div class="am-sift">
+      <button class="am-btn am-sift__open" type="button" @click="sheetOpen = true">
+        Фильтры
+        <span v-if="pickCount > 0" class="am-sift__num">{{ pickCount }}</span>
+      </button>
+
+      <div class="am-choose">
+        <div class="am-choose__row">
+          <button
+            v-for="genre in GENRE_CHOICES"
+            :key="genre"
+            class="am-chip"
+            :class="{ 'am-chip--on': homePick.genres.includes(genre) }"
+            type="button"
+            @click="toggleGenre(genre)"
+          >
+            {{ genreWord(genre) ?? genre }}
+          </button>
+        </div>
       </div>
+    </div>
+
+    <div v-if="picked" class="am-now">
+      <button
+        v-for="chip in pickChips"
+        :key="chip.key"
+        class="am-chip am-chip--on"
+        type="button"
+        @click="dropChip(chip)"
+      >
+        {{ chip.title }}
+        <span class="am-now__off" aria-hidden="true">×</span>
+      </button>
+
+      <button class="am-btn am-btn--ghost" type="button" @click="resetPick">Сбросить</button>
     </div>
 
     <div v-if="busy" class="am-shelf">
@@ -599,7 +858,63 @@ watch(homeGenre, () => {
         </ul>
       </section>
 
-      <div v-if="!recsPending && ownRows.length === 0 && recs.length === 0" class="am-empty">
+      <!-- Лента подбора: тот же вид плиток, но сеткой и без конца. -->
+      <section v-if="feedShown" class="am-shelf">
+        <div class="am-bar">
+          <h2 class="am-h2">{{ feedTitle }}</h2>
+        </div>
+
+        <ul v-if="feedRows.length > 0" class="am-grid">
+          <MediaTile
+            v-for="row in feedRows"
+            :key="row.mediaId"
+            :title="row.title"
+            :facts="row.facts"
+            :cover="row.cover"
+            :color="row.color"
+            :score="row.score"
+            :mark="row.mark"
+            :repeat="row.repeat"
+            :note="row.note"
+            :own="row.own"
+            :done="row.done"
+            :soon="row.soon"
+            :play="row.play"
+            :adult="row.adult"
+            hidable
+            @open="open(row.mediaId)"
+            @hide="hideOne(row.mediaId)"
+          />
+        </ul>
+
+        <ul v-else-if="feedBusy" class="am-grid">
+          <li v-for="n in HOLD_COUNT" :key="n" class="am-hold">
+            <span class="am-skeleton am-hold__art" />
+            <span class="am-skeleton am-hold__line" />
+          </li>
+        </ul>
+
+        <div v-else class="am-empty">
+          <span class="am-empty__mark" aria-hidden="true">✧</span>
+          <span>По такому отбору ничего не нашлось.</span>
+          <span>Снимите пару условий — подбор станет шире.</span>
+
+          <div class="am-empty__acts">
+            <button class="am-btn" type="button" @click="resetPick">Сбросить отбор</button>
+          </div>
+        </div>
+
+        <div v-if="!feedDone && feedRows.length > 0" class="am-more">
+          <button class="am-btn am-btn--soft" type="button" :disabled="feedBusy" @click="onMore">
+            {{ feedBusy ? 'Грузим…' : 'Показать ещё' }}
+          </button>
+        </div>
+      </section>
+
+      <div
+        v-if="!recsPending && !feedShown && ownRows.length === 0 && recs.length === 0"
+        class="am-empty"
+      >
         <span class="am-empty__mark" aria-hidden="true">✧</span>
         <span>Свой список пуст, а каталог не ответил.</span>
         <span>Когда сеть вернётся, здесь появятся рекомендации.</span>
@@ -612,6 +927,13 @@ watch(homeGenre, () => {
         </div>
       </div>
     </template>
+
+    <FilterSheet
+      :open="sheetOpen"
+      :pick="homePick"
+      @close="sheetOpen = false"
+      @apply="onApply"
+    />
   </section>
 </template>
 
@@ -689,11 +1011,36 @@ watch(homeGenre, () => {
   gap: 10px;
 }
 
+/* Ряд отбора: кнопка меню слева, лента жанров занимает остальное.
+   min-width: 0 на ленте обязателен — иначе прокрутчик распирает флекс
+   и кнопка уезжает за край. */
+.am-sift {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.am-sift__open {
+  flex: 0 0 auto;
+}
+
+.am-sift__num {
+  padding: 0 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--am-bg);
+  background: linear-gradient(135deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Жанры одной лентой: восемнадцать чипов переносом занимали три строки
    и уводили первую полку за сгиб. Края растворяются маской: обрезанный
    по краю чип честно говорит, что ряд прокручивается. */
 .am-choose {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 2px 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -719,6 +1066,20 @@ watch(homeGenre, () => {
   flex: 0 0 auto;
 }
 
+/* Что сейчас в отборе: снимается по одному нажатием на сам чип. */
+.am-now {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.am-now__off {
+  margin-left: 2px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
 /* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
 .am-empty__acts {
   display: flex;
@@ -726,6 +1087,14 @@ watch(homeGenre, () => {
   gap: 10px;
   justify-content: center;
   margin-top: 6px;
+}
+
+/* «Показать ещё» по центру под сеткой: у края страницы кнопку
+   приходилось бы искать глазами после каждой порции. */
+.am-more {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 10px;
 }
 
 .am-shelf {
@@ -793,5 +1162,17 @@ watch(homeGenre, () => {
   width: 72%;
   height: 12px;
   border-radius: var(--am-r-s);
+}
+
+/* На узком экране кнопка отбора уходит над лентой жанров: рядом им тесно,
+   и лента сжималась до двух чипов. */
+@media (max-width: 560px) {
+  .am-sift {
+    flex-wrap: wrap;
+  }
+
+  .am-choose {
+    flex-basis: 100%;
+  }
 }
 </style>
