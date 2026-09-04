@@ -132,6 +132,19 @@ export interface AniMoriSettings {
    * своё, а не спрошенное у облака: узнать его без сети тоже надо.
    */
   cloudSavedCount: number
+  /**
+   * Время правки файла копии, каким его назвало само облако после нашего
+   * последнего касания. Пустая строка значит «этот файл мы не писали».
+   *
+   * Ключ нужен ровно для одного вопроса перед сохранением: наша ли копия
+   * лежит в облаке сейчас. Запись шла с перезаписью не глядя, и сохранение
+   * с устройства, где список беднее, молча затирало копию другого.
+   *
+   * Сравнивать своё cloudSavedAt с временем файла нельзя: их ставят разные
+   * часы, и разница в минуту читалась бы как чужая правка. Здесь лежит
+   * ровно та строка, которую отдало облако, и сравнение идёт знак в знак.
+   */
+  cloudSeenModified: string
   /** Производная: тайтлы включены, пока основной источник != 'off'. */
   translateTitles: boolean
 }
@@ -174,6 +187,7 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   cloudToken: '',
   cloudSavedAt: 0,
   cloudSavedCount: 0,
+  cloudSeenModified: '',
   translateTitles: true,
 }
 
@@ -213,6 +227,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     cloudToken,
     cloudSavedAt,
     cloudSavedCount,
+    cloudSeenModified,
   ] = await Promise.all([
     storage.get('set_interface', DEFAULT_SETTINGS.translateInterface),
     storage.get<TitleSource>('set_title_primary'),
@@ -244,6 +259,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('am_cloud_token', DEFAULT_SETTINGS.cloudToken),
     storage.get('am_cloud_saved_at', DEFAULT_SETTINGS.cloudSavedAt),
     storage.get('am_cloud_saved_count', DEFAULT_SETTINGS.cloudSavedCount),
+    storage.get('am_cloud_seen_modified', DEFAULT_SETTINGS.cloudSeenModified),
   ])
 
   // Совместимость: старый set_titles применяется только при отсутствии нового ключа.
@@ -281,6 +297,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     cloudToken,
     cloudSavedAt,
     cloudSavedCount,
+    cloudSeenModified,
     translateTitles: titlePrimary !== 'off',
   }
 }
