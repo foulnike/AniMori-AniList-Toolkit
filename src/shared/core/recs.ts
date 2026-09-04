@@ -1,10 +1,34 @@
 // Рекомендации главной (пункт 3.11): профиль вкуса по любимым жанрам,
-// советы «по мотивам», отбор показанного и список «не интересует».
+// советы «по мотивам», бесконечная лента подбора, отбор показанного
+// и список «не интересует».
 // Кэш живёт в памяти запуска: пересчёт на каждый запуск — решение реестра.
+//
+// ПАЧКА ВМЕСТО ТРЁХ ПОХОДОВ
+// Сезон, тренд и лучшее спрашиваются одним запросом и раздаются трём полкам
+// из общего обещания. Раньше это были три захода подряд через общую паузу
+// клиента, и витрина собиралась ступеньками по несколько секунд.
+//
+// ЛЕНТА ДОБИРАЕТ, А НЕ ОТДАЁТ СТРАНИЦУ
+// Своё, скрытое и взрослое выбрасываются после ответа сервера, и страница
+// из тридцати тайтлов у человека с большим списком легко тает до трёх.
+// Поэтому «Показать ещё» просит не страницу, а нужное число плиток.
 
 import { Bridge } from '@/bridge'
 import type { MediaBrief } from '../api/anilist-media'
-import { fetchGenreMap, fetchRecsFor, fetchShelf, type ShelfKind } from '../api/anilist-catalog'
+import {
+  fetchFeed,
+  fetchGenreMap,
+  fetchRecsFor,
+  fetchShelf,
+  fetchShelfPack,
+  fetchTags,
+  type CatalogPick,
+  type CatalogTag,
+  type FeedPage,
+  type PackKind,
+  type ShelfKind,
+  type ShelfPack,
+} from '../api/anilist-catalog'
 import { Logger } from '../utils/logger'
 import { keepAllowed } from './adult'
 import { getEntry } from './collection'
@@ -25,6 +49,10 @@ const SEED_POOL = 8
 /** Оценка, с которой запись считается любимой. */
 const LOVED_SCORE = 8
 
+/** Сколько страниц берётся за один «Показать ещё». Потолок обязателен:
+    узкий отбор вроде «меха до 1990» иначе уведёт в десятки запросов подряд. */
+const FEED_TRIES = 3
+
 /** Ключ хранилища скрытого. Пользовательские данные, а не настройка. */
 const HIDE_KEY = 'am_recs_hidden'
 
@@ -39,6 +67,12 @@ const done = new Map<string, Promise<MediaBrief[]>>()
 
 /** Профиль вкуса запуска. null значит «ещё не считали», пустота — «считали, нету». */
 let taste: string[] | null = null
+
+/** Общее обещание пачки полок: три полки ждут один и тот же ответ. */
+let packRun: Promise<ShelfPack> | null = null
+
+/** Справочник тэгов запуска: меню отбора открывают много раз за сеанс. */
+let tagsRun: Promise<CatalogTag[]> | null = null
 
 /** Поднимает список скрытого из хранилища один раз за запуск. */
 async function loadHidden(): Promise<Set<number>> {
@@ -140,6 +174,28 @@ function cached(key: string, load: () => Promise<MediaBrief[]>): Promise<MediaBr
   return promise
 }
 
+/**
+ * Пачка полок каталога одним запросом. Провал сбрасывает обещание: витрина
+ * пересобирается при возврате на главную, и после обрыва сети вторая попытка
+ * обязана уйти в сеть, а не вернуть запомненную пустоту.
+ */
+function loadPack(): Promise<ShelfPack> {
+  if (packRun !== null) return packRun
+
+  packRun = fetchShelfPack().catch((e: unknown) => {
+    Logger('WARN', 'Рекомендации: пачка полок не доехала', e)
+    packRun = null
+    return { airing: [], trending: [], top: [] }
+  })
+
+  return packRun
+}
+
+/** Одна полка из пачки с применённым отбором показа. */
+export function packShelf(kind: PackKind): Promise<MediaBrief[]> {
+  return cached(`pack:${kind}`, async () => visible((await loadPack())[kind]))
+}
+
 /** Полка каталога с применённым отбором. Отказ сети — пустая полка. */
 export function recShelf(kind: ShelfKind, genres?: string[]): Promise<MediaBrief[]> {
   return cached(`${kind}:${(genres ?? []).join(',')}`, async () => {
@@ -161,22 +217,35 @@ export function tasteShelf(): Promise<MediaBrief[]> {
   })
 }
 
-/** Советы «по мотивам»: повторы склеиваются суммой весов. */
+/**
+ * Советы «по мотивам»: повторы склеиваются суммой весов.
+ *
+ * Семена спрашиваются разом: друг от друга они не зависят, а очередью
+ * и темпом ведает клиент AniList. Отказ одного семени не роняет полку:
+ * советы второго сами по себе уже полка.
+ */
 export function motifShelf(): Promise<MediaBrief[]> {
   return cached('motif', async () => {
     const seeds = pickSeeds()
     if (seeds.length === 0) return []
 
-    const weight = new Map<number, { brief: MediaBrief; rating: number }>()
-    for (const seed of seeds) {
-      try {
-        for (const rec of await fetchRecsFor(seed)) {
-          const known = weight.get(rec.brief.mediaId)
-          if (known !== undefined) known.rating += rec.rating
-          else weight.set(rec.brief.mediaId, { brief: rec.brief, rating: rec.rating })
+    const packs = await Promise.all(
+      seeds.map(async (seed) => {
+        try {
+          return await fetchRecsFor(seed)
+        } catch (e) {
+          Logger('WARN', `Рекомендации: советы для ${seed} не доехали`, e)
+          return []
         }
-      } catch (e) {
-        Logger('WARN', `Рекомендации: советы для ${seed} не доехали`, e)
+      }),
+    )
+
+    const weight = new Map<number, { brief: MediaBrief; rating: number }>()
+    for (const recs of packs) {
+      for (const rec of recs) {
+        const known = weight.get(rec.brief.mediaId)
+        if (known !== undefined) known.rating += rec.rating
+        else weight.set(rec.brief.mediaId, { brief: rec.brief, rating: rec.rating })
       }
     }
 
@@ -186,4 +255,71 @@ export function motifShelf(): Promise<MediaBrief[]> {
         .map((rec) => rec.brief),
     )
   })
+}
+
+/**
+ * Справочник тэгов для меню отбора. Провал сбрасывает обещание: меню
+ * без тэгов бесполезно, и второе открытие должно попробовать снова.
+ */
+export function tagChoices(): Promise<CatalogTag[]> {
+  if (tagsRun !== null) return tagsRun
+
+  tagsRun = fetchTags().catch((e: unknown) => {
+    Logger('WARN', 'Рекомендации: справочник тэгов не доехал', e)
+    tagsRun = null
+    return []
+  })
+
+  return tagsRun
+}
+
+/**
+ * Состояние ленты подбора: где остановились и кого уже отдавали.
+ * Живёт у вызывающего, а не в ядре: лент бывает несколько, и чужой экран
+ * не должен листать чужую.
+ */
+export interface FeedRun {
+  pick: CatalogPick
+  page: number
+  done: boolean
+  seen: Set<number>
+}
+
+/** Новая лента под отбор. Страницы ещё не брали. */
+export function newFeed(pick: CatalogPick): FeedRun {
+  return { pick, page: 0, done: false, seen: new Set() }
+}
+
+/**
+ * Следующая порция ленты: не менее `want` плиток, пока каталог не кончился.
+ *
+ * Пустой ответ при `done === false` — не конец ленты, а неудачный заход:
+ * кнопка остаётся, и следующее нажатие продолжит с той же страницы.
+ */
+export async function feedMore(run: FeedRun, want: number): Promise<MediaBrief[]> {
+  const out: MediaBrief[] = []
+
+  for (let attempt = 0; attempt < FEED_TRIES && !run.done && out.length < want; attempt++) {
+    const page = run.page + 1
+
+    let reply: FeedPage
+    try {
+      reply = await fetchFeed(run.pick, page)
+    } catch (e) {
+      // Отказ сети не закрывает ленту: страница не засчитана, берём её же потом.
+      Logger('WARN', `Лента подбора: страница ${page} не доехала`, e)
+      break
+    }
+
+    run.page = page
+    if (!reply.hasNext) run.done = true
+
+    for (const brief of await visible(reply.items)) {
+      if (run.seen.has(brief.mediaId)) continue
+      run.seen.add(brief.mediaId)
+      out.push(brief)
+    }
+  }
+
+  return out
 }
