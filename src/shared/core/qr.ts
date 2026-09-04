@@ -10,6 +10,15 @@
 //
 // Модуль без единого импорта: ни моста, ни DOM, ни журнала — чистая
 // считалка. Наружу отдаётся сетка тёмных клеток и разметка SVG.
+//
+// ЧТЕНИЕ ПО НОМЕРУ ИДЁТ ЧЕРЕЗ nth()
+// Проверка типов в проекте строгая: чтение по номеру она считает возможной
+// пустотой, даже когда номер заведомо внутри длины. Спорить с ней
+// восклицательными знаками в счётном коде — худший из выходов: ими
+// глушится и настоящий промах. Поэтому все чтения идут через nth(),
+// который за границей отдаёт ноль, а таблицы версий — через planOf()
+// и alignOf(). Записи это не касается: писать по номеру строгость
+// не мешает, и накладных расходов у этого решения нет никаких.
 
 /** Стойкость M в сведениях о формате обозначается двумя нулями. */
 const LEVEL_BITS = 0b00
@@ -18,16 +27,23 @@ const LEVEL_BITS = 0b00
 const MAX_VERSION = 10
 
 /**
- * Устройство версий на уровне M: [байт данных, байт стойкости на блок,
- * блоков в первой группе, байт в её блоке, блоков во второй, байт в её
- * блоке]. Нулевая строка — затычка: версии считают с единицы.
+ * Устройство версии: [байт данных, байт стойкости на блок, блоков
+ * в первой группе, байт в её блоке, блоков во второй, байт в её блоке].
+ */
+type Plan = [number, number, number, number, number, number]
+
+/** Затычка: версии считают с единицы, и нулевой строке нужен смысл. */
+const NO_PLAN: Plan = [0, 0, 0, 0, 0, 0]
+
+/**
+ * Устройство версий на уровне M.
  *
  * Сверено дважды: байты данных равны сумме блоков, а вместе
  * со стойкостью — полной емкости версии: 26, 44, 70, 100, 134, 172,
  * 196, 242, 292, 346.
  */
-const PLAN: Array<[number, number, number, number, number, number]> = [
-  [0, 0, 0, 0, 0, 0],
+const PLAN: Plan[] = [
+  NO_PLAN,
   [16, 10, 1, 16, 0, 0],
   [28, 16, 1, 28, 0, 0],
   [44, 26, 1, 44, 0, 0],
@@ -59,6 +75,16 @@ const ALIGN: number[][] = [
   [6, 28, 50],
 ]
 
+/** Устройство версии. За таблицу здесь не выходят, но проверка строга. */
+function planOf(version: number): Plan {
+  return PLAN[version] ?? NO_PLAN
+}
+
+/** Места узоров выравнивания для версии. */
+function alignOf(version: number): number[] {
+  return ALIGN[version] ?? []
+}
+
 /** Готовый код. */
 export interface QrCode {
   /** Сторона в клетках, без белого поля вокруг. */
@@ -85,6 +111,11 @@ export interface QrLook {
 const EXP = new Uint8Array(512)
 const LOG = new Uint8Array(256)
 
+/** Чтение по номеру. За границей ноль — см. шапку файла. */
+function nth(list: Uint8Array | number[], i: number): number {
+  return list[i] ?? 0
+}
+
 /** Таблицы поля Галуа — раз при загрузке: они малы, а нужны всегда. */
 function sow(): void {
   let x = 1
@@ -94,7 +125,7 @@ function sow(): void {
     x = x << 1
     if ((x & 0x100) !== 0) x ^= 0x11d
   }
-  for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255]
+  for (let i = 255; i < 512; i++) EXP[i] = nth(EXP, i - 255)
 }
 
 sow()
@@ -103,7 +134,7 @@ sow()
 function mul(a: number, b: number): number {
   if (a === 0 || b === 0) return 0
 
-  return EXP[LOG[a] + LOG[b]]
+  return nth(EXP, nth(LOG, a) + nth(LOG, b))
 }
 
 /**
@@ -116,8 +147,8 @@ function guard(block: Uint8Array, count: number): Uint8Array {
   for (let i = 0; i < count; i++) {
     const next = new Uint8Array(gen.length + 1)
     for (let j = 0; j < gen.length; j++) {
-      next[j] ^= gen[j]
-      next[j + 1] ^= mul(gen[j], EXP[i])
+      next[j] = nth(next, j) ^ nth(gen, j)
+      next[j + 1] = nth(next, j + 1) ^ mul(nth(gen, j), nth(EXP, i))
     }
     gen = next
   }
@@ -125,9 +156,9 @@ function guard(block: Uint8Array, count: number): Uint8Array {
   const rest = new Uint8Array(block.length + count)
   rest.set(block)
   for (let i = 0; i < block.length; i++) {
-    const lead = rest[i]
+    const lead = nth(rest, i)
     if (lead === 0) continue
-    for (let j = 1; j < gen.length; j++) rest[i + j] ^= mul(gen[j], lead)
+    for (let j = 1; j < gen.length; j++) rest[i + j] = nth(rest, i + j) ^ mul(nth(gen, j), lead)
   }
 
   return rest.slice(block.length)
@@ -169,7 +200,7 @@ function utf8(text: string): Uint8Array {
 function bytesFit(version: number): number {
   const head = version >= 10 ? 20 : 12
 
-  return Math.floor((PLAN[version][0] * 8 - head) / 8)
+  return Math.floor((planOf(version)[0] * 8 - head) / 8)
 }
 
 /**
@@ -182,7 +213,7 @@ function bytesFit(version: number): number {
  * а с ним и весь код.
  */
 function weave(bytes: Uint8Array, version: number): Uint8Array {
-  const [dataLen, ecLen, group1, size1, group2, size2] = PLAN[version]
+  const [dataLen, ecLen, group1, size1, group2, size2] = planOf(version)
 
   const bits: number[] = []
   const push = (value: number, width: number) => {
@@ -203,7 +234,7 @@ function weave(bytes: Uint8Array, version: number): Uint8Array {
   const data = new Uint8Array(dataLen)
   for (let i = 0; i < bits.length; i += 8) {
     let one = 0
-    for (let j = 0; j < 8; j++) one = (one << 1) | bits[i + j]
+    for (let j = 0; j < 8; j++) one = (one << 1) | nth(bits, i + j)
     data[i / 8] = one
   }
   for (let i = bits.length / 8, turn = 0; i < dataLen; i++, turn++) {
@@ -225,10 +256,10 @@ function weave(bytes: Uint8Array, version: number): Uint8Array {
   let k = 0
   const widest = Math.max(size1, size2)
   for (let i = 0; i < widest; i++) {
-    for (const block of blocks) if (i < block.length) out[k++] = block[i]
+    for (const block of blocks) if (i < block.length) out[k++] = nth(block, i)
   }
   for (let i = 0; i < ecLen; i++) {
-    for (const one of guards) out[k++] = one[i]
+    for (const one of guards) out[k++] = nth(one, i)
   }
 
   return out
@@ -268,7 +299,7 @@ function frame(grid: Uint8Array, fixed: Uint8Array, size: number, version: numbe
     }
   }
 
-  const spots = ALIGN[version]
+  const spots = alignOf(version)
   const last = spots.length - 1
   for (let i = 0; i < spots.length; i++) {
     for (let j = 0; j < spots.length; j++) {
@@ -277,7 +308,7 @@ function frame(grid: Uint8Array, fixed: Uint8Array, size: number, version: numbe
 
       for (let dy = -2; dy <= 2; dy++) {
         for (let dx = -2; dx <= 2; dx++) {
-          set(spots[i] + dy, spots[j] + dx, Math.max(Math.abs(dx), Math.abs(dy)) !== 1)
+          set(nth(spots, i) + dy, nth(spots, j) + dx, Math.max(Math.abs(dx), Math.abs(dy)) !== 1)
         }
       }
     }
@@ -334,7 +365,7 @@ function fill(grid: Uint8Array, fixed: Uint8Array, size: number, data: Uint8Arra
         if (fixed[cell] === 1) continue
         if (at >= data.length * 8) continue
 
-        grid[cell] = (data[at >>> 3] >>> (7 - (at & 7))) & 1
+        grid[cell] = (nth(data, at >>> 3) >>> (7 - (at & 7))) & 1
         at++
       }
     }
@@ -374,7 +405,7 @@ function hide(grid: Uint8Array, fixed: Uint8Array, size: number, mask: number): 
       const cell = row * size + col
       if (fixed[cell] === 1) continue
       if (!bend(mask, row, col)) continue
-      grid[cell] ^= 1
+      grid[cell] = nth(grid, cell) ^ 1
     }
   }
 }
@@ -416,7 +447,7 @@ function lineScore(grid: Uint8Array, size: number, index: number, byRow: boolean
   let window = 0
 
   for (let i = 0; i < size; i++) {
-    const one = byRow ? grid[index * size + i] : grid[i * size + index]
+    const one = byRow ? nth(grid, index * size + i) : nth(grid, i * size + index)
 
     if (one === last) {
       run++
@@ -454,11 +485,11 @@ function penalty(grid: Uint8Array, size: number): number {
 
   for (let row = 0; row + 1 < size; row++) {
     for (let col = 0; col + 1 < size; col++) {
-      const one = grid[row * size + col]
+      const one = nth(grid, row * size + col)
       const same =
-        one === grid[row * size + col + 1] &&
-        one === grid[(row + 1) * size + col] &&
-        one === grid[(row + 1) * size + col + 1]
+        one === nth(grid, row * size + col + 1) &&
+        one === nth(grid, (row + 1) * size + col) &&
+        one === nth(grid, (row + 1) * size + col + 1)
       if (same) score += 3
     }
   }
@@ -551,8 +582,9 @@ export function qrSvg(code: QrCode, look: QrLook = {}): string {
 
   const parts: string[] = []
   for (let row = 0; row < code.size; row++) {
+    const line = code.dark[row] ?? []
     for (let col = 0; col < code.size; col++) {
-      if (code.dark[row][col]) parts.push(`M${col + quiet} ${row + quiet}h1v1h-1z`)
+      if (line[col] === true) parts.push(`M${col + quiet} ${row + quiet}h1v1h-1z`)
     }
   }
 
