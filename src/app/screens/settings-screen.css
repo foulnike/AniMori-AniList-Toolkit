@@ -3,12 +3,21 @@
    поддаваться точечной правке. Подключается атрибутом src у style scoped,
    поэтому правила по-прежнему закрыты одним экраном. */
 
-/* Две колонки известной доли, а не auto-fit по минимальной ширине: на
-   фуллскрине сетка разводила четыре панели в ряд, и настройки читались
-   как россыпь окошек. Потолок ширины держит строку текста читаемой. */
+/* Панели разведены по именованным местам, а не по столбцам-обёрткам.
+   Причина: колонок то две, то три, и обёртки пришлось бы перетасовывать
+   разметкой под каждую ширину окна. С местами разметка одна, а порядок
+   живёт здесь.
+
+   Две колонки — рабочая ширина окна и половина экрана. Слева то, чем
+   правят список, справа то, на что смотрят. Потолок ширины держит строку
+   текста читаемой. */
 .am-set {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-areas:
+    'pull look'
+    'data about'
+    'cloud .';
   gap: var(--am-gap);
   align-items: start;
   width: 100%;
@@ -16,17 +25,57 @@
   margin: 0 auto;
 }
 
-/* Колонка сама столбец: панели в ней идут одна под другой с общим шагом. */
-.am-set__col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--am-gap);
-  min-width: 0;
+.am-set__pull {
+  grid-area: pull;
 }
 
+.am-set__data {
+  grid-area: data;
+}
+
+.am-set__cloud {
+  grid-area: cloud;
+}
+
+.am-set__look {
+  grid-area: look;
+}
+
+.am-set__about {
+  grid-area: about;
+}
+
+/* Фуллскрин: три колонки. Раньше их было две при любой ширине, и на
+   широком окне по сторонам оставались пустые поля, а панели тянулись
+   вниз простынёй.
+
+   Справа облачная копия: в ней больше всего строк и ввода, и своя доля
+   шире прочих. В середине то, чем список наполняют, слева оформление
+   и справка — их открывают реже всего.
+
+   Порог 1400px, а не 1200: на 1280 три колонки сжимали панель облака
+   до ширины, где путь файла и ссылка перестают читаться. */
+@media (min-width: 1400px) {
+  .am-set {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr);
+    grid-template-areas:
+      'look pull cloud'
+      'about data .';
+    max-width: 1680px;
+  }
+}
+
+/* Узкое окно: одна колонка, и порядок важнее вида. Сначала то, чем
+   список заводят, потом данные и копия, и только затем оформление. */
 @media (max-width: 980px) {
   .am-set {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'pull'
+      'data'
+      'cloud'
+      'look'
+      'about';
   }
 }
 
@@ -71,6 +120,202 @@
 .am-field {
   flex: 1 1 240px;
   min-width: 200px;
+}
+
+/* Значок вместо подписи. Служебных действий у облака три — проверить
+   связь, сменить пропуск, отключить, — и словами они занимали ряд
+   шириной в панель, споря за внимание с тем, что делают каждый день.
+   Слова никуда не делись: они в подсказке и в aria-label.
+
+   Ростом со строку, а не с кнопку: значок стоит рядом с заголовком
+   и в строке площадки, и полная высота .am-btn разрывала бы обе. */
+.am-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-cap);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease);
+}
+
+.am-icon:hover:not(:disabled) {
+  color: var(--am-text);
+  background: var(--am-hover);
+  border-color: rgb(var(--am-accent-rgb) / 0.45);
+}
+
+.am-icon:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Площадка строкой: знак, название, состояние и справа то, что с ней
+   можно сделать. Раньше здесь стояли карточки выбора — они были нужны,
+   пока мест было два. Google Диск убран целиком, и карточка осталась
+   одна, с пустотой на месте второй.
+
+   Тем же классом одета заглушка Шикимори в импорте: строка провайдера
+   и там и тут значит одно и то же, и выглядеть должна одинаково. */
+.am-place {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px 11px 14px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-l);
+}
+
+/* Площадка, до которой руки ещё не дошли, одета пунктиром и погашена:
+   пунктир сам говорит «пока нет», и обещать словами ничего не приходится. */
+.am-place--soon {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.am-place__mark {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--am-r-s);
+}
+
+/* Знак буквой — для того, чего ещё нет: рисовать фирменный знак сервису,
+   который не подключается, значит обещать больше, чем сделано. */
+.am-place__mark--shiki {
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--am-faint);
+  background: var(--am-fill-3);
+}
+
+.am-place__text {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.am-place__name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.am-place__note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--am-dim);
+}
+
+.am-place__acts {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* Две главные кнопки: копия туда и копия обратно. Их нажимают каждый день,
+   и они одни во всей панели нарисованы крупно и акцентом — остальное
+   либо значок, либо призрак.
+
+   Направление подписано под названием: «сохранить» и «забрать» на слух
+   отличаются хуже, чем на вид, и стрелка со строкой «список → облако»
+   снимает вопрос до нажатия. */
+.am-duo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.am-duo__btn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 12px 8px;
+  font: inherit;
+  color: var(--am-text);
+  cursor: pointer;
+  background: rgb(var(--am-accent-rgb) / 0.1);
+  border: 1px solid rgb(var(--am-accent-rgb) / 0.4);
+  border-radius: var(--am-r-l);
+  transition:
+    background-color var(--am-fast) var(--am-ease),
+    border-color var(--am-fast) var(--am-ease),
+    border-radius var(--am-mid) var(--am-ease),
+    transform var(--am-fast) var(--am-ease);
+}
+
+.am-duo__btn:hover:not(:disabled) {
+  background: rgb(var(--am-accent-rgb) / 0.18);
+  border-radius: var(--am-r-drop);
+  transform: translateY(-2px);
+}
+
+.am-duo__btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.am-duo__btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+  transform: none;
+}
+
+.am-duo__mark {
+  font-size: 17px;
+  line-height: 1;
+  color: var(--am-accent);
+}
+
+.am-duo__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.am-duo__note {
+  font-size: 11px;
+  color: var(--am-dim);
+}
+
+/* Подзаголовок внутри панели с волосяной линией до края. Ссылка для
+   телевизора и чтение по ссылке — отдельные истории, а не ещё две кнопки
+   в общей россыпи, и без такой подписи они склеивались с тем, что выше. */
+.am-sub {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--am-faint);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.am-sub::after {
+  flex: 1 1 auto;
+  height: 1px;
+  content: '';
+  background: var(--am-line-soft);
 }
 
 /* Выбор темы: три карточки рядом, выбранная подсвечена акцентом. */
@@ -277,76 +522,7 @@
   background: rgb(var(--am-accent-rgb) / 0.24);
 }
 
-/* Выбор облака теми же карточками, что и выбор оформления: одинаковый
-   по смыслу выбор должен и выглядеть одинаково, иначе экран читается
-   как склад из разных мест.
-
-   Площадка, до которой руки ещё не дошли, одета пунктиром и погашена:
-   пунктир сам говорит «пока нет», и обещать словами ничего не приходится. */
-.am-cloud {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.am-cloud__pick {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  padding: 13px 8px;
-  font: inherit;
-  color: var(--am-dim);
-  cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-l);
-  transition:
-    color var(--am-fast) var(--am-ease),
-    background-color var(--am-fast) var(--am-ease),
-    border-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease),
-    transform var(--am-fast) var(--am-ease);
-}
-
-.am-cloud__pick:hover:not(:disabled) {
-  color: var(--am-text);
-  background: var(--am-hover);
-  border-radius: var(--am-r-drop);
-  transform: translateY(-2px);
-}
-
-.am-cloud__pick--on {
-  color: var(--am-text);
-  background: rgb(var(--am-accent-rgb) / 0.12);
-  border-color: rgb(var(--am-accent-rgb) / 0.5);
-  border-radius: var(--am-r-drop);
-  box-shadow: var(--am-sh-glow);
-}
-
-.am-cloud__pick:disabled {
-  cursor: default;
-  border-style: dashed;
-  opacity: 0.55;
-}
-
-.am-cloud__mark {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--am-faint);
-}
-
-.am-cloud__pick--on .am-cloud__mark {
-  color: var(--am-accent);
-}
-
-.am-cloud__name {
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-/* Подпись «позже» внутри погашенной карточки: пунктир говорит о том же,
+/* Подпись «позже» в строке того, чего ещё нет: пунктир говорит о том же,
    но слово снимает последний вопрос — «сломано или ещё не сделано?». */
 .am-cloud__soon {
   font-size: 11px;
@@ -518,7 +694,7 @@ code {
 
 @media (prefers-reduced-motion: reduce) {
   .am-skins__btn:hover,
-  .am-cloud__pick:hover:not(:disabled) {
+  .am-duo__btn:hover:not(:disabled) {
     transform: none;
   }
 }
