@@ -1,9 +1,17 @@
 <script setup lang="ts">
-// Пункт 3.9: люди тайтла под двумя колонками карточки. Добыча своя:
+// Пункт 3.9: люди аниме под двумя колонками карточки. Добыча своя:
 // ответ тяжелее карточки, и ждать его сверху экрана незачем.
 //
 // Окошко человека блок больше не держит: оно в общем слое (person-layer.ts),
 // потому что теперь человека открывает ещё и ссылка из любого описания.
+//
+// ИМЯ НЕ ВЫЛЕЗАЕТ ЗА ПЛИТКУ
+//
+// Ширина трека полки задана жёстко, а имена бывают в полторы строки
+// без единого пробела — полное имя персонажа со всеми титулами или
+// слитная транскрипция. Такое слово не переносится по обычным правилам
+// и вылезало поверх соседних плиток. Теперь подпись режется по двум
+// строкам, а целиком имя всегда есть в подсказке первой строкой.
 import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 
 import { fetchMalIds } from '@/api/anilist-media'
@@ -51,7 +59,7 @@ const busy = ref(false)
 /** Раскрыт ли хвост списка авторов. */
 const wide = ref(false)
 
-/** Номер показа: ответ на прежний тайтл приходит уже не к месту. */
+/** Номер показа: ответ на прежнее аниме приходит уже не к месту. */
 let run = 0
 
 /** Русские имена, добытые фоном: ключ — `${kind}:${personId}`. */
@@ -97,13 +105,15 @@ function displayName(kind: PersonKind, person: PersonRef): string {
 }
 
 /**
- * Подсказка плитки: родное имя и латиница двумя строками. Когда подпись
- * уже по-русски, латиница — единственный способ сверить человека с источником,
- * а своя подсказка держит перенос строки, чего системная не умела.
+ * Подсказка плитки: показанное имя, родное и латиница тремя строками.
+ * Показанное идёт первым именно потому, что в плитке оно режется по двум
+ * строкам: длинное имя иначе негде было бы дочитать. Латиница — единственный
+ * способ сверить человека с источником, а своя подсказка держит перенос
+ * строки, чего системная не умела.
  */
 function personHint(kind: PersonKind, person: PersonRef): string {
   const shown = displayName(kind, person)
-  const lines = [person.native, person.name === shown ? null : person.name]
+  const lines = [shown, person.native, person.name === shown ? null : person.name]
 
   return lines.filter((line): line is string => typeof line === 'string' && line !== '').join('\n')
 }
@@ -128,7 +138,7 @@ async function load(): Promise<void> {
     void beginRussian(mine)
   } catch (e) {
     // Без людей карточка полноценна, поэтому секция просто не появится.
-    Logger('WARN', `Люди тайтла ${props.mediaId}: добыть не вышло`, e)
+    Logger('WARN', `Люди аниме ${props.mediaId}: добыть не вышло`, e)
   } finally {
     if (mine === run) busy.value = false
   }
@@ -136,8 +146,8 @@ async function load(): Promise<void> {
 
 /**
  * Фоновый проход по русским именам. Основная масса приходит одним запросом —
- * списком ролей тайтла; точечный поиск достаётся несопоставленным. Уход
- * с тайтла обрывает очередь тем же номером показа, что и основная добыча.
+ * списком ролей аниме; точечный поиск достаётся несопоставленным. Уход
+ * с аниме обрывает очередь тем же номером показа, что и основная добыча.
  */
 async function beginRussian(mine: number): Promise<void> {
   const queue: Array<{ kind: PersonKind; person: PersonRef }> = []
@@ -152,12 +162,12 @@ async function beginRussian(mine: number): Promise<void> {
   }
   if (queue.length === 0) return
 
-  // MAL id текущего тайтла: на нём висят и массовый проход, и гард тёзок.
+  // MAL id нынешнего аниме: на нём висят и массовый проход, и гард тёзок.
   let malId: number | undefined
   try {
     malId = (await fetchMalIds([props.mediaId])).get(props.mediaId)
   } catch (e) {
-    Logger('WARN', `Русские имена: MAL id тайтла ${props.mediaId} не добыт`, e)
+    Logger('WARN', `Русские имена: MAL id аниме ${props.mediaId} не добыт`, e)
   }
 
   if (malId) {
@@ -361,6 +371,7 @@ watch(
   flex-direction: column;
   gap: 7px;
   width: 100%;
+  min-width: 0;
   padding: 0;
   font: inherit;
   color: inherit;
@@ -410,10 +421,14 @@ watch(
   position: absolute;
   bottom: 6px;
   left: 6px;
+  max-width: calc(100% - 12px);
   padding: 2px 8px;
+  overflow: hidden;
   font-size: 10.5px;
   font-weight: 600;
   color: var(--am-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: color-mix(in srgb, var(--am-veil) 72%, transparent);
   border-radius: var(--am-r-cap);
   backdrop-filter: blur(6px);
@@ -425,15 +440,29 @@ watch(
   border-radius: var(--am-r-leaf);
 }
 
+/* Две строки и ни пикселем больше. anywhere рвёт слитное имя без пробелов:
+   без этого такое слово шире трека и ложится поверх соседней плитки.
+   Целиком имя остаётся в подсказке. */
 .am-face__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
-/* Озвучка бледнее имени: это второй человек в той же плитке. */
+/* Озвучка бледнее имени: это второй человек в той же плитке.
+   Режется так же: имя актёра бывает длиннее имени героя. */
 .am-face__voice {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  width: 100%;
   padding: 0;
+  overflow: hidden;
   font: inherit;
   font-size: 12px;
   color: var(--am-dim);
@@ -441,6 +470,7 @@ watch(
   cursor: pointer;
   background: none;
   border: 0;
+  overflow-wrap: anywhere;
   transition: color var(--am-fast) var(--am-ease);
 }
 
