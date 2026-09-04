@@ -1,15 +1,26 @@
 <script setup lang="ts">
-// Меню отбора подбора для главной: жанры, тэги, годы, форматы и порядок.
+// Меню отбора подбора для главной: жанры, годы, форматы, порядок и тэги.
 //
 // ЧЕРНОВИК, А НЕ ПРЯМАЯ ПРАВКА
 // Меню правит свою копию и отдаёт её одним «Готово». Иначе каждое нажатие
 // чипа било бы в сеть: человек собирает отбор из пяти-шести условий, а лента
 // пересчитывалась бы после каждого.
 //
+// ТЭГИ ИДУТ ПОСЛЕДНИМИ
+// Раздел тэгов выше остальных вытеснял их за край: список групп длинный,
+// и до годов с форматами приходилось листать. Жанры, годы, формат и порядок
+// вместе занимают экран, тэги — уточнение поверх них, и место им в конце.
+//
 // ГРУППЫ ТЭГОВ ЗАКРЫТЫ ПО УМОЛЧАНИЮ
 // Справочник AniList — близко к тысяче тэгов. Сразу все — это и стена чипов
 // без шанса найти нужный, и тысяча узлов в показе разом. Открыта всегда одна
 // группа, а поиск идёт по всему сразу и группы временно отменяет.
+//
+// СВОИ СТРЕЛКИ У ГОДА
+// Поле года — обычный текст с цифровой клавиатурой, а не число: родной
+// счётчик браузера в каждом движке свой, в тёмной теме выглядит чужим
+// и на телефоне не показывается вовсе. Стрелки нарисованы здесь, шаг
+// повторяют клавиши вверх-вниз в самом поле.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import {
@@ -74,6 +85,9 @@ interface TagGroup {
   items: CatalogTag[]
 }
 
+/** Какая из двух границ года правится. */
+type YearSide = 'from' | 'till'
+
 const draft = ref<CatalogPick>(emptyPick())
 const tags = ref<CatalogTag[]>([])
 const tagsBusy = ref(false)
@@ -89,6 +103,15 @@ let tagsAsked = false
 let bodyKeep = ''
 
 const yearMax = new Date().getFullYear() + 1
+
+/** Нынешний год: с него начинает пустое поле под стрелкой. */
+const yearNow = new Date().getFullYear()
+
+/** Оба поля года списком: разметка у них общая, разнятся подпись и подсказка. */
+const YEAR_FIELDS: ReadonlyArray<{ side: YearSide; title: string; hint: string }> = [
+  { side: 'from', title: 'С года', hint: String(YEAR_MIN) },
+  { side: 'till', title: 'По год', hint: String(yearMax) },
+]
 
 /** Сколько условий сейчас в черновике. Порядок не считается отбором. */
 const count = computed(
@@ -215,11 +238,57 @@ function readYear(text: string): number | null {
   return Number.isFinite(num) ? num : null
 }
 
+/** Что сейчас набрано в поле стороны. */
+function yearText(side: YearSide): string {
+  return side === 'from' ? fromText.value : tillText.value
+}
+
+function setYearText(side: YearSide, text: string): void {
+  if (side === 'from') fromText.value = text
+  else tillText.value = text
+}
+
 /** Поля годов читаются сырыми: подгонка под границы на каждую цифру
     не давала бы ввести «1995»: первая же единица стала бы годом 1950. */
 function onYears(): void {
   draft.value.yearFrom = readYear(fromText.value)
   draft.value.yearTo = readYear(tillText.value)
+}
+
+/**
+ * Ввод в поле года. Всё, кроме цифр, снимается на месте и длина держится
+ * в четырёх знаках: поле текстовое, и без этого в нём осели бы буквы.
+ * Значение возвращается в сам узел, иначе показ отстанет от состояния,
+ * когда чистка вернула прежнюю строку и перерисовки не будет.
+ */
+function onYearInput(side: YearSide, e: Event): void {
+  const field = e.target as HTMLInputElement
+  const clean = field.value.replace(/\D+/g, '').slice(0, 4)
+
+  if (field.value !== clean) field.value = clean
+  setYearText(side, clean)
+  onYears()
+}
+
+/**
+ * Шаг стрелкой на год. Пустое или недописанное поле сперва встаёт на нынешний
+ * год: иначе стрелка вверх превращала бы набранное «19» в «20», а с пустого
+ * поля пришлось бы подниматься от пятидесятого.
+ */
+function stepYear(side: YearSide, step: number): void {
+  const now = readYear(yearText(side))
+  const whole = now !== null && now >= YEAR_MIN && now <= yearMax
+  const next = whole ? (now as number) + step : yearNow
+
+  setYearText(side, String(Math.min(Math.max(next, YEAR_MIN), yearMax)))
+  onYears()
+}
+
+/** Упёрлась ли стрелка в край каталога: дальше нажимать нечего. */
+function stepOff(side: YearSide, step: number): boolean {
+  const year = readYear(yearText(side))
+  if (year === null) return false
+  return step > 0 ? year >= yearMax : year <= YEAR_MIN
 }
 
 /** Готовый промежуток: повторное нажатие снимает годы вовсе. */
@@ -348,6 +417,105 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="am-part">
+            <h3 class="am-h3">Годы</h3>
+
+            <div class="am-wrap">
+              <button
+                v-for="span in spans"
+                :key="span.key"
+                class="am-chip"
+                :class="{ 'am-chip--on': spanOn(span) }"
+                type="button"
+                @click="useSpan(span)"
+              >
+                {{ span.title }}
+              </button>
+            </div>
+
+            <div class="am-years">
+              <div v-for="field in YEAR_FIELDS" :key="field.side" class="am-years__one">
+                <span class="am-meta">{{ field.title }}</span>
+
+                <div class="am-year">
+                  <input
+                    class="am-input am-year__field"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="4"
+                    autocomplete="off"
+                    :aria-label="field.title"
+                    :placeholder="field.hint"
+                    :value="yearText(field.side)"
+                    @input="onYearInput(field.side, $event)"
+                    @keydown.up.prevent="stepYear(field.side, 1)"
+                    @keydown.down.prevent="stepYear(field.side, -1)"
+                  />
+
+                  <span class="am-year__steps">
+                    <button
+                      class="am-year__step"
+                      type="button"
+                      tabindex="-1"
+                      :disabled="stepOff(field.side, 1)"
+                      :aria-label="`${field.title}: больше`"
+                      @click="stepYear(field.side, 1)"
+                    >
+                      <svg class="am-year__arrow" viewBox="0 0 12 8" aria-hidden="true">
+                        <path d="M1.7 5.8 6 1.9 10.3 5.8" />
+                      </svg>
+                    </button>
+
+                    <button
+                      class="am-year__step"
+                      type="button"
+                      tabindex="-1"
+                      :disabled="stepOff(field.side, -1)"
+                      :aria-label="`${field.title}: меньше`"
+                      @click="stepYear(field.side, -1)"
+                    >
+                      <svg class="am-year__arrow" viewBox="0 0 12 8" aria-hidden="true">
+                        <path d="M1.7 2.2 6 6.1 10.3 2.2" />
+                      </svg>
+                    </button>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="am-part">
+            <h3 class="am-h3">Формат выхода</h3>
+            <div class="am-wrap">
+              <button
+                v-for="format in FORMAT_CHOICES"
+                :key="format"
+                class="am-chip"
+                :class="{ 'am-chip--on': draft.formats.includes(format) }"
+                type="button"
+                @click="toggleFormat(format)"
+              >
+                {{ formatWord(format) ?? format }}
+              </button>
+            </div>
+          </section>
+
+          <section class="am-part">
+            <h3 class="am-h3">Порядок</h3>
+            <div class="am-seg">
+              <button
+                v-for="item in SORT_CHOICES"
+                :key="item.key"
+                class="am-seg__btn"
+                :class="{ 'am-seg__btn--on': draft.sort === item.key }"
+                type="button"
+                @click="setSort(item.key)"
+              >
+                {{ item.title }}
+              </button>
+            </div>
+          </section>
+
+          <section class="am-part">
             <h3 class="am-h3">Тэги</h3>
 
             <div v-if="chosenTags.length > 0" class="am-wrap am-part__chosen">
@@ -419,85 +587,6 @@ onBeforeUnmount(() => {
                 </div>
               </li>
             </ul>
-          </section>
-
-          <section class="am-part">
-            <h3 class="am-h3">Годы</h3>
-
-            <div class="am-wrap">
-              <button
-                v-for="span in spans"
-                :key="span.key"
-                class="am-chip"
-                :class="{ 'am-chip--on': spanOn(span) }"
-                type="button"
-                @click="useSpan(span)"
-              >
-                {{ span.title }}
-              </button>
-            </div>
-
-            <div class="am-years">
-              <label class="am-years__one">
-                <span class="am-meta">С года</span>
-                <input
-                  v-model="fromText"
-                  class="am-input"
-                  type="number"
-                  inputmode="numeric"
-                  :min="YEAR_MIN"
-                  :max="yearMax"
-                  :placeholder="String(YEAR_MIN)"
-                  @input="onYears"
-                />
-              </label>
-
-              <label class="am-years__one">
-                <span class="am-meta">По год</span>
-                <input
-                  v-model="tillText"
-                  class="am-input"
-                  type="number"
-                  inputmode="numeric"
-                  :min="YEAR_MIN"
-                  :max="yearMax"
-                  :placeholder="String(yearMax)"
-                  @input="onYears"
-                />
-              </label>
-            </div>
-          </section>
-
-          <section class="am-part">
-            <h3 class="am-h3">Формат выхода</h3>
-            <div class="am-wrap">
-              <button
-                v-for="format in FORMAT_CHOICES"
-                :key="format"
-                class="am-chip"
-                :class="{ 'am-chip--on': draft.formats.includes(format) }"
-                type="button"
-                @click="toggleFormat(format)"
-              >
-                {{ formatWord(format) ?? format }}
-              </button>
-            </div>
-          </section>
-
-          <section class="am-part">
-            <h3 class="am-h3">Порядок</h3>
-            <div class="am-seg">
-              <button
-                v-for="item in SORT_CHOICES"
-                :key="item.key"
-                class="am-seg__btn"
-                :class="{ 'am-seg__btn--on': draft.sort === item.key }"
-                type="button"
-                @click="setSort(item.key)"
-              >
-                {{ item.title }}
-              </button>
-            </div>
           </section>
         </div>
 
@@ -735,6 +824,73 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+/* Своя пара стрелок вместо родного счётчика: место под них отведено
+   отступом поля, чтобы цифры года не заезжали под кнопки. */
+.am-year {
+  position: relative;
+  display: flex;
+}
+
+.am-year__field {
+  width: 100%;
+  padding-right: 36px;
+  font-variant-numeric: tabular-nums;
+}
+
+.am-year__steps {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Стрелки вне обхода клавишей: в самом поле год двигают вверх и вниз,
+   и две лишние остановки на каждое поле только мешали бы. */
+.am-year__step {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  color: var(--am-dim);
+  cursor: pointer;
+  background: var(--am-fill-1);
+  border: 0;
+  border-radius: var(--am-r-s);
+  transition:
+    color var(--am-fast) var(--am-ease),
+    background-color var(--am-fast) var(--am-ease);
+}
+
+.am-year__step:hover:not(:disabled) {
+  color: var(--am-text);
+  background: var(--am-fill-2);
+}
+
+.am-year__step:active:not(:disabled) {
+  background: var(--am-fill-3);
+}
+
+.am-year__step:disabled {
+  color: var(--am-faint);
+  cursor: default;
+  background: none;
+}
+
+.am-year__arrow {
+  width: 12px;
+  height: 8px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* На узком экране меню становится нижним листом: коробка по центру
    на телефоне оставляла бы полосы пустоты сверху и снизу. */
 @media (max-width: 640px) {
@@ -759,7 +915,8 @@ onBeforeUnmount(() => {
     animation: none;
   }
 
-  .am-fold__arrow {
+  .am-fold__arrow,
+  .am-year__step {
     transition: none;
   }
 }
