@@ -10,7 +10,7 @@ import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
-import { peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
+import { onPlayableChange, peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
@@ -28,13 +28,6 @@ const TITLE_CHUNK = 10
  * а каждая строка стоит отдельного похода к источнику через очередь темпа.
  */
 const TITLE_DEPTH = 20
-
-/**
- * Скольким верхним строкам добирать метку доступности сетью. Склад поднимается
- * для всей выдачи даром, а в сеть идёт только верх: строка стоит вопроса
- * к каждому источнику, и полная страница выдачи съела бы очередь темпа.
- */
-const PLAY_DEPTH = 10
 
 /** Сколько плиток-заглушек показать, пока идёт первый ответ. */
 const HOLD_COUNT = 12
@@ -65,6 +58,11 @@ function describe(e: unknown): string {
 function redraw(): void {
   rows.value = briefs.map(toTileRow)
 }
+
+// Ответы про доступность приходят ровно по одному и вразброд, а выдача уже
+// на экране: без подписки метки появлялись только одним рывком в конце захода,
+// а при длинной очереди конец откладывался на минуты.
+const stopPlayWatch = onPlayableChange(redraw)
 
 /**
  * Добирает русские названия тем строкам, где их ещё нет. Русский путь сюда
@@ -97,9 +95,12 @@ async function fillTitles(): Promise<void> {
 
 /**
  * Добирает метки доступности. Сначала склад — он отвечает даром и разом по всей
- * выдаче, — и только потом сеть, и то верхним строкам. Метка нужна здесь больше
- * всего: половину каталога наши источники не показывают, и без неё человек
- * узнаёт об этом только внутри плеера.
+ * выдаче, — и только потом сеть. Метка нужна здесь больше всего: половину
+ * каталога наши источники не показывают, и без неё человек узнаёт об этом
+ * только внутри плеера.
+ *
+ * Спрашивается вся выдача, а не верх списка: темп держит очередь ядра,
+ * и решать за неё, скольким строкам повезло, экрану не нужно.
  */
 async function fillPlay(): Promise<void> {
   const mine = ++playRun
@@ -112,7 +113,6 @@ async function fillPlay(): Promise<void> {
 
     const wanted = briefs
       .filter((brief) => peekPlayable(brief.mediaId) === null)
-      .slice(0, PLAY_DEPTH)
       .map((brief) => toPlayAsk(brief))
 
     if (wanted.length === 0) return
@@ -227,6 +227,10 @@ onBeforeUnmount(() => {
   run++
   titleRun++
   playRun++
+
+  // Очередь живёт дольше экрана: неснятая подписка держала бы снятый
+  // показ и рисовала в никуда на каждый ответ источника.
+  stopPlayWatch()
 })
 </script>
 
