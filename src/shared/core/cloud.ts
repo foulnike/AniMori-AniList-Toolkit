@@ -1,7 +1,23 @@
 // Распорядитель облачной копии — этап 6. Здесь решается только порядок
-// действий: формат файла живёт в cloud-file.ts, сеть — в api/yandex-disk.ts,
-// а сам список — в collection.ts. Разделение не ради слоёв: когда появится
-// Google Drive, меняться будет только выбор провайдера в pass().
+// действий: формат файла живёт в cloud-file.ts, сеть — в api/yandex-disk.ts
+// и api/google-drive.ts, вход в Google — в api/google-oauth.ts, а сам
+// список — в collection.ts.
+//
+// ДВА МЕСТА, ОДИН ПОРЯДОК ДЕЙСТВИЙ
+// Обещание из прошлой шапки сдержано наполовину. Провайдер действительно
+// выбирается в одном месте, но одной строкой обойтись не вышло: у Яндекса
+// пропуск вставляют руками и он живёт годами, а Google выдаёт пропуск
+// доступа программе на час. Поэтому pass() стал асинхронным и умеет
+// продлевать пропуск сам, а ниже появились четыре тонкие обёртки —
+// statCopy, readCopy, writeCopy, testCopy. Только они знают, куда идти;
+// всё остальное про место не спрашивает.
+//
+// ПОЧЕМУ ПРОПУСК ДОСТУПА GOOGLE НЕ ЛОЖИТСЯ НА ДИСК
+// Он стухнет раньше, чем человек вернётся к приложению, и запись его
+// на диск была бы записью мусора. В памяти он живёт до закрытия окна,
+// продлевается за минуту до срока и забывается при выходе из облака.
+// На диске лежит только пропуск продления — единственное, что имеет смысл
+// хранить между запусками.
 //
 // Облако здесь ровно хранилище, а не второй хозяин списка: само по себе
 // оно никогда ничего не начинает и ничего не синхронизирует в фоне. Запись
@@ -10,10 +26,15 @@
 // весь этап 3 и затевался.
 //
 // КОПИЯ ЛЕЖИТ В ПАПКЕ ПРИЛОЖЕНИЯ
-// Путь теперь app:/animori-list.json, а не /AniMori/…: пропуску достаточно
-// области на одну папку, и корня Диска он не видит вовсе. Заводить папку
-// больше не нужно — Диск создаёт её сам при первой записи, и шага
-// ensureFolder здесь больше нет.
+// У Яндекса путь app:/animori-list.json, а не /AniMori/…: пропуску
+// достаточно области на одну папку, и корня Диска он не видит вовсе.
+// Заводить папку не нужно — Диск создаёт её сам при первой записи,
+// и шага ensureFolder здесь больше нет.
+//
+// У Google то же самое устроено ещё строже: копия живёт в appDataFolder,
+// скрытой папке приложения, которой в самом Диске не видно вовсе. Чужих
+// файлов оттуда не видно нам, нашего файла — чужим приложениям. Путей
+// в Диске нет, поэтому имя файла там просто имя, а не путь.
 //
 // ЗАПИСЬ НЕ ЗАТИРАЕТ НЕЗНАКОМУЮ КОПИЮ МОЛЧА
 // Прежде сохранение шло с перезаписью не глядя, и два устройства с одной
@@ -25,8 +46,25 @@
 // кто-то ещё, и решает человек. Сравнивается именно строка от облака,
 // а не своё время записи: свои часы и часы провайдера расходятся на минуты,
 // и разница читалась бы как чужая правка на каждой второй записи.
+//
+// Метка принадлежит текущему месту: у Яндекса и Google это разные файлы
+// с разными часами. Очищает её choosePlace() — чтобы про это нельзя было
+// забыть в интерфейсе.
 
-import { checkAccess, DISK_APP_ROOT, downloadText, statFile, uploadText } from '../api/yandex-disk'
+import {
+  checkAccess as driveCheck,
+  downloadText as driveDownload,
+  statFile as driveStat,
+  uploadText as driveUpload,
+} from '../api/google-drive'
+import { refreshAccess, revokeAccess, type GoogleKeys } from '../api/google-oauth'
+import {
+  checkAccess as diskCheck,
+  DISK_APP_ROOT,
+  downloadText as diskDownload,
+  statFile as diskStat,
+  uploadText as diskUpload,
+} from '../api/yandex-disk'
 import { Logger } from '../utils/logger'
 import { buildCloudFile, CLOUD_DIR, CLOUD_FILE, parseCloudFile, type CloudFile } from './cloud-file'
 import {
@@ -39,7 +77,7 @@ import {
   putEntry,
   type PullMode,
 } from './collection'
-import { saveSetting, settings } from './settings'
+import { saveSetting, settings, type CloudPlace } from './settings'
 import { saveSnapshotNow, SNAPSHOT_VERSION } from './snapshot'
 
 /** Путь файла копии для API Диска: приставка app: и есть папка приложения. */
@@ -56,10 +94,44 @@ const FILE_PATH = `${DISK_APP_ROOT}/${CLOUD_FILE}`
 export const CLOUD_PATH = `Приложения/${CLOUD_DIR}/${CLOUD_FILE}`
 
 /**
- * Исход облачного действия. Та же форма, что у клиента Диска, и по той же
- * причине: человеку нужна фраза на экран, а не исключение в журнале.
+ * То же для Google. Папку нарочно не выдаём за обычную: в Диске её не видно
+ * ни в списке файлов, ни в поиске, и человек не найдёт её, сколько бы
+ * ни искал. Удалить копию можно на странице управления приложениями Google —
+ * вместе со всеми данными приложения.
+ */
+export const DRIVE_PATH = `Скрытая папка приложения Google Диска → ${CLOUD_FILE}`
+
+/**
+ * За сколько до срока менять пропуск доступа Google. Минута — запас
+ * на дорогу: пропуск, годный «ещё пять секунд», по пути стухнет.
+ */
+const ACCESS_EDGE_MS = 60000
+
+/**
+ * Исход облачного действия. Та же форма, что у клиентов обоих облаков,
+ * и по той же причине: человеку нужна фраза на экран, а не исключение
+ * в журнале.
  */
 export type CloudDone<T> = { ok: true; value: T } | { ok: false; problem: string }
+
+/** Исход шага, где значение не нужно: важны только успех и фраза отказа. */
+type Step = { ok: true } | { ok: false; problem: string }
+
+/** Чем и куда ходить. Внутреннее: наружу отдаётся только исход действия. */
+interface Hands {
+  place: 'yandex' | 'google'
+  /** Пропуск, годный прямо сейчас. */
+  token: string
+  /** Как зовётся файл копии в этом облаке: путь у Яндекса, имя у Google. */
+  path: string
+}
+
+/** Что известно про файл копии, без разницы, чей он. */
+interface SeenFile {
+  bytes: number
+  /** Время правки со стороны облака в виде ISO 8601 или null. */
+  modified: string | null
+}
 
 /** Чем кончилось сохранение копии. */
 export interface CloudSaved {
@@ -113,38 +185,238 @@ export interface CloudApplied extends CloudCounts {
 }
 
 /**
- * Пропуск для выбранного облака или отказ словами. Единственное место,
- * где решается, куда идти: второй провайдер добавит здесь одну ветку,
- * а не второй комплект функций.
+ * Пропуск доступа Google на время работы окна. Живёт в памяти нарочно —
+ * см. шапку файла.
  */
-function pass(): CloudDone<string> {
-  if (settings.cloudPlace !== 'yandex') {
-    return { ok: false, problem: 'Облако не выбрано: укажите место в настройках' }
-  }
+let googlePass: { token: string; until: number } | null = null
 
-  const token = settings.cloudToken.trim()
-  if (token === '') {
-    return { ok: false, problem: 'Пропуск Яндекс Диска не введён' }
-  }
-
-  return { ok: true, value: token }
-}
-
-/** Готово ли облако к работе. Нужно экрану, чтобы гасить кнопки. */
-export function cloudReady(): boolean {
-  return pass().ok
+/**
+ * Забыть пропуск доступа Google. Зовётся при выходе и при смене места:
+ * оставленный в памяти пропуск после «выйти» — это доступ, который человек
+ * уже считает закрытым.
+ */
+export function forgetCloudPass(): void {
+  googlePass = null
 }
 
 /**
- * Проверяет пропуск, не сохраняя его. Зовётся в момент, когда человек его
- * вставил: лучше сказать «не годится» сразу, чем молча запомнить строку
- * и отказать потом, когда человек уже надеётся на копию.
+ * Пропуск Google, годный прямо сейчас. Продлевает молча: человек просил
+ * сохранить копию, а не поговорить про пропуска.
+ */
+async function googleToken(): Promise<CloudDone<string>> {
+  if (googlePass !== null && googlePass.until - ACCESS_EDGE_MS > Date.now()) {
+    return { ok: true, value: googlePass.token }
+  }
+
+  const client = settings.cloudGoogleClient.trim()
+  const secret = settings.cloudGoogleSecret.trim()
+  const refresh = settings.cloudGoogleRefresh.trim()
+
+  if (client === '' || secret === '') {
+    return { ok: false, problem: 'Не заданы ключи клиента Google: укажите их в настройках' }
+  }
+
+  if (refresh === '') {
+    return { ok: false, problem: 'Вход в Google не пройден: войдите в настройках' }
+  }
+
+  const got = await refreshAccess(client, secret, refresh)
+  if (!got.ok) {
+    // Негодный пропуск в памяти хуже пустоты: следующая попытка
+    // отказала бы, не спросив Google.
+    googlePass = null
+    return { ok: false, problem: got.problem }
+  }
+
+  googlePass = { token: got.value.access, until: got.value.accessUntil }
+  Logger('API', 'Облако: пропуск Google продлён')
+
+  return { ok: true, value: got.value.access }
+}
+
+/**
+ * Чем и куда ходить сейчас, или отказ словами. Единственное место, где
+ * решается место: второй провайдер добавил здесь одну ветку, а не второй
+ * комплект действий.
+ */
+async function pass(): Promise<CloudDone<Hands>> {
+  if (settings.cloudPlace === 'yandex') {
+    const token = settings.cloudToken.trim()
+    if (token === '') return { ok: false, problem: 'Пропуск Яндекс Диска не введён' }
+
+    return { ok: true, value: { place: 'yandex', token, path: FILE_PATH } }
+  }
+
+  if (settings.cloudPlace === 'google') {
+    const token = await googleToken()
+    if (!token.ok) return token
+
+    return { ok: true, value: { place: 'google', token: token.value, path: CLOUD_FILE } }
+  }
+
+  return { ok: false, problem: 'Облако не выбрано: укажите место в настройках' }
+}
+
+/**
+ * Есть ли чем ходить в облако. Нужно экрану, чтобы гасить кнопки, поэтому
+ * ответ обязан быть мгновенным и сети не касается: годен ли пропуск на самом
+ * деле, знает только облако, и спрашивают об этом checkChosenPlace().
+ */
+export function cloudReady(): boolean {
+  if (settings.cloudPlace === 'yandex') return settings.cloudToken.trim() !== ''
+  if (settings.cloudPlace === 'google') return settings.cloudGoogleRefresh.trim() !== ''
+
+  return false
+}
+
+/** Пустая строка от Google значит «время неизвестно», а не «начало времён». */
+function orNull(when: string): string | null {
+  return when === '' ? null : when
+}
+
+/** Спрашивает облако про файл копии. Отсутствие файла — не ошибка. */
+async function statCopy(hands: Hands): Promise<CloudDone<SeenFile | null>> {
+  if (hands.place === 'google') {
+    const done = await driveStat(hands.token, hands.path)
+    if (!done.ok) return done
+    if (done.value === null) return { ok: true, value: null }
+
+    return { ok: true, value: { bytes: done.value.bytes, modified: orNull(done.value.modified) } }
+  }
+
+  const done = await diskStat(hands.token, hands.path)
+  if (!done.ok) return done
+  if (done.value === null) return { ok: true, value: null }
+
+  return { ok: true, value: { bytes: done.value.bytes, modified: done.value.modified ?? null } }
+}
+
+/** Читает копию целиком. */
+async function readCopy(hands: Hands): Promise<CloudDone<string>> {
+  if (hands.place === 'google') return driveDownload(hands.token, hands.path)
+
+  return diskDownload(hands.token, hands.path)
+}
+
+/** Пишет копию поверх прежней. */
+async function writeCopy(hands: Hands, text: string): Promise<Step> {
+  if (hands.place === 'google') return driveUpload(hands.token, hands.path, text)
+
+  return diskUpload(hands.token, hands.path, text)
+}
+
+/** Проверяет, что пропуск годен и папка копии доступна. */
+async function testCopy(hands: Hands): Promise<Step> {
+  if (hands.place === 'google') return driveCheck(hands.token)
+
+  return diskCheck(hands.token)
+}
+
+/**
+ * Проверяет вставленный пропуск Яндекс Диска, не сохраняя его. Зовётся
+ * в момент, когда человек его вставил: лучше сказать «не годится» сразу,
+ * чем молча запомнить строку и отказать потом, когда человек уже надеется
+ * на копию.
  */
 export async function checkPlace(token: string): Promise<CloudDone<true>> {
-  const done = await checkAccess(token)
+  const done = await diskCheck(token)
   if (!done.ok) return done
 
   return { ok: true, value: true }
+}
+
+/**
+ * Проверяет выбранное сейчас место целиком: и пропуск, и доступ к папке.
+ * Для Google это единственная честная проверка — пропуск там не вставляют,
+ * а получают, и убедиться, что полученным можно работать, стоит сразу.
+ */
+export async function checkChosenPlace(): Promise<CloudDone<true>> {
+  const hands = await pass()
+  if (!hands.ok) return hands
+
+  const done = await testCopy(hands.value)
+  if (!done.ok) return { ok: false, problem: done.problem }
+
+  return { ok: true, value: true }
+}
+
+/**
+ * Запоминает вход в Google после подтверждения на другом устройстве.
+ *
+ * Пустой пропуск продления НЕ затирает прежний: при повторном входе Google
+ * иногда его не присылает, и старый в этом случае годен. Затереть его
+ * пустотой значило бы выкинуть единственный ключ от копии.
+ *
+ * Метка чужой копии здесь не чистится нарочно: место не менялось. Если
+ * вошли в другой счёт Google, файл там другой, и первое же сохранение
+ * честно переспросит — а лишний вопрос дешевле стёртой копии.
+ */
+export async function keepGoogleLogin(keys: GoogleKeys): Promise<void> {
+  googlePass = { token: keys.access, until: keys.accessUntil }
+
+  if (keys.refresh !== '') {
+    await saveSetting('cloudGoogleRefresh', 'am_cloud_g_refresh', keys.refresh)
+  }
+
+  Logger('DB', 'Облако: вход в Google запомнен')
+}
+
+/**
+ * Выход из Google: отзывает доступ у самого Google и стирает всё своё.
+ *
+ * Ключи стираются даже при неудаче отзыва — см. шапку revokeAccess:
+ * пропавшая сеть не должна держать человека вошедшим против его воли.
+ * Про неудачу при этом говорится вслух, потому что доступ у Google мог
+ * остаться живым, и человек вправе убрать его на их странице приложений.
+ */
+export async function signOutGoogle(): Promise<CloudDone<true>> {
+  const done = await revokeAccess(settings.cloudGoogleRefresh.trim())
+
+  forgetCloudPass()
+  await saveSetting('cloudGoogleRefresh', 'am_cloud_g_refresh', '')
+  await saveSetting('cloudSeenModified', 'am_cloud_seen_modified', '')
+  await saveSetting('cloudSavedAt', 'am_cloud_saved_at', 0)
+  await saveSetting('cloudSavedCount', 'am_cloud_saved_count', 0)
+
+  Logger('DB', 'Облако: вход в Google забыт')
+
+  if (!done.ok) return { ok: false, problem: done.problem }
+
+  return { ok: true, value: true }
+}
+
+/**
+ * Меняет место копии. Всё, что относилось к прежнему месту, забывается
+ * здесь же — иначе про это пришлось бы помнить интерфейсу:
+ *
+ * 1. Метка чужой копии: у нового места свой файл и свои часы, и старая
+ *    строка означала бы «эта копия наша» без всякой проверки.
+ * 2. Числа последней копии: на новом месте копии ещё нет, а панель обещала
+ *    бы человеку «812 записей, сохранено вчера» — обещание пустое.
+ * 3. Пропуск доступа в памяти: он выдан прежним облаком.
+ *
+ * Сам пропуск продления Google не стирается: место меняют и туда, и обратно,
+ * а заставлять человека входить заново из-за переключения — грубость.
+ * Для настоящего выхода есть signOutGoogle().
+ */
+export async function choosePlace(place: CloudPlace): Promise<void> {
+  if (settings.cloudPlace === place) return
+
+  forgetCloudPass()
+  await saveSetting('cloudPlace', 'am_cloud_place', place)
+  await saveSetting('cloudSeenModified', 'am_cloud_seen_modified', '')
+  await saveSetting('cloudSavedAt', 'am_cloud_saved_at', 0)
+  await saveSetting('cloudSavedCount', 'am_cloud_saved_count', 0)
+
+  Logger('DB', `Облако: место копии теперь ${place}`)
+}
+
+/** Где копия лежит с точки зрения человека — для выбранного сейчас места. */
+export function cloudPathText(): string {
+  if (settings.cloudPlace === 'yandex') return CLOUD_PATH
+  if (settings.cloudPlace === 'google') return DRIVE_PATH
+
+  return ''
 }
 
 /**
@@ -157,8 +429,8 @@ export async function checkPlace(token: string): Promise<CloudDone<true>> {
  * значение означало бы «копия наша» без проверки, а из двух ошибок
  * лишний вопрос дешевле стёртой копии.
  */
-async function rememberSeen(token: string): Promise<void> {
-  const seen = await statFile(token, FILE_PATH)
+async function rememberSeen(hands: Hands): Promise<void> {
+  const seen = await statCopy(hands)
   const mark = seen.ok && seen.value !== null ? (seen.value.modified ?? '') : ''
   await saveSetting('cloudSeenModified', 'am_cloud_seen_modified', mark)
 }
@@ -172,8 +444,8 @@ async function rememberSeen(token: string): Promise<void> {
  * после вопроса человеку, который видел её размер и время.
  */
 export async function saveCopy(device: string, force = false): Promise<CloudSaveDone> {
-  const token = pass()
-  if (!token.ok) return token
+  const hands = await pass()
+  if (!hands.ok) return hands
 
   // Список обязан быть поднят: иначе в облако уедет пустота вместо
   // списка, который ещё лежит на диске и не прочитан.
@@ -198,7 +470,7 @@ export async function saveCopy(device: string, force = false): Promise<CloudSave
   // Сторож перед записью — см. шапку файла. Один дешёвый запрос перед
   // заливкой в сотни килобайт — цена, которую не стоит и обсуждать.
   if (!force) {
-    const there = await statFile(token.value, FILE_PATH)
+    const there = await statCopy(hands.value)
     if (!there.ok) return there
 
     const found = there.value
@@ -213,14 +485,14 @@ export async function saveCopy(device: string, force = false): Promise<CloudSave
     }
   }
 
-  const sent = await uploadText(token.value, FILE_PATH, built.text)
+  const sent = await writeCopy(hands.value, built.text)
   if (!sent.ok) return sent
 
   // Отметка о копии пишется ПОСЛЕ успеха: обещание копии, которой нет,
   // хуже отсутствия копии: на первое человек полагается.
   await saveSetting('cloudSavedAt', 'am_cloud_saved_at', built.file.savedAt)
   await saveSetting('cloudSavedCount', 'am_cloud_saved_count', built.file.count)
-  await rememberSeen(token.value)
+  await rememberSeen(hands.value)
 
   Logger('DB', `Облако: копия сохранена, записей ${built.file.count}, байт ${built.bytes}`)
 
@@ -235,10 +507,10 @@ export async function saveCopy(device: string, force = false): Promise<CloudSave
  * судьбу своего списка вслепую человек не должен.
  */
 export async function copyInfo(): Promise<CloudDone<CloudInfo>> {
-  const token = pass()
-  if (!token.ok) return token
+  const hands = await pass()
+  if (!hands.ok) return hands
 
-  const found = await statFile(token.value, FILE_PATH)
+  const found = await statCopy(hands.value)
   if (!found.ok) return found
 
   if (found.value === null) {
@@ -350,12 +622,12 @@ function replaceFromCopy(file: CloudFile): CloudCounts {
  *    кнопка рядом, и она спрашивает подтверждения.
  */
 export async function pullCopy(mode: PullMode): Promise<CloudDone<CloudApplied>> {
-  const token = pass()
-  if (!token.ok) return token
+  const hands = await pass()
+  if (!hands.ok) return hands
 
   await initCollection()
 
-  const got = await downloadText(token.value, FILE_PATH)
+  const got = await readCopy(hands.value)
   if (!got.ok) return got
 
   const read = parseCloudFile(got.value, SNAPSHOT_VERSION)
@@ -390,7 +662,7 @@ export async function pullCopy(mode: PullMode): Promise<CloudDone<CloudApplied>>
   // говорить о прошлой своей записи там, где в облаке уже другая копия.
   await saveSetting('cloudSavedAt', 'am_cloud_saved_at', file.savedAt)
   await saveSetting('cloudSavedCount', 'am_cloud_saved_count', file.count)
-  await rememberSeen(token.value)
+  await rememberSeen(hands.value)
 
   Logger(
     'DB',
