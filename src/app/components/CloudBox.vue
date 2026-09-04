@@ -8,13 +8,27 @@
 // в списке и как звать это устройство в файле копии, — и одна весть обратно:
 // список сменился, числа наверху пора переспросить.
 //
-// ОДНО МЕСТО
+// ОДНО МЕСТО — ОДНА СТРОКА
 // Мест было два, Google Диск убран целиком (причины — в шапке core/cloud.ts).
-// Выбор оставлен кнопкой, а не убран совсем: место можно и отключить, и это
-// разные состояния. Кому в настройках досталось прежнее «google», панель
-// говорит об этом прямо и просит выбрать Яндекс: тихо подставить другое
-// облако вместо выбранного — последнее, что программа вправе сделать
-// со чужими данными.
+// Выбор карточками с одной карточкой оставлял дыру на месте второй, поэтому
+// площадка теперь строка: знак, название, состояние и справа то, что с ней
+// можно сделать. Кому в настройках досталось прежнее «google», панель говорит
+// об этом прямо и просит выбрать Яндекс: тихо подставить другое облако вместо
+// выбранного — последнее, что программа вправе сделать с чужими данными.
+//
+// ПОРЯДОК КНОПОК
+// Кнопок было шесть в одном ряду, и глазу не за что зацепиться. Теперь они
+// разведены по весу:
+//  · «Сохранить» и «Забрать» — то, что делают каждый день: две крупные
+//    кнопки со стрелкой и подписью направления;
+//  · проверка связи, смена пропуска и отключение — служебные, раз в полгода,
+//    и стоят значками в строке площадки; слова им заменяют подсказки;
+//  · ссылка и чтение по ссылке — свои разделы с заголовком, потому что это
+//    отдельные истории, а не ещё две кнопки в общей россыпи.
+//
+// Длинные объяснения ушли в справку под кнопкой «i» (components/CloudHelp.vue).
+// В панели они стояли абзацами и оплачивались каждым открытием настроек,
+// а нужны один раз — когда что-то не сошлось.
 //
 // ЗАПИСЬ ПОВЕРХ НЕЗНАКОМОЙ КОПИИ СПРАШИВАЕТ
 // Ядро отказывает третьим состоянием: не «ok» и не ошибка, а вопрос —
@@ -27,10 +41,9 @@
 // Пропуск Диска — строка под шесть десятков знаков, и набрать её пультом
 // нельзя. Поэтому у копии два конца.
 //
-// «Поделиться копией» публикует файл и показывает ссылку. Набирать на
-// телевизоре нужно не её целиком, а только хвост — десяток знаков после
-// последней косой черты, — и хвост поэтому вынесен отдельной строкой
-// крупнее адреса.
+// «Создать ссылку» публикует файл и показывает адрес. Набирать на телевизоре
+// нужно не его целиком, а только хвост — десяток знаков после последней
+// косой черты.
 //
 // «Забрать по ссылке» стоит ниже всего прочего и живёт своей жизнью: он
 // не требует ни пропуска, ни выбранного места, потому что ровно для этого
@@ -60,7 +73,9 @@ import {
   type CloudStranger,
 } from '@/core/cloud'
 import type { PullMode } from '@/core/collection'
-import { saveSetting, settings, type CloudPlace } from '@/core/settings'
+import { saveSetting, settings } from '@/core/settings'
+
+import CloudHelp from './CloudHelp.vue'
 
 const props = defineProps<{
   /** Записей в списке сейчас: это число стоит в вопросах перед заменой. */
@@ -109,6 +124,9 @@ const linkDraft = ref('')
 /** Что нашлось по введённой ссылке. null — ещё не искали или не нашли. */
 const linkFound = ref<CloudLink | null>(null)
 
+/** Открыта ли справка. Состояние здесь, а не внутри неё: нажимают отсюда. */
+const helpOpen = ref(false)
+
 // Своя заметка и своя ошибка: отказ облака не должен красить соседние панели
 // настроек и затирать их ответы.
 const cloudNote = ref('')
@@ -149,6 +167,21 @@ async function cloudGuard(action: () => Promise<void>): Promise<void> {
 /** Готово ли облако к работе: место выбрано и пропуск к нему сохранён. */
 function cloudOn(): boolean {
   return cloudPlace.value === 'yandex' && cloudSaved.value
+}
+
+/** Показывать ли поле пропуска: пока его нет или пока меняют руками. */
+function tokenNeeded(): boolean {
+  return cloudPlace.value === 'yandex' && (!cloudSaved.value || tokenOpen.value)
+}
+
+/// Подпись под названием площадки: одна строка на все состояния. Раньше
+/// то же самое стояло тремя разными абзацами в разных местах панели,
+/// и человеку приходилось собирать состояние глазами по всему блоку.
+function placeNote(): string {
+  if (cloudPlace.value !== 'yandex') return 'Копия списка одним файлом в папке приложения'
+  if (!cloudSaved.value) return 'Пропуск не сохранён'
+  if (cloudThere.value === '') return 'На связи'
+  return `В облаке: ${cloudThere.value}`
 }
 
 /// Время человеку — местное и словами. Ноль и нечитаемая дата дают прочерк:
@@ -211,24 +244,26 @@ async function readCloud(): Promise<void> {
 }
 
 /**
- * Выбор места. Смена места стирает память о чужой копии и числа прошлой
- * записи: в другом облаке лежит другой файл, и прежние цифры говорили бы
- * о нём неправду. Стиранием занимается ядро, здесь остаётся переспросить.
+ * Подключение площадки. Смена места стирает память о чужой копии и числа
+ * прошлой записи: в другом облаке лежит другой файл, и прежние цифры
+ * говорили бы о нём неправду. Стиранием занимается ядро, здесь остаётся
+ * переспросить и открыть поле пропуска — за ним человек и нажимал.
  */
-function onPick(place: CloudPlace): void {
-  if (cloudPlace.value === place) return
-
+function onConnect(): void {
   void cloudGuard(async () => {
     cloudNote.value = ''
     strangerAsk.value = null
 
-    await choosePlace(place)
-    cloudPlace.value = place
-    cloudSavedAt.value = settings.cloudSavedAt
-    cloudSavedCount.value = settings.cloudSavedCount
-    cloudThere.value = ''
-    shareLink.value = ''
+    if (cloudPlace.value !== 'yandex') {
+      await choosePlace('yandex')
+      cloudPlace.value = 'yandex'
+      cloudSavedAt.value = settings.cloudSavedAt
+      cloudSavedCount.value = settings.cloudSavedCount
+      cloudThere.value = ''
+      shareLink.value = ''
+    }
 
+    tokenOpen.value = true
     await readCloud()
   })
 }
@@ -256,6 +291,13 @@ function onCloudToken(): void {
     cloudNote.value = 'Пропуск принят: Яндекс Диск на связи.'
     await readCloud()
   })
+}
+
+/// Отказ от смены пропуска. Черновик стирается: недонабранная строка,
+/// всплывшая через месяц, читалась бы как сохранённый пропуск.
+function onTokenCancel(): void {
+  tokenDraft.value = ''
+  tokenOpen.value = false
 }
 
 /** Пропуск выдаёт сам Яндекс: адрес открывает оболочка, окно ходит только к API. */
@@ -334,7 +376,7 @@ function onStrangerCancel(): void {
   strangerAsk.value = null
 }
 
-/** Нажатие «Забрать копию»: сначала вопрос — копия ляжет поверх живого списка. */
+/** Нажатие «Забрать»: сначала вопрос — копия ляжет поверх живого списка. */
 function onCloudAsk(): void {
   cloudNote.value = ''
   cloudError.value = ''
@@ -399,7 +441,7 @@ function pullText(got: {
 
 /**
  * Публикация копии. Единственное место, где список становится доступен
- * кому-то ещё, поэтому и кнопка, и предупреждение стоят рядом: по ссылке
+ * кому-то ещё, поэтому предупреждение стоит тут же, под ссылкой: по ней
  * копию прочитает любой, кто её знает.
  *
  * Повторное нажатие законно и просто вернёт ту же ссылку — на случай, если
@@ -420,7 +462,7 @@ function onShare(): void {
   })
 }
 
-/** Закрытие ссылки. Сам файл копии остаётся на месте и в работе. */
+/** Закрытие доступа. Сам файл копии остаётся на месте и в работе. */
 function onUnshare(): void {
   void cloudGuard(async () => {
     cloudNote.value = ''
@@ -432,7 +474,7 @@ function onUnshare(): void {
     }
 
     shareLink.value = ''
-    cloudNote.value = 'Ссылка закрыта. Файл копии остался на месте.'
+    cloudNote.value = 'Доступ по ссылке закрыт. Файл копии остался на месте.'
   })
 }
 
@@ -527,6 +569,15 @@ onMounted(() => {
   <div class="am-panel am-box">
     <div class="am-bar">
       <h3 class="am-h3">Облачная копия</h3>
+      <button
+        v-tip="'Подробно: как это устроено и где взять пропуск'"
+        class="am-icon"
+        type="button"
+        aria-label="Как это работает"
+        @click="helpOpen = true"
+      >
+        i
+      </button>
       <span class="am-bar__gap" />
       <span class="am-flag" :class="{ 'am-flag--on': cloudOn() }">
         <span class="am-flag__dot" aria-hidden="true" />
@@ -534,51 +585,94 @@ onMounted(() => {
       </span>
     </div>
 
-    <!-- Знак площадки нарисован, а не набран буквой: «Я» в рамке читалась
-         заготовкой, по которой не понять, куда ляжет копия. Рисунок свой
-         и в фирменных цветах — сеть за картинкой не ходит, и на любой теме
-         он выглядит одинаково.
+    <!-- Площадка строкой: знак, название, состояние и справа то, что с ней
+         можно сделать. Служебные действия здесь значками — подписи им
+         заменяют подсказки, а место в панели они больше не занимают.
 
-         Цвет знака не наследуется от карточки сознательно: у фирменного
-         знака свой цвет, и подкрашивать его акцентом было бы неверно. -->
-    <div class="am-cloud">
-      <button
-        v-tip="'Хранить копию списка на Яндекс Диске'"
-        class="am-cloud__pick"
-        :class="{ 'am-cloud__pick--on': cloudPlace === 'yandex' }"
-        type="button"
-        :disabled="cloudBusy"
-        @click="onPick('yandex')"
-      >
-        <svg class="am-cloud__mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-          <rect width="24" height="24" rx="6" fill="#fc3f1d" />
-          <path
-            fill="#fff"
-            fill-rule="evenodd"
-            d="M16 4.8h-3.9c-2.5 0-4.2 1.6-4.2 4 0 1.8 1 3.1 2.7 3.7L7.9 19.2h2.7l2.6-6.2h0.7v6.2H16Zm-2.1 2.1h-1.7c-1.3 0-2.1 0.8-2.1 2 0 1.2 0.8 2 2.1 2h1.7Z"
-          />
-        </svg>
-        <span class="am-cloud__name">Яндекс Диск</span>
-      </button>
+         Знак нарисован, а не набран буквой: «Я» в рамке читалась заготовкой.
+         Цвет знака не наследуется сознательно: у фирменного знака свой цвет,
+         и подкрашивать его акцентом было бы неверно. -->
+    <div class="am-place">
+      <svg class="am-place__mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="#fc3f1d" />
+        <path
+          fill="#fff"
+          fill-rule="evenodd"
+          d="M16 4.8h-3.9c-2.5 0-4.2 1.6-4.2 4 0 1.8 1 3.1 2.7 3.7L7.9 19.2h2.7l2.6-6.2h0.7v6.2H16Zm-2.1 2.1h-1.7c-1.3 0-2.1 0.8-2.1 2 0 1.2 0.8 2 2.1 2h1.7Z"
+        />
+      </svg>
+
+      <span class="am-place__text">
+        <span class="am-place__name">Яндекс Диск</span>
+        <span class="am-place__note">{{ placeNote() }}</span>
+      </span>
+
+      <span class="am-place__acts">
+        <template v-if="cloudOn()">
+          <button
+            v-tip="'Проверить связь: годен ли пропуск и на месте ли папка копии'"
+            class="am-icon"
+            type="button"
+            aria-label="Проверить связь"
+            :disabled="cloudBusy"
+            @click="onCloudCheck"
+          >
+            ↻
+          </button>
+          <button
+            v-tip="'Сменить пропуск'"
+            class="am-icon"
+            type="button"
+            aria-label="Сменить пропуск"
+            :disabled="cloudBusy || tokenOpen"
+            @click="tokenOpen = true"
+          >
+            🔑
+          </button>
+          <button
+            v-tip="'Отключить облако: забыть пропуск. Файл копии на Диске останется'"
+            class="am-icon"
+            type="button"
+            aria-label="Отключить облако"
+            :disabled="cloudBusy"
+            @click="onCloudForget"
+          >
+            ✕
+          </button>
+        </template>
+
+        <button
+          v-else
+          v-tip="'Ввести пропуск Яндекс Диска'"
+          class="am-btn"
+          type="button"
+          :disabled="cloudBusy || tokenNeeded()"
+          @click="onConnect"
+        >
+          Подключить
+        </button>
+      </span>
     </div>
 
     <!-- Прежний выбор Google: место считается невыбранным, и об этом сказано
          прямо. Подставить другое облако молча программа не вправе. -->
     <p v-if="cloudPlace === 'google'" class="am-meta">
       Google Диск убран из программы: вход с устройства не давал скрытой папки, а без проверки
-      Google пропуск умирал за неделю. Выберите Яндекс Диск — файл копии в Google Диске остался
+      Google пропуск умирал за неделю. Подключите Яндекс Диск — файл копии в Google Диске остался
       на месте и никуда не денется.
     </p>
 
-    <!-- Пропуск вставляется руками: готовых Яндекс не выдаёт. -->
-    <template v-if="cloudPlace === 'yandex'">
-      <p v-if="!cloudSaved || tokenOpen" class="am-meta">
-        Пропуск выдаёт сам Яндекс: заведите приложение с правом на папку приложения на Диске на
+    <!-- Пропуск вставляется руками: готовых Яндекс не выдаёт. Порядок по шагам
+         живёт в справке под «i», здесь только адрес и поле. -->
+    <template v-if="tokenNeeded()">
+      <p class="am-meta">
+        Пропуск выдаёт сам Яндекс: заведите приложение с правом «Приложения на Диске» на
         <button class="am-link" type="button" @click="onCloudHelp">oauth.yandex.com</button>
-        и вставьте выданный токен сюда. Он останется на этом устройстве.
+        и вставьте выданный токен сюда. Он останется на этом устройстве. Порядок по шагам — под
+        кнопкой «i».
       </p>
 
-      <div v-if="!cloudSaved || tokenOpen" class="am-row">
+      <div class="am-row">
         <label class="am-field">
           <input
             v-model="tokenDraft"
@@ -594,6 +688,46 @@ onMounted(() => {
           @click="onCloudToken"
         >
           {{ cloudBusy ? 'Проверяем…' : 'Проверить и сохранить' }}
+        </button>
+        <button
+          v-if="cloudSaved"
+          class="am-btn am-btn--ghost"
+          type="button"
+          :disabled="cloudBusy"
+          @click="onTokenCancel"
+        >
+          Отмена
+        </button>
+      </div>
+    </template>
+
+    <template v-if="cloudPlace === 'yandex'">
+      <!-- То, что делают каждый день: две крупные кнопки со стрелкой
+           и подписью направления. Направление подписью, а не догадкой:
+           «сохранить» и «забрать» на слух отличаются хуже, чем на вид. -->
+      <div class="am-duo">
+        <button
+          v-tip="'Записать нынешний список в облако. Незнакомую копию не затрёт без спроса'"
+          class="am-duo__btn"
+          type="button"
+          :disabled="!cloudOn() || cloudBusy"
+          @click="onCloudSave"
+        >
+          <span class="am-duo__mark" aria-hidden="true">↑</span>
+          <span class="am-duo__name">{{ cloudBusy ? 'Работаем…' : 'Сохранить' }}</span>
+          <span class="am-duo__note">список → облако</span>
+        </button>
+
+        <button
+          v-tip="'Забрать копию из облака: слиянием или с заменой'"
+          class="am-duo__btn"
+          type="button"
+          :disabled="!cloudOn() || cloudBusy"
+          @click="onCloudAsk"
+        >
+          <span class="am-duo__mark" aria-hidden="true">↓</span>
+          <span class="am-duo__name">Забрать</span>
+          <span class="am-duo__note">облако → список</span>
         </button>
       </div>
 
@@ -612,110 +746,7 @@ onMounted(() => {
             {{ cloudSavedCount > 0 ? cloudSavedCount : '—' }}
           </span>
         </li>
-        <li v-if="cloudThere" class="am-fact">
-          <span class="am-fact__name">В облаке сейчас</span>
-          <span class="am-fact__value">{{ cloudThere }}</span>
-        </li>
-        <li v-if="shareLink" class="am-fact">
-          <span class="am-fact__name">Хвост ссылки</span>
-          <span class="am-fact__value"><code>{{ linkTail(shareLink) }}</code></span>
-        </li>
       </ul>
-
-      <div class="am-row">
-        <button
-          v-tip="'Записать нынешний список в облако. Незнакомую копию не затрёт без спроса'"
-          class="am-btn"
-          type="button"
-          :disabled="!cloudOn() || cloudBusy"
-          @click="onCloudSave"
-        >
-          {{ cloudBusy ? 'Работаем…' : 'Сохранить копию' }}
-        </button>
-        <button
-          v-tip="'Забрать копию из облака: слиянием или с заменой'"
-          class="am-btn am-btn--ghost"
-          type="button"
-          :disabled="!cloudOn() || cloudBusy"
-          @click="onCloudAsk"
-        >
-          Забрать копию
-        </button>
-        <button
-          v-if="cloudOn()"
-          v-tip="'Спросить облако, годен ли пропуск и на месте ли папка копии'"
-          class="am-btn am-btn--ghost"
-          type="button"
-          :disabled="cloudBusy"
-          @click="onCloudCheck"
-        >
-          Проверить связь
-        </button>
-        <button
-          v-if="cloudSaved && !tokenOpen"
-          class="am-btn am-btn--ghost"
-          type="button"
-          :disabled="cloudBusy"
-          @click="tokenOpen = true"
-        >
-          Сменить пропуск
-        </button>
-        <button
-          v-if="cloudSaved"
-          v-tip="'Забыть пропуск. Файл копии в облаке останется'"
-          class="am-btn am-btn--ghost"
-          type="button"
-          :disabled="cloudBusy"
-          @click="onCloudForget"
-        >
-          Отключить облако
-        </button>
-      </div>
-
-      <!-- Ссылка на копию: то, чем список попадает на устройство, где нечем
-           вводить пропуск. Предупреждение стоит здесь же, а не в подписи
-           кнопки: открыть свой список — решение, а не настройка. -->
-      <div v-if="cloudOn()" class="am-row">
-        <button
-          v-if="!shareLink"
-          v-tip="'Опубликовать файл копии и получить короткую ссылку на него'"
-          class="am-btn am-btn--ghost"
-          type="button"
-          :disabled="cloudBusy"
-          @click="onShare"
-        >
-          Поделиться копией
-        </button>
-
-        <template v-if="shareLink">
-          <label class="am-field">
-            <input class="am-input" type="text" readonly :value="shareLink" />
-          </label>
-          <button
-            v-tip="'Открыть ссылку в браузере'"
-            class="am-btn am-btn--ghost"
-            type="button"
-            @click="onShareOpen"
-          >
-            Открыть
-          </button>
-          <button
-            v-tip="'Закрыть ссылку. Файл копии останется на месте'"
-            class="am-btn am-btn--ghost"
-            type="button"
-            :disabled="cloudBusy"
-            @click="onUnshare"
-          >
-            Закрыть ссылку
-          </button>
-        </template>
-      </div>
-
-      <p v-if="shareLink" class="am-meta">
-        По этой ссылке копию прочитает любой, кто её знает: пропуск для чтения не нужен. На другом
-        устройстве достаточно набрать хвост — <code>{{ linkTail(shareLink) }}</code> — в поле
-        «Забрать по ссылке» ниже.
-      </p>
 
       <!-- Незнакомая копия: тот же узел вопроса, что и у переноса, но
            порядок кнопок обратный. Первым стоит «Сначала забрать»:
@@ -752,12 +783,7 @@ onMounted(() => {
         <p class="am-ask__text">Записей: {{ list }}.</p>
 
         <div class="am-row">
-          <button
-            class="am-btn"
-            type="button"
-            :disabled="cloudBusy"
-            @click="onCloudPull('merge')"
-          >
+          <button class="am-btn" type="button" :disabled="cloudBusy" @click="onCloudPull('merge')">
             Добавить недостающее
           </button>
           <button
@@ -768,23 +794,68 @@ onMounted(() => {
           >
             Заменить целиком
           </button>
-          <button class="am-btn am-btn--ghost" type="button" @click="onCloudCancel">
-            Отмена
-          </button>
+          <button class="am-btn am-btn--ghost" type="button" @click="onCloudCancel">Отмена</button>
         </div>
       </div>
+
+      <!-- Ссылка своим разделом: это не ещё одна кнопка в общем ряду,
+           а единственное место, где список открывается кому-то ещё. -->
+      <template v-if="cloudOn()">
+        <p class="am-sub">Ссылка для телевизора</p>
+
+        <div class="am-row">
+          <button
+            v-if="!shareLink"
+            v-tip="'Опубликовать файл копии и получить короткую ссылку на него'"
+            class="am-btn am-btn--ghost"
+            type="button"
+            :disabled="cloudBusy"
+            @click="onShare"
+          >
+            Создать ссылку
+          </button>
+
+          <template v-else>
+            <label class="am-field">
+              <input class="am-input" type="text" readonly :value="shareLink" />
+            </label>
+            <button
+              v-tip="'Открыть ссылку в браузере'"
+              class="am-icon"
+              type="button"
+              aria-label="Открыть ссылку"
+              @click="onShareOpen"
+            >
+              ↗
+            </button>
+            <button
+              v-tip="'Закрыть доступ по ссылке. Файл копии останется на месте'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="cloudBusy"
+              @click="onUnshare"
+            >
+              Закрыть доступ
+            </button>
+          </template>
+        </div>
+
+        <p v-if="shareLink" class="am-meta">
+          На телевизоре набирают только хвост — <code>{{ linkTail(shareLink) }}</code> — в поле
+          «Забрать по ссылке» ниже. По ссылке копию прочитает любой, кто её знает; когда перенос
+          закончен, доступ можно закрыть.
+        </p>
+        <p v-else class="am-meta">
+          Пропуск пультом не набрать. Ссылка даёт короткий хвост — его и вводят на телевизоре.
+        </p>
+      </template>
     </template>
 
     <!-- Чтение по ссылке стоит последним и живёт отдельно от места: ни
          пропуска, ни выбранного облака он не требует. Это первый запуск
          на устройстве, где вводить нечем, и единственное, что там можно
          набрать, — десяток знаков хвоста. -->
-    <ul class="am-facts">
-      <li class="am-fact">
-        <span class="am-fact__name">Забрать по ссылке</span>
-        <span class="am-fact__value">пропуск не нужен</span>
-      </li>
-    </ul>
+    <p class="am-sub">Забрать по ссылке · пропуск не нужен</p>
 
     <div class="am-row">
       <label class="am-field">
@@ -813,12 +884,7 @@ onMounted(() => {
       </p>
 
       <div class="am-row">
-        <button
-          class="am-btn"
-          type="button"
-          :disabled="cloudBusy"
-          @click="onLinkPull('merge')"
-        >
+        <button class="am-btn" type="button" :disabled="cloudBusy" @click="onLinkPull('merge')">
           Добавить недостающее
         </button>
         <button
@@ -836,6 +902,10 @@ onMounted(() => {
 
     <p v-if="cloudError" class="am-error">{{ cloudError }}</p>
     <p v-if="cloudNote" class="am-note">{{ cloudNote }}</p>
+
+    <!-- Справка отдельным узлом и модалкой: длинные объяснения нужны один
+         раз, а в панели они стояли абзацами и мешали каждый день. -->
+    <CloudHelp :open="helpOpen" :path="cloudPathText()" @close="helpOpen = false" />
   </div>
 </template>
 
