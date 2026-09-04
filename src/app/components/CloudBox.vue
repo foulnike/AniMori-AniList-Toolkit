@@ -3,19 +3,18 @@
 // не начинает — каждую кнопку нажимает человек, и обратный путь всегда
 // спрашивает: копия ложится поверх живого списка.
 //
-// Своим узлом, а не частью экрана настроек: с двумя местами панель выросла
-// вдвое, а экран настроек и без неё самый большой файл в приложении. Наружу
-// нужны всего два числа — сколько записей в списке и как звать это устройство
-// в файле копии, — и одна весть обратно: список сменился, числа наверху пора
-// переспросить.
+// Своим узлом, а не частью экрана настроек: экран настроек и без неё самый
+// большой файл в приложении. Наружу нужны всего два числа — сколько записей
+// в списке и как звать это устройство в файле копии, — и одна весть обратно:
+// список сменился, числа наверху пора переспросить.
 //
-// ДВА МЕСТА, ДВА РАЗНЫХ ВХОДА
-// У Яндекса пропуск выдают руками, и его вставляют в поле. Google руками
-// не даёт ничего: там вход идёт кодом с устройства — картинка с адресом
-// и восемь знаков, — поэтому он живёт отдельным узлом CloudGoogle.vue,
-// а сюда возвращает готовые ключи: хранить их дело настроек, а не панели
-// входа. Ниже выбора места разницы уже нет: числа, запись и возвращение
-// у обоих мест общие.
+// ОДНО МЕСТО
+// Мест было два, Google Диск убран целиком (причины — в шапке core/cloud.ts).
+// Выбор оставлен кнопкой, а не убран совсем: место можно и отключить, и это
+// разные состояния. Кому в настройках досталось прежнее «google», панель
+// говорит об этом прямо и просит выбрать Яндекс: тихо подставить другое
+// облако вместо выбранного — последнее, что программа вправе сделать
+// со чужими данными.
 //
 // ЗАПИСЬ ПОВЕРХ НЕЗНАКОМОЙ КОПИИ СПРАШИВАЕТ
 // Ядро отказывает третьим состоянием: не «ok» и не ошибка, а вопрос —
@@ -24,11 +23,26 @@
 // там или старее, а решение остаётся за человеком. Красной строкой такое
 // показывать нельзя — это не поломка, и пугать здесь нечем.
 //
+// ССЫЛКА: ОТДАТЬ И ЗАБРАТЬ
+// Пропуск Диска — строка под шесть десятков знаков, и набрать её пультом
+// нельзя. Поэтому у копии два конца.
+//
+// «Поделиться копией» публикует файл и показывает ссылку. Набирать на
+// телевизоре нужно не её целиком, а только хвост — десяток знаков после
+// последней косой черты, — и хвост поэтому вынесен отдельной строкой
+// крупнее адреса.
+//
+// «Забрать по ссылке» стоит ниже всего прочего и живёт своей жизнью: он
+// не требует ни пропуска, ни выбранного места, потому что ровно для этого
+// и сделан — первый запуск на устройстве, где вводить нечем. Сперва по
+// ссылке спрашивается размер и время, и только потом предлагается положить
+// копию: замена списка вслепую по строке из пульта — способ потерять список
+// из-за одной опечатки.
+//
 // Оформление берётся из settings-screen.css: классы панели живут там же,
 // где остальные настройки, и разводить их по двум файлам пока незачем.
 import { onMounted, ref } from 'vue'
 
-import type { GoogleKeys } from '@/api/google-oauth'
 import { Bridge } from '@/bridge'
 import {
   checkChosenPlace,
@@ -36,16 +50,17 @@ import {
   choosePlace,
   cloudPathText,
   copyInfo,
-  keepGoogleLogin,
+  linkInfo,
+  pullByLink,
   pullCopy,
   saveCopy,
-  signOutGoogle,
+  shareCopy,
+  unshareCopy,
+  type CloudLink,
   type CloudStranger,
 } from '@/core/cloud'
 import type { PullMode } from '@/core/collection'
 import { saveSetting, settings, type CloudPlace } from '@/core/settings'
-
-import CloudGoogle from './CloudGoogle.vue'
 
 const props = defineProps<{
   /** Записей в списке сейчас: это число стоит в вопросах перед заменой. */
@@ -64,8 +79,8 @@ const emit = defineEmits<{ changed: [] }>()
 const cloudPlace = ref(settings.cloudPlace)
 
 /**
- * Есть ли сохранённый пропуск Яндекса. Хранится признак, а не сам пропуск:
- * в разметку ему попадать незачем ни в каком виде.
+ * Есть ли сохранённый пропуск. Хранится признак, а не сам пропуск: в разметку
+ * ему попадать незачем ни в каком виде.
  */
 const cloudSaved = ref(settings.cloudToken !== '')
 
@@ -75,28 +90,24 @@ const tokenDraft = ref('')
 /** Открыто ли поле пропуска при уже сохранённом: смена бывает редко. */
 const tokenOpen = ref(false)
 
-/**
- * Ключи своего приложения Google. Номер приложения секретом не считается,
- * пароль считается и стоит под точками, но лежат оба здесь же, на этом
- * устройстве: отдавать их куда-то ещё незачем.
- */
-const gClient = ref(settings.cloudGoogleClient)
-const gSecret = ref(settings.cloudGoogleSecret)
-
-/** Открыты ли поля ключей при уже пройденном входе: смена бывает редко. */
-const keysOpen = ref(false)
-
-/**
- * Пройден ли вход в Google. Опять признак, а не сам пропуск: обновляемый
- * ключ живёт в настройках, и разметке о нём знать нечего.
- */
-const gSigned = ref(settings.cloudGoogleRefresh !== '')
-
 const cloudSavedAt = ref(settings.cloudSavedAt)
 const cloudSavedCount = ref(settings.cloudSavedCount)
 
 /** Что лежит в облаке сейчас, строкой. Пустая строка — «не спрашивали». */
 const cloudThere = ref('')
+
+/**
+ * Ссылка на нашу копию или пустая строка. Не хранится в настройках нарочно:
+ * публикация живёт на стороне Диска и может пропасть при перезаписи файла,
+ * поэтому ссылку всегда спрашивают у облака заново.
+ */
+const shareLink = ref('')
+
+/** Ссылка, введённая для чтения чужой копии. */
+const linkDraft = ref('')
+
+/** Что нашлось по введённой ссылке. null — ещё не искали или не нашли. */
+const linkFound = ref<CloudLink | null>(null)
 
 // Своя заметка и своя ошибка: отказ облака не должен красить соседние панели
 // настроек и затирать их ответы.
@@ -117,13 +128,6 @@ const strangerAsk = ref<CloudStranger | null>(null)
 /** Где человек берёт пропуск к Яндекс Диску. Своего приложения у сборки нет. */
 const YANDEX_OAUTH_URL = 'https://oauth.yandex.com/client/new/'
 
-/**
- * Где человек заводит своё приложение Google. Причина та же, что и у Яндекса,
- * только строже: устройству без клавиатуры Google выдаёт вход лишь через
- * приложение вида «ТВ и устройства с ограниченным вводом».
- */
-const GOOGLE_CONSOLE_URL = 'https://console.cloud.google.com/apis/credentials'
-
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -142,15 +146,9 @@ async function cloudGuard(action: () => Promise<void>): Promise<void> {
   }
 }
 
-/**
- * Готово ли облако к работе: место выбрано и вход в него пройден. У Яндекса
- * вход — это сохранённый пропуск, у Google — пройденный вход с устройства.
- */
+/** Готово ли облако к работе: место выбрано и пропуск к нему сохранён. */
 function cloudOn(): boolean {
-  if (cloudPlace.value === 'yandex') return cloudSaved.value
-  if (cloudPlace.value === 'google') return gSigned.value
-
-  return false
+  return cloudPlace.value === 'yandex' && cloudSaved.value
 }
 
 /// Время человеку — местное и словами. Ноль и нечитаемая дата дают прочерк:
@@ -173,6 +171,13 @@ function strangerText(found: CloudStranger): string {
   return `${sizeText(found.bytes)}${when}`
 }
 
+/// Хвост ссылки: то немногое, что придётся набирать пультом. Ядро принимает
+/// и хвост, и ссылку целиком, поэтому показываем короткое.
+function linkTail(link: string): string {
+  const cut = link.replace(/\/+$/, '')
+  return cut.slice(cut.lastIndexOf('/') + 1)
+}
+
 /**
  * Спрашивает облако, что там лежит. Отказ здесь не кричит: это строка
  * факта, а не ответ на нажатие, и красная надпись при открытии настроек
@@ -182,6 +187,7 @@ function strangerText(found: CloudStranger): string {
 async function readCloud(): Promise<void> {
   if (!cloudOn()) {
     cloudThere.value = ''
+    shareLink.value = ''
     return
   }
 
@@ -190,6 +196,11 @@ async function readCloud(): Promise<void> {
     cloudThere.value = 'спросить не удалось'
     return
   }
+
+  // Ссылка приходит вместе со сведениями о файле: отдельный запрос ради неё
+  // был бы лишним, а пропавшую публикацию видно сразу.
+  shareLink.value = got.value.share ?? ''
+
   if (!got.value.there) {
     cloudThere.value = 'копии нет'
     return
@@ -216,6 +227,7 @@ function onPick(place: CloudPlace): void {
     cloudSavedAt.value = settings.cloudSavedAt
     cloudSavedCount.value = settings.cloudSavedCount
     cloudThere.value = ''
+    shareLink.value = ''
 
     await readCloud()
   })
@@ -251,83 +263,10 @@ function onCloudHelp(): void {
   void Bridge.shell.openExternal(YANDEX_OAUTH_URL)
 }
 
-/** Приложение Google человек заводит сам, там же, где и все ключи Google. */
-function onGoogleHelp(): void {
-  void Bridge.shell.openExternal(GOOGLE_CONSOLE_URL)
-}
-
 /**
- * Запись ключей приложения. Проверять их отдельно нечем: годность номера
- * и пароля выясняется только на входе, и скажет об этом сам вход.
- */
-function onGoogleKeysSave(): void {
-  void cloudGuard(async () => {
-    cloudNote.value = ''
-
-    const client = gClient.value.trim()
-    const secret = gSecret.value.trim()
-    await saveSetting('cloudGoogleClient', 'am_cloud_g_client', client)
-    await saveSetting('cloudGoogleSecret', 'am_cloud_g_secret', secret)
-
-    gClient.value = client
-    gSecret.value = secret
-    keysOpen.value = false
-
-    // Прежний вход относился к прежнему приложению: с новыми ключами
-    // обновляемый пропуск чужой, и Google откажет при первом обращении.
-    cloudNote.value = gSigned.value
-      ? 'Приложение записано. Прежний вход к нему не относится: войдите заново.'
-      : 'Приложение записано. Теперь можно входить: код появится ниже.'
-  })
-}
-
-/**
- * Вход пройден: узел входа отдал ключи, а хранить их — дело настроек.
- * Панель входа нарочно не пишет в память сама: ключи здесь одного рода
- * с пропуском Яндекса, и место у них одно.
- */
-function onGoogleKeys(keys: GoogleKeys): void {
-  void cloudGuard(async () => {
-    cloudNote.value = ''
-
-    await keepGoogleLogin(keys)
-    gSigned.value = true
-    keysOpen.value = false
-    cloudNote.value = 'Вход в Google пройден: скрытая папка Диска на связи.'
-
-    await readCloud()
-  })
-}
-
-/**
- * Выход из Google. Ключи стираются всегда, даже если отзыв до Google
- * не дошёл: оставить их у себя после просьбы выйти хуже, чем не доложить
- * о выходе. Об отказе при этом говорится вслух.
- */
-function onGoogleOut(): void {
-  void cloudGuard(async () => {
-    cloudNote.value = ''
-
-    const done = await signOutGoogle()
-    gSigned.value = false
-    cloudSavedAt.value = 0
-    cloudSavedCount.value = 0
-    cloudThere.value = ''
-    strangerAsk.value = null
-
-    if (!done.ok) {
-      cloudError.value = done.problem
-      return
-    }
-
-    cloudNote.value = 'Выход выполнен. Файл копии в скрытой папке Диска остался нетронутым.'
-  })
-}
-
-/**
- * Проверка связи по кнопке. Нужна не для порядка: пропуск Яндекса живёт
- * не вечно, вход в Google можно отозвать со стороны, и узнать об этом
- * лучше сейчас, чем в тот вечер, когда копия понадобится.
+ * Проверка связи по кнопке. Нужна не для порядка: пропуск живёт не вечно,
+ * его можно отозвать со стороны, и узнать об этом лучше сейчас, чем в тот
+ * вечер, когда копия понадобится.
  */
 function onCloudCheck(): void {
   void cloudGuard(async () => {
@@ -422,8 +361,6 @@ function onCloudPull(mode: PullMode): void {
       return
     }
 
-    const got = done.value
-
     // Список сменился: числа снаружи переспрашивает тот, кто их показывает.
     emit('changed')
 
@@ -432,22 +369,127 @@ function onCloudPull(mode: PullMode): void {
     cloudSavedAt.value = settings.cloudSavedAt
     cloudSavedCount.value = settings.cloudSavedCount
 
-    const from = got.from.device === '' ? '' : ` Копия с устройства «${got.from.device}».`
-    const lost = got.dropped > 0 ? ` Битых записей в копии: ${got.dropped} — их пропустили.` : ''
-
-    cloudNote.value =
-      got.mode === 'replace'
-        ? `Список замещён копией: записей ${got.total}.${from}${lost}`
-        : `Копия приложена: всего ${got.total}, новых ${got.added}, ` +
-          `обновлено ${got.updated}, своих правок сохранено ${got.kept}, ` +
-          `только здесь ${got.onlyHere}.${from}${lost}`
-
+    cloudNote.value = pullText(done.value)
     await readCloud()
   })
 }
 
+/// Итог возвращения словами. Один текст на оба пути — по пропуску и по
+/// ссылке: человеку важно одно и то же, а разница видна по кнопке, которую
+/// он нажал.
+function pullText(got: {
+  mode: PullMode
+  total: number
+  added: number
+  updated: number
+  kept: number
+  onlyHere: number
+  dropped: number
+  from: { device: string }
+}): string {
+  const from = got.from.device === '' ? '' : ` Копия с устройства «${got.from.device}».`
+  const lost = got.dropped > 0 ? ` Битых записей в копии: ${got.dropped} — их пропустили.` : ''
+
+  return got.mode === 'replace'
+    ? `Список замещён копией: записей ${got.total}.${from}${lost}`
+    : `Копия приложена: всего ${got.total}, новых ${got.added}, ` +
+        `обновлено ${got.updated}, своих правок сохранено ${got.kept}, ` +
+        `только здесь ${got.onlyHere}.${from}${lost}`
+}
+
 /**
- * Отключение Яндекс Диска. Файл на Диске остаётся нетронутым: стирать чужое
+ * Публикация копии. Единственное место, где список становится доступен
+ * кому-то ещё, поэтому и кнопка, и предупреждение стоят рядом: по ссылке
+ * копию прочитает любой, кто её знает.
+ *
+ * Повторное нажатие законно и просто вернёт ту же ссылку — на случай, если
+ * перезапись файла сбросила публикацию.
+ */
+function onShare(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await shareCopy()
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    shareLink.value = done.value
+    cloudNote.value = 'Ссылка готова. На другом устройстве достаточно набрать её хвост.'
+  })
+}
+
+/** Закрытие ссылки. Сам файл копии остаётся на месте и в работе. */
+function onUnshare(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await unshareCopy()
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    shareLink.value = ''
+    cloudNote.value = 'Ссылка закрыта. Файл копии остался на месте.'
+  })
+}
+
+/** Адрес ссылки открывает оболочка: по нему браузер просто скачает файл. */
+function onShareOpen(): void {
+  if (shareLink.value === '') return
+  void Bridge.shell.openExternal(shareLink.value)
+}
+
+/**
+ * Поиск копии по ссылке. Пропуска не требует вовсе — на этом и держится
+ * первый запуск на устройстве без клавиатуры. Показываются размер и время,
+ * и только после этого предлагается положить копию поверх списка.
+ */
+function onLinkFind(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+    linkFound.value = null
+
+    const done = await linkInfo(linkDraft.value.trim())
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    linkFound.value = done.value
+  })
+}
+
+function onLinkCancel(): void {
+  linkFound.value = null
+}
+
+/** Чтение по ссылке. Отметок о своей копии не двигает: их у читателя нет. */
+function onLinkPull(mode: PullMode): void {
+  const found = linkFound.value
+  if (found === null) return
+
+  linkFound.value = null
+
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await pullByLink(found.key, mode)
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    emit('changed')
+    linkDraft.value = ''
+    cloudNote.value = pullText(done.value)
+  })
+}
+
+/**
+ * Отключение облака. Файл на Диске остаётся нетронутым: стирать чужое
  * хранилище по кнопке «отключить» программа не вправе.
  *
  * Память о времени правки стирается вместе с пропуском: с новым пропуском
@@ -467,6 +509,7 @@ function onCloudForget(): void {
     cloudSavedAt.value = 0
     cloudSavedCount.value = 0
     cloudThere.value = ''
+    shareLink.value = ''
     tokenDraft.value = ''
     tokenOpen.value = false
     strangerAsk.value = null
@@ -491,10 +534,10 @@ onMounted(() => {
       </span>
     </div>
 
-    <!-- Знаки площадок нарисованы, а не набраны буквой: «Я» и «G» в рамке
-         читались заготовкой, по которой не понять, куда ляжет копия.
-         Рисунки свои и в фирменных цветах — сеть за картинками не ходит,
-         и на любой теме они выглядят одинаково.
+    <!-- Знак площадки нарисован, а не набран буквой: «Я» в рамке читалась
+         заготовкой, по которой не понять, куда ляжет копия. Рисунок свой
+         и в фирменных цветах — сеть за картинкой не ходит, и на любой теме
+         он выглядит одинаково.
 
          Цвет знака не наследуется от карточки сознательно: у фирменного
          знака свой цвет, и подкрашивать его акцентом было бы неверно. -->
@@ -517,53 +560,17 @@ onMounted(() => {
         </svg>
         <span class="am-cloud__name">Яндекс Диск</span>
       </button>
-      <button
-        v-tip="'Хранить копию в скрытой папке Google Диска'"
-        class="am-cloud__pick"
-        :class="{ 'am-cloud__pick--on': cloudPlace === 'google' }"
-        type="button"
-        :disabled="cloudBusy"
-        @click="onPick('google')"
-      >
-        <svg
-          class="am-cloud__mark"
-          width="24"
-          height="24"
-          viewBox="0 0 87.3 87.3"
-          aria-hidden="true"
-        >
-          <g transform="translate(0 4.65)">
-            <path
-              fill="#0066da"
-              d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z"
-            />
-            <path
-              fill="#00ac47"
-              d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44C.4 49.9 0 51.45 0 53h27.5z"
-            />
-            <path
-              fill="#ea4335"
-              d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 11.5z"
-            />
-            <path
-              fill="#00832d"
-              d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z"
-            />
-            <path
-              fill="#2684fc"
-              d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z"
-            />
-            <path
-              fill="#ffba00"
-              d="M73.4 26.5L60.7 4.5c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z"
-            />
-          </g>
-        </svg>
-        <span class="am-cloud__name">Google Диск</span>
-      </button>
     </div>
 
-    <!-- Яндекс: пропуск вставляется руками. -->
+    <!-- Прежний выбор Google: место считается невыбранным, и об этом сказано
+         прямо. Подставить другое облако молча программа не вправе. -->
+    <p v-if="cloudPlace === 'google'" class="am-meta">
+      Google Диск убран из программы: вход с устройства не давал скрытой папки, а без проверки
+      Google пропуск умирал за неделю. Выберите Яндекс Диск — файл копии в Google Диске остался
+      на месте и никуда не денется.
+    </p>
+
+    <!-- Пропуск вставляется руками: готовых Яндекс не выдаёт. -->
     <template v-if="cloudPlace === 'yandex'">
       <p v-if="!cloudSaved || tokenOpen" class="am-meta">
         Пропуск выдаёт сам Яндекс: заведите приложение с правом на папку приложения на Диске на
@@ -589,59 +596,7 @@ onMounted(() => {
           {{ cloudBusy ? 'Проверяем…' : 'Проверить и сохранить' }}
         </button>
       </div>
-    </template>
 
-    <!-- Google: свои ключи и вход кодом с устройства. Поля стоят здесь,
-         а не в узле входа: ключи одного рода с пропуском Яндекса, и хранит
-         их эта панель. Сам вход — CloudGoogle.vue. -->
-    <template v-if="cloudPlace === 'google'">
-      <p v-if="!gSigned || keysOpen" class="am-meta">
-        Готовых пропусков Google не выдаёт: заведите на
-        <button class="am-link" type="button" @click="onGoogleHelp">console.cloud.google.com</button>
-        своё приложение вида «ТВ и устройства с ограниченным вводом», включите ему Google Drive API
-        и впишите сюда номер и пароль приложения. Они останутся на этом устройстве.
-      </p>
-
-      <div v-if="!gSigned || keysOpen" class="am-row">
-        <label class="am-field">
-          <input
-            v-model="gClient"
-            class="am-input"
-            type="text"
-            placeholder="Номер приложения (client_id)"
-          />
-        </label>
-        <label class="am-field">
-          <input
-            v-model="gSecret"
-            class="am-input"
-            type="password"
-            placeholder="Пароль приложения (client_secret)"
-          />
-        </label>
-        <button
-          class="am-btn"
-          type="button"
-          :disabled="cloudBusy || !gClient.trim() || !gSecret.trim()"
-          @click="onGoogleKeysSave"
-        >
-          Сохранить
-        </button>
-      </div>
-
-      <CloudGoogle
-        :client="gClient"
-        :secret="gSecret"
-        :signed="gSigned"
-        @keys="onGoogleKeys"
-        @out="onGoogleOut"
-      />
-    </template>
-
-    <!-- Ниже выбора места разницы между площадками нет: числа, запись
-         и возвращение у них общие. Особыми остаются только кнопки смены
-         пропуска и отключения — их вид зависит от места. -->
-    <template v-if="cloudPlace !== 'none'">
       <ul class="am-facts">
         <li class="am-fact">
           <span class="am-fact__name">Файл копии</span>
@@ -660,6 +615,10 @@ onMounted(() => {
         <li v-if="cloudThere" class="am-fact">
           <span class="am-fact__name">В облаке сейчас</span>
           <span class="am-fact__value">{{ cloudThere }}</span>
+        </li>
+        <li v-if="shareLink" class="am-fact">
+          <span class="am-fact__name">Хвост ссылки</span>
+          <span class="am-fact__value"><code>{{ linkTail(shareLink) }}</code></span>
         </li>
       </ul>
 
@@ -693,7 +652,7 @@ onMounted(() => {
           Проверить связь
         </button>
         <button
-          v-if="cloudPlace === 'yandex' && cloudSaved && !tokenOpen"
+          v-if="cloudSaved && !tokenOpen"
           class="am-btn am-btn--ghost"
           type="button"
           :disabled="cloudBusy"
@@ -702,16 +661,7 @@ onMounted(() => {
           Сменить пропуск
         </button>
         <button
-          v-if="cloudPlace === 'google' && gSigned && !keysOpen"
-          class="am-btn am-btn--ghost"
-          type="button"
-          :disabled="cloudBusy"
-          @click="keysOpen = true"
-        >
-          Сменить приложение
-        </button>
-        <button
-          v-if="cloudPlace === 'yandex' && cloudSaved"
+          v-if="cloudSaved"
           v-tip="'Забыть пропуск. Файл копии в облаке останется'"
           class="am-btn am-btn--ghost"
           type="button"
@@ -721,6 +671,51 @@ onMounted(() => {
           Отключить облако
         </button>
       </div>
+
+      <!-- Ссылка на копию: то, чем список попадает на устройство, где нечем
+           вводить пропуск. Предупреждение стоит здесь же, а не в подписи
+           кнопки: открыть свой список — решение, а не настройка. -->
+      <div v-if="cloudOn()" class="am-row">
+        <button
+          v-if="!shareLink"
+          v-tip="'Опубликовать файл копии и получить короткую ссылку на него'"
+          class="am-btn am-btn--ghost"
+          type="button"
+          :disabled="cloudBusy"
+          @click="onShare"
+        >
+          Поделиться копией
+        </button>
+
+        <template v-if="shareLink">
+          <label class="am-field">
+            <input class="am-input" type="text" readonly :value="shareLink" />
+          </label>
+          <button
+            v-tip="'Открыть ссылку в браузере'"
+            class="am-btn am-btn--ghost"
+            type="button"
+            @click="onShareOpen"
+          >
+            Открыть
+          </button>
+          <button
+            v-tip="'Закрыть ссылку. Файл копии останется на месте'"
+            class="am-btn am-btn--ghost"
+            type="button"
+            :disabled="cloudBusy"
+            @click="onUnshare"
+          >
+            Закрыть ссылку
+          </button>
+        </template>
+      </div>
+
+      <p v-if="shareLink" class="am-meta">
+        По этой ссылке копию прочитает любой, кто её знает: пропуск для чтения не нужен. На другом
+        устройстве достаточно набрать хвост — <code>{{ linkTail(shareLink) }}</code> — в поле
+        «Забрать по ссылке» ниже.
+      </p>
 
       <!-- Незнакомая копия: тот же узел вопроса, что и у переноса, но
            порядок кнопок обратный. Первым стоит «Сначала забрать»:
@@ -779,6 +774,65 @@ onMounted(() => {
         </div>
       </div>
     </template>
+
+    <!-- Чтение по ссылке стоит последним и живёт отдельно от места: ни
+         пропуска, ни выбранного облака он не требует. Это первый запуск
+         на устройстве, где вводить нечем, и единственное, что там можно
+         набрать, — десяток знаков хвоста. -->
+    <ul class="am-facts">
+      <li class="am-fact">
+        <span class="am-fact__name">Забрать по ссылке</span>
+        <span class="am-fact__value">пропуск не нужен</span>
+      </li>
+    </ul>
+
+    <div class="am-row">
+      <label class="am-field">
+        <input
+          v-model="linkDraft"
+          class="am-input"
+          type="text"
+          placeholder="Ссылка на копию или её хвост"
+        />
+      </label>
+      <button
+        v-tip="'Спросить, что лежит по ссылке. Список пока не меняется'"
+        class="am-btn"
+        type="button"
+        :disabled="cloudBusy || !linkDraft.trim()"
+        @click="onLinkFind"
+      >
+        {{ cloudBusy ? 'Смотрим…' : 'Найти копию' }}
+      </button>
+    </div>
+
+    <div v-if="linkFound" class="am-ask">
+      <p class="am-ask__text">
+        По ссылке лежит копия: {{ sizeText(linkFound.bytes) }}<template v-if="linkFound.modified">
+          · {{ whenText(Date.parse(linkFound.modified)) }}</template>. Здесь записей: {{ list }}.
+      </p>
+
+      <div class="am-row">
+        <button
+          class="am-btn"
+          type="button"
+          :disabled="cloudBusy"
+          @click="onLinkPull('merge')"
+        >
+          Добавить недостающее
+        </button>
+        <button
+          v-tip="'Заменить свой список копией по ссылке целиком'"
+          class="am-btn am-btn--ghost"
+          type="button"
+          :disabled="cloudBusy"
+          @click="onLinkPull('replace')"
+        >
+          Заменить целиком
+        </button>
+        <button class="am-btn am-btn--ghost" type="button" @click="onLinkCancel">Отмена</button>
+      </div>
+    </div>
 
     <p v-if="cloudError" class="am-error">{{ cloudError }}</p>
     <p v-if="cloudNote" class="am-note">{{ cloudNote }}</p>
