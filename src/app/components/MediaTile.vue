@@ -20,6 +20,7 @@ import { computed, ref, watch } from 'vue'
 import type { PlayState } from '@/core/playable'
 
 import { soonHint, soonWord } from '../labels'
+import SakuraBloom from './SakuraBloom.vue'
 
 interface Props {
   title: string
@@ -193,7 +194,8 @@ const hasTags = computed(
     </button>
 
     <!-- Знак «✕» спрятан от чтения с экрана, а подсказка v-tip рисуется своей
-         плашкой в body и имени кнопке не даёт — отсюда явный aria-label. -->
+         плашкой в body и имени кнопке не даёт — отсюда явный aria-label.
+         Подложка кнопки — не фон и не рамка, а цветок: см. SakuraBloom.vue. -->
     <button
       v-if="hidable"
       v-tip="'Не интересует'"
@@ -202,16 +204,20 @@ const hasTags = computed(
       aria-label="Не интересует"
       @click="emit('hide')"
     >
-      <span aria-hidden="true">✕</span>
+      <SakuraBloom />
+      <span class="am-tile__hide-sign" aria-hidden="true">✕</span>
     </button>
   </li>
 </template>
 
 <style scoped>
 /* Цвет текста и меток поверх постера не тематический: завеса под ними
-   тёмная во всех трёх темах. Объявлен один раз и дальше берётся только var(). */
+   тёмная во всех трёх темах. Объявлен один раз и дальше берётся только var().
+   --am-art-deep — то же самое, но плотное: для фигур, которые накладываются
+   сами на себя и от полупрозрачности пошли бы швами. */
 .am-tile {
   --am-on-art: #eef3fb;
+  --am-art-deep: #0b1017;
 
   position: relative;
   min-width: 0;
@@ -591,8 +597,22 @@ const hasTags = computed(
    Появляется он не на месте, а вырастает из самого угла постера: кружок,
    возникший из ничего прямо под курсором, читался случайным попаданием,
    а не предложением действия. Точка роста — верхний левый угол, оттуда
-   же уходят метки. */
+   же уходят метки.
+
+   ФОРМЫ У САМОЙ КНОПКИ БОЛЬШЕ НЕТ
+   Ни фона, ни рамки, ни размытия: круг и распускающийся цветок рисует
+   вложенный SakuraBloom.vue, а кнопка осталась пустой коробкой под ним.
+   Так сделано потому, что лепестки выходят за её край и накладываются друг
+   на друга — border-radius вогнутых впадин не умеет вовсе, а clip-path на
+   самой кнопке обрезал бы и попадание курсора, и кольцо фокуса.
+   border-radius всё же оставлен: он больше ничего не красит, но по нему
+   идёт обводка :focus-visible, и без него кольцо вышло бы квадратным
+   вокруг круглого предмета. */
 .am-tile__hide {
+  --am-bloom-deep: var(--am-art-deep);
+  --am-bloom-petal: color-mix(in srgb, var(--am-sakura) 34%, var(--am-art-deep));
+  --am-bloom-out: 2px;
+
   position: absolute;
   top: 8px;
   left: 8px;
@@ -608,18 +628,16 @@ const hasTags = computed(
   color: var(--am-on-art);
   visibility: hidden;
   cursor: pointer;
-  background: color-mix(in srgb, var(--am-veil) 78%, transparent);
-  border: 1px solid color-mix(in srgb, var(--am-on-art) 16%, transparent);
+  background: none;
+  border: 0;
   border-radius: var(--am-r-cap);
   opacity: 0;
-  backdrop-filter: blur(8px);
   transform: translate(-4px, -4px) scale(0.84);
   transform-origin: top left;
   transition:
     opacity var(--am-fast) var(--am-ease),
     visibility var(--am-fast) var(--am-ease),
-    background-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease),
+    color var(--am-fast) var(--am-ease),
     transform var(--am-mid) var(--am-ease);
 }
 
@@ -637,23 +655,18 @@ const hasTags = computed(
   transform: none;
 }
 
-/* Форма такая же, как у кнопок закрытия в окнах: круг в покое,
-   лепесток под курсором. */
-.am-tile__hide:hover,
-.am-tile__hide:focus-visible {
-  background: color-mix(in srgb, var(--am-veil) 92%, transparent);
-  border-color: color-mix(in srgb, var(--am-on-art) 30%, transparent);
-  border-radius: var(--am-r-drop);
-}
-
-/* Символ поднимается вместе с формой, центровку держит родитель. */
-.am-tile__hide > span {
+/* Символ лежит поверх цветка: сам цветок вынут из потока через absolute,
+   а позиционированное рисуется выше обычного — без своего z-index знак
+   ушёл бы под лепестки. Центровку держит сетка родителя. */
+.am-tile__hide-sign {
+  position: relative;
+  z-index: 1;
   display: block;
   transition: transform var(--am-fast) var(--am-ease);
 }
 
-.am-tile__hide:hover > span,
-.am-tile__hide:focus-visible > span {
+.am-tile__hide:hover > .am-tile__hide-sign,
+.am-tile__hide:focus-visible > .am-tile__hide-sign {
   transform: translateY(-1px);
 }
 
@@ -666,8 +679,8 @@ const hasTags = computed(
   .am-tile--hidable:hover .am-tile__tags,
   .am-tile--hidable:has(:focus-visible) .am-tile__tags,
   .am-tile__hide,
-  .am-tile__hide:hover > span,
-  .am-tile__hide:focus-visible > span {
+  .am-tile__hide:hover > .am-tile__hide-sign,
+  .am-tile__hide:focus-visible > .am-tile__hide-sign {
     transform: none;
   }
 
