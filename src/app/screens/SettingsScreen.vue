@@ -14,6 +14,14 @@
 // Облачная копия живая с этого захода, но по-прежнему только по кнопке:
 // само по себе облако ничего не начинает и в фоне не ходит.
 //
+// ДВА МЕСТА, ДВА РАЗНЫХ ВХОДА
+// У Яндекса пропуск выдают руками, и его вставляют в поле. Google руками
+// не даёт ничего: там вход идёт кодом с устройства — картинка с адресом
+// и восемь знаков, — поэтому он живёт отдельным узлом CloudGoogle.vue,
+// а сюда возвращает готовые ключи: хранить их дело настроек, а не панели
+// входа. Ниже выбора места разницы уже нет — числа, запись и возвращение
+// у обоих мест общие.
+//
 // ВОПРОСЫ КОРОТКИЕ, ОТВЕТ ЖИВЁТ В КНОПКАХ
 // Раньше подтверждения объясняли разницу способов абзацем на три строки.
 // Абзац этот никто не читал: под ним стоят «Добавить недостающее»
@@ -31,13 +39,18 @@
 // Оформление живёт в settings-screen.css — так же, как у карточки и плеера.
 import { onMounted, ref } from 'vue'
 
+import type { GoogleKeys } from '@/api/google-oauth'
 import { Bridge } from '@/bridge'
 import {
+  checkChosenPlace,
   checkPlace,
-  CLOUD_PATH,
+  choosePlace,
+  cloudPathText,
   copyInfo,
+  keepGoogleLogin,
   pullCopy,
   saveCopy,
+  signOutGoogle,
   type CloudStranger,
 } from '@/core/cloud'
 import {
@@ -52,7 +65,7 @@ import {
 import { datasetStatus, initDatasetNames } from '@/core/dataset-names'
 import { clearCache, getDbStats } from '@/core/db'
 import { buildMalXml, malXmlFileName } from '@/core/mal-xml'
-import { saveSetting, settings } from '@/core/settings'
+import { saveSetting, settings, type CloudPlace } from '@/core/settings'
 
 import { APPEARANCES, appearance, setAppearance } from '../appearance'
 import {
@@ -64,6 +77,7 @@ import {
   submitToken,
   type LoginStart,
 } from '../auth/session'
+import CloudGoogle from '../components/CloudGoogle.vue'
 import { saveXmlFile } from '../save-file'
 
 const version = __ANIMORI_VERSION__
@@ -97,6 +111,13 @@ const DATASET_URL = 'https://github.com/foulnike/animori-data'
  * делать вид, что окно входа сейчас откроется само.
  */
 const YANDEX_OAUTH_URL = 'https://oauth.yandex.com/client/new/'
+
+/**
+ * Где человек заводит своё приложение Google. Причина та же, что и у Яндекса,
+ * только строже: устройству без клавиатуры Google выдаёт вход лишь через
+ * приложение вида «ТВ и устройства с ограниченным вводом».
+ */
+const GOOGLE_CONSOLE_URL = 'https://console.cloud.google.com/apis/credentials'
 
 /// Внешние ссылки из окна открываются только оболочкой: target="_blank"
 /// в WebView2 отбрасывается молча, без окна и без ошибки.
@@ -181,7 +202,7 @@ const canPickDir = Bridge.exportFile.available
 const cloudPlace = ref(settings.cloudPlace)
 
 /**
- * Есть ли сохранённый пропуск. Хранится признак, а не сам пропуск:
+ * Есть ли сохранённый пропуск Яндекса. Хранится признак, а не сам пропуск:
  * в разметку ему попадать незачем ни в каком виде.
  */
 const cloudSaved = ref(settings.cloudToken !== '')
@@ -191,6 +212,23 @@ const tokenDraft = ref('')
 
 /** Открыто ли поле пропуска при уже сохранённом: смена бывает редко. */
 const tokenOpen = ref(false)
+
+/**
+ * Ключи своего приложения Google. Номер приложения секретом не считается,
+ * пароль считается и стоит под точками, но лежат оба здесь же, на этом
+ * устройстве: отдавать их куда-то ещё незачем.
+ */
+const gClient = ref(settings.cloudGoogleClient)
+const gSecret = ref(settings.cloudGoogleSecret)
+
+/** Открыты ли поля ключей при уже пройденном входе: смена бывает редко. */
+const keysOpen = ref(false)
+
+/**
+ * Пройден ли вход в Google. Опять признак, а не сам пропуск: обновляемый
+ * ключ живёт в настройках, и разметке о нём знать нечего.
+ */
+const gSigned = ref(settings.cloudGoogleRefresh !== '')
 
 const cloudSavedAt = ref(settings.cloudSavedAt)
 const cloudSavedCount = ref(settings.cloudSavedCount)
@@ -438,9 +476,15 @@ function onExport(): void {
   })
 }
 
-/** Готово ли облако к работе: место выбрано и пропуск сохранён. */
+/**
+ * Готово ли облако к работе: место выбрано и вход в него пройден. У Яндекса
+ * вход — это сохранённый пропуск, у Google — пройденный вход с устройства.
+ */
 function cloudOn(): boolean {
-  return cloudPlace.value === 'yandex' && cloudSaved.value
+  if (cloudPlace.value === 'yandex') return cloudSaved.value
+  if (cloudPlace.value === 'google') return gSigned.value
+
+  return false
 }
 
 /// Время человеку — местное и словами. Ноль и нечитаемая дата дают прочерк:
@@ -490,16 +534,23 @@ async function readCloud(): Promise<void> {
 }
 
 /**
- * Выбор места. Пока место одно, но ключ в настройках строковый:
- * Google Drive встанет рядом вторым значением, а не вторым флажком.
+ * Выбор места. Смена места стирает память о чужой копии и числа прошлой
+ * записи: в другом облаке лежит другой файл, и прежние цифры говорили бы
+ * о нём неправду. Стиранием занимается ядро, здесь остаётся переспросить.
  */
-function onPickYandex(): void {
-  if (cloudPlace.value === 'yandex') return
+function onPick(place: CloudPlace): void {
+  if (cloudPlace.value === place) return
 
   void cloudGuard(async () => {
     cloudNote.value = ''
-    cloudPlace.value = 'yandex'
-    await saveSetting('cloudPlace', 'am_cloud_place', 'yandex')
+    strangerAsk.value = null
+
+    await choosePlace(place)
+    cloudPlace.value = place
+    cloudSavedAt.value = settings.cloudSavedAt
+    cloudSavedCount.value = settings.cloudSavedCount
+    cloudThere.value = ''
+
     await readCloud()
   })
 }
@@ -532,6 +583,99 @@ function onCloudToken(): void {
 /** Пропуск выдаёт сам Яндекс: адрес открывает оболочка, окно ходит только к API. */
 function onCloudHelp(): void {
   void Bridge.shell.openExternal(YANDEX_OAUTH_URL)
+}
+
+/** Приложение Google человек заводит сам, там же, где и все ключи Google. */
+function onGoogleHelp(): void {
+  void Bridge.shell.openExternal(GOOGLE_CONSOLE_URL)
+}
+
+/**
+ * Запись ключей приложения. Проверять их отдельно нечем: годность номера
+ * и пароля выясняется только на входе, и скажет об этом сам вход.
+ */
+function onGoogleKeysSave(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const client = gClient.value.trim()
+    const secret = gSecret.value.trim()
+    await saveSetting('cloudGoogleClient', 'am_cloud_g_client', client)
+    await saveSetting('cloudGoogleSecret', 'am_cloud_g_secret', secret)
+
+    gClient.value = client
+    gSecret.value = secret
+    keysOpen.value = false
+
+    // Прежний вход относился к прежнему приложению: с новыми ключами
+    // обновляемый пропуск чужой, и Google откажет при первом обращении.
+    cloudNote.value = gSigned.value
+      ? 'Приложение записано. Прежний вход к нему не относится: войдите заново.'
+      : 'Приложение записано. Теперь можно входить: код появится ниже.'
+  })
+}
+
+/**
+ * Вход пройден: узел входа отдал ключи, а хранить их — дело настроек.
+ * Панель входа нарочно не пишет в память сама: ключи здесь одного рода
+ * с пропуском Яндекса, и место у них одно.
+ */
+function onGoogleKeys(keys: GoogleKeys): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    await keepGoogleLogin(keys)
+    gSigned.value = true
+    keysOpen.value = false
+    cloudNote.value = 'Вход в Google пройден: скрытая папка Диска на связи.'
+
+    await readCloud()
+  })
+}
+
+/**
+ * Выход из Google. Ключи стираются всегда, даже если отзыв до Google
+ * не дошёл: оставить их у себя после просьбы выйти хуже, чем не доложить
+ * о выходе. Об отказе при этом говорится вслух.
+ */
+function onGoogleOut(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await signOutGoogle()
+    gSigned.value = false
+    cloudSavedAt.value = 0
+    cloudSavedCount.value = 0
+    cloudThere.value = ''
+    strangerAsk.value = null
+
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    cloudNote.value = 'Выход выполнен. Файл копии в скрытой папке Диска остался нетронутым.'
+  })
+}
+
+/**
+ * Проверка связи по кнопке. Нужна не для порядка: пропуск Яндекса живёт
+ * не вечно, вход в Google можно отозвать со стороны, и узнать об этом
+ * лучше сейчас, чем в тот вечер, когда копия понадобится.
+ */
+function onCloudCheck(): void {
+  void cloudGuard(async () => {
+    cloudNote.value = ''
+
+    const done = await checkChosenPlace()
+    if (!done.ok) {
+      cloudError.value = done.problem
+      return
+    }
+
+    cloudNote.value = 'Связь есть: пропуск годен и папка копии доступна.'
+    await readCloud()
+  })
 }
 
 /**
@@ -635,22 +779,20 @@ function onCloudPull(mode: PullMode): void {
 }
 
 /**
- * Отключение облака. Файл на Диске остаётся нетронутым: стирать чужое
+ * Отключение Яндекс Диска. Файл на Диске остаётся нетронутым: стирать чужое
  * хранилище по кнопке «отключить» программа не вправе.
  *
  * Память о времени правки стирается вместе с пропуском: с новым пропуском
  * это уже может быть другой Диск, и прежняя метка выдала бы чужую копию
- * за свою — ровно то, от чего сторож и поставлен.
+ * за свою — ровно то, от чего сторож и поставлен. Этим занимается ядро,
+ * когда место переставляют на «никуда».
  */
 function onCloudForget(): void {
   void cloudGuard(async () => {
     cloudNote.value = ''
 
     await saveSetting('cloudToken', 'am_cloud_token', '')
-    await saveSetting('cloudPlace', 'am_cloud_place', 'none')
-    await saveSetting('cloudSavedAt', 'am_cloud_saved_at', 0)
-    await saveSetting('cloudSavedCount', 'am_cloud_saved_count', 0)
-    await saveSetting('cloudSeenModified', 'am_cloud_seen_modified', '')
+    await choosePlace('none')
 
     cloudPlace.value = 'none'
     cloudSaved.value = false
@@ -951,11 +1093,11 @@ onMounted(() => {
           <p v-if="note" class="am-note">{{ note }}</p>
         </div>
 
-        <!-- Облачная копия: место, пропуск, копия туда и обратно. Само облако
+        <!-- Облачная копия: место, вход, копия туда и обратно. Само облако
              ничего не начинает — обе кнопки нажимает человек, и обратный путь
              всегда спрашивает: копия ложится поверх живого списка. Формат
              файла — core/cloud-file.ts, порядок действий — core/cloud.ts,
-             сеть — api/yandex-disk.ts. -->
+             сеть — api/yandex-disk.ts и api/google-drive.ts. -->
         <div class="am-panel am-box">
           <div class="am-bar">
             <h3 class="am-h3">Облачная копия</h3>
@@ -980,7 +1122,7 @@ onMounted(() => {
               :class="{ 'am-cloud__pick--on': cloudPlace === 'yandex' }"
               type="button"
               :disabled="cloudBusy"
-              @click="onPickYandex"
+              @click="onPick('yandex')"
             >
               <svg
                 class="am-cloud__mark"
@@ -998,7 +1140,14 @@ onMounted(() => {
               </svg>
               <span class="am-cloud__name">Яндекс Диск</span>
             </button>
-            <button class="am-cloud__pick" type="button" disabled>
+            <button
+              v-tip="'Хранить копию в скрытой папке Google Диска'"
+              class="am-cloud__pick"
+              :class="{ 'am-cloud__pick--on': cloudPlace === 'google' }"
+              type="button"
+              :disabled="cloudBusy"
+              @click="onPick('google')"
+            >
               <svg
                 class="am-cloud__mark"
                 width="24"
@@ -1030,11 +1179,11 @@ onMounted(() => {
                   />
                 </g>
               </svg>
-              <span class="am-cloud__name">Google Drive</span>
-              <span class="am-cloud__soon">позже</span>
+              <span class="am-cloud__name">Google Диск</span>
             </button>
           </div>
 
+          <!-- Яндекс: пропуск вставляется руками. -->
           <template v-if="cloudPlace === 'yandex'">
             <p v-if="!cloudSaved || tokenOpen" class="am-meta">
               Пропуск выдаёт сам Яндекс: заведите приложение с правом на папку приложения на Диске
@@ -1061,11 +1210,63 @@ onMounted(() => {
                 {{ cloudBusy ? 'Проверяем…' : 'Проверить и сохранить' }}
               </button>
             </div>
+          </template>
 
+          <!-- Google: свои ключи и вход кодом с устройства. Поля стоят здесь,
+               а не в узле входа: ключи одного рода с пропуском Яндекса,
+               и хранит их экран настроек. Сам вход — CloudGoogle.vue. -->
+          <template v-if="cloudPlace === 'google'">
+            <p v-if="!gSigned || keysOpen" class="am-meta">
+              Готовых пропусков Google не выдаёт: заведите на
+              <button class="am-link" type="button" @click="onGoogleHelp">console.cloud.google.com</button>
+              своё приложение вида «ТВ и устройства с ограниченным вводом», включите ему Google
+              Drive API и впишите сюда номер и пароль приложения. Они останутся на этом устройстве.
+            </p>
+
+            <div v-if="!gSigned || keysOpen" class="am-row">
+              <label class="am-field">
+                <input
+                  v-model="gClient"
+                  class="am-input"
+                  type="text"
+                  placeholder="Номер приложения (client_id)"
+                />
+              </label>
+              <label class="am-field">
+                <input
+                  v-model="gSecret"
+                  class="am-input"
+                  type="password"
+                  placeholder="Пароль приложения (client_secret)"
+                />
+              </label>
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="cloudBusy || !gClient.trim() || !gSecret.trim()"
+                @click="onGoogleKeysSave"
+              >
+                Сохранить
+              </button>
+            </div>
+
+            <CloudGoogle
+              :client="gClient"
+              :secret="gSecret"
+              :signed="gSigned"
+              @keys="onGoogleKeys"
+              @out="onGoogleOut"
+            />
+          </template>
+
+          <!-- Ниже выбора места разницы между площадками нет: числа, запись
+               и возвращение у них общие. Особыми остаются только кнопки
+               смены пропуска и отключения — их вид зависит от места. -->
+          <template v-if="cloudPlace !== 'none'">
             <ul class="am-facts">
               <li class="am-fact">
                 <span class="am-fact__name">Файл копии</span>
-                <span class="am-fact__value"><code>{{ CLOUD_PATH }}</code></span>
+                <span class="am-fact__value"><code>{{ cloudPathText() }}</code></span>
               </li>
               <li class="am-fact">
                 <span class="am-fact__name">Последняя копия</span>
@@ -1103,7 +1304,17 @@ onMounted(() => {
                 Забрать копию
               </button>
               <button
-                v-if="cloudSaved && !tokenOpen"
+                v-if="cloudOn()"
+                v-tip="'Спросить облако, годен ли пропуск и на месте ли папка копии'"
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="cloudBusy"
+                @click="onCloudCheck"
+              >
+                Проверить связь
+              </button>
+              <button
+                v-if="cloudPlace === 'yandex' && cloudSaved && !tokenOpen"
                 class="am-btn am-btn--ghost"
                 type="button"
                 :disabled="cloudBusy"
@@ -1112,7 +1323,16 @@ onMounted(() => {
                 Сменить пропуск
               </button>
               <button
-                v-if="cloudSaved"
+                v-if="cloudPlace === 'google' && gSigned && !keysOpen"
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="cloudBusy"
+                @click="keysOpen = true"
+              >
+                Сменить приложение
+              </button>
+              <button
+                v-if="cloudPlace === 'yandex' && cloudSaved"
                 v-tip="'Забыть пропуск. Файл копии в облаке останется'"
                 class="am-btn am-btn--ghost"
                 type="button"
@@ -1193,73 +1413,4 @@ onMounted(() => {
 
       <!-- Правая колонка — вид и справка: то, что смотрят, а не то, чем правят. -->
       <div class="am-set__col">
-        <div class="am-panel am-box">
-          <h3 class="am-h3">Оформление</h3>
-
-          <div class="am-skins">
-            <button
-              v-for="item in APPEARANCES"
-              :key="item.name"
-              v-tip="item.hint"
-              class="am-skins__btn"
-              :class="{ 'am-skins__btn--on': item.name === appearance }"
-              type="button"
-              @click="setAppearance(item.name)"
-            >
-              <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
-              <span class="am-skins__name">{{ item.title }}</span>
-            </button>
-          </div>
-
-          <label class="am-switch">
-            <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
-            <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
-          </label>
-        </div>
-
-        <div class="am-panel am-box">
-          <h3 class="am-h3">О программе</h3>
-
-          <ul class="am-facts">
-            <li class="am-fact">
-              <span class="am-fact__name">Версия</span>
-              <span class="am-fact__value">{{ version }}</span>
-            </li>
-            <li class="am-fact">
-              <span class="am-fact__name">Система</span>
-              <span class="am-fact__value">{{ system }}</span>
-            </li>
-            <li class="am-fact">
-              <span class="am-fact__name">Датасет названий</span>
-              <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
-                {{ datasetText }}
-              </span>
-            </li>
-          </ul>
-
-          <!-- Имя источника, лицензия и ссылка. Обязанностью строка быть
-               перестала: CC0-1.0 атрибуции не требует, и это вежливость
-               к единственному источнику кириллицы. Манами из цепочки убрана
-               3 сентября 2026 — номера теперь свои, перечислением каталога. -->
-          <p class="am-meta am-fine">
-            Русские названия поставляет датасет
-            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-            (лицензия CC0-1.0): номера и связки собраны перечислением каталога Шикимори,
-            сами названия — из открытых API Шикимори и anime365.
-          </p>
-
-          <!-- Свежесть датасета — единственное, за чем человеку приходится следить
-               руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
-          <p v-if="datasetStale" class="am-stale">
-            Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет,
-            программа добирает из сети по одному — это медленно. Загляните в
-            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-            и запустите сборку кнопкой.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-</template>
-
-<style scoped src="./settings-screen.css"></style>
+        <div class="am-panel
