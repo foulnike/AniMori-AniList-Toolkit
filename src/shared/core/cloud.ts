@@ -8,8 +8,25 @@
 // и чтение бывают только по прямому действию человека: тихая синхронизация
 // двух машин без спроса — это ровно тот способ потерять список, от которого
 // весь этап 3 и затевался.
+//
+// КОПИЯ ЛЕЖИТ В ПАПКЕ ПРИЛОЖЕНИЯ
+// Путь теперь app:/animori-list.json, а не /AniMori/…: пропуску достаточно
+// области на одну папку, и корня Диска он не видит вовсе. Заводить папку
+// больше не нужно — Диск создаёт её сам при первой записи, и шага
+// ensureFolder здесь больше нет.
+//
+// ЗАПИСЬ НЕ ЗАТИРАЕТ НЕЗНАКОМУЮ КОПИЮ МОЛЧА
+// Прежде сохранение шло с перезаписью не глядя, и два устройства с одной
+// копией давали ровно то, против чего всё здесь написано: запись с машины,
+// где список беднее, уничтожала копию другой без единого вопроса.
+//
+// Теперь перед записью спрашивается время правки файла, и если оно не то,
+// которое мы запомнили после своего последнего касания, — значит, файл писал
+// кто-то ещё, и решает человек. Сравнивается именно строка от облака,
+// а не своё время записи: свои часы и часы провайдера расходятся на минуты,
+// и разница читалась бы как чужая правка на каждой второй записи.
 
-import { checkAccess, downloadText, ensureFolder, statFile, uploadText } from '../api/yandex-disk'
+import { checkAccess, DISK_APP_ROOT, downloadText, statFile, uploadText } from '../api/yandex-disk'
 import { Logger } from '../utils/logger'
 import { buildCloudFile, CLOUD_DIR, CLOUD_FILE, parseCloudFile, type CloudFile } from './cloud-file'
 import {
@@ -25,14 +42,18 @@ import {
 import { saveSetting, settings } from './settings'
 import { saveSnapshotNow, SNAPSHOT_VERSION } from './snapshot'
 
-/** Папка копии в корне облака. */
-const DIR_PATH = `/${CLOUD_DIR}`
+/** Путь файла копии для API Диска: приставка app: и есть папка приложения. */
+const FILE_PATH = `${DISK_APP_ROOT}/${CLOUD_FILE}`
 
 /**
- * Полный путь до файла копии. Показывается человеку как есть: знать, куда
- * именно уезжает его список, он вправе без лазания в исходники.
+ * Где копия лежит с точки зрения человека. Показывается как есть: знать,
+ * куда именно уезжает его список, он вправе без лазания в исходники.
+ *
+ * Имя папки Диск берёт из названия приложения в OAuth, а не из наших
+ * констант, и совпадение с CLOUD_DIR здесь — договорённость, а не гарантия:
+ * назовут приложение иначе — и папка будет называться иначе.
  */
-export const CLOUD_PATH = `${DIR_PATH}/${CLOUD_FILE}`
+export const CLOUD_PATH = `Приложения/${CLOUD_DIR}/${CLOUD_FILE}`
 
 /**
  * Исход облачного действия. Та же форма, что у клиента Диска, и по той же
@@ -46,6 +67,25 @@ export interface CloudSaved {
   count: number
   savedAt: number
 }
+
+/**
+ * Что лежит в облаке вместо нашей копии. Нужно ровно для вопроса
+ * человеку: решать судьбу чужой записи вслепую он не должен.
+ */
+export interface CloudStranger {
+  bytes: number
+  /** Время правки со стороны облака в виде ISO 8601 или null. */
+  modified: string | null
+}
+
+/**
+ * Исход сохранения. Отдельный тип от CloudDone потому, что у отказа есть
+ * третье состояние: не ошибка, а вопрос. Незнакомая копия в облаке не значит,
+ * что что-то сломалось; значит только, что решать теперь человеку.
+ */
+export type CloudSaveDone =
+  | { ok: true; value: CloudSaved }
+  | { ok: false; problem: string; stranger?: CloudStranger }
 
 /** Что лежит в облаке сейчас. Отсутствие копии — нормальный ответ. */
 export interface CloudInfo {
@@ -108,16 +148,30 @@ export async function checkPlace(token: string): Promise<CloudDone<true>> {
 }
 
 /**
- * Собирает список и кладёт копию в облако, замещая прежнюю.
+ * Запоминает время правки файла, каким его назвало облако. Зовётся после
+ * каждого своего касания копии — и записи, и чтения: именно с этой строкой
+ * сравнится следующее сохранение.
  *
- * Папка заводится перед каждой записью, а не один раз при настройке: папку
- * могли удалить руками с сайта Диска между двумя сохранениями, и лишний
- * дешёвый запрос здесь дешевле отказа в самый нужный момент.
+ * Неудача запроса пишет пустоту, а не оставляет прежнее значение. Пустота
+ * значит «не знаем», и следующая запись переспросит человека. Прежнее
+ * значение означало бы «копия наша» без проверки, а из двух ошибок
+ * лишний вопрос дешевле стёртой копии.
+ */
+async function rememberSeen(token: string): Promise<void> {
+  const seen = await statFile(token, FILE_PATH)
+  const mark = seen.ok && seen.value !== null ? (seen.value.modified ?? '') : ''
+  await saveSetting('cloudSeenModified', 'am_cloud_seen_modified', mark)
+}
+
+/**
+ * Собирает список и кладёт копию в облако, замещая прежнюю.
  *
  * @param device Метка устройства для человека: «Windows», «ТВ». Передаётся снаружи,
  * потому что ядро про площадку не знает и знать не должно.
+ * @param force «Замещать, даже если в облаке незнакомая копия». Ставится только
+ * после вопроса человеку, который видел её размер и время.
  */
-export async function saveCopy(device: string): Promise<CloudDone<CloudSaved>> {
+export async function saveCopy(device: string, force = false): Promise<CloudSaveDone> {
   const token = pass()
   if (!token.ok) return token
 
@@ -141,16 +195,32 @@ export async function saveCopy(device: string): Promise<CloudDone<CloudSaved>> {
     }
   }
 
-  const folder = await ensureFolder(token.value, DIR_PATH)
-  if (!folder.ok) return folder
+  // Сторож перед записью — см. шапку файла. Один дешёвый запрос перед
+  // заливкой в сотни килобайт — цена, которую не стоит и обсуждать.
+  if (!force) {
+    const there = await statFile(token.value, FILE_PATH)
+    if (!there.ok) return there
 
-  const sent = await uploadText(token.value, CLOUD_PATH, built.text)
+    const found = there.value
+    if (found !== null && (found.modified ?? '') !== settings.cloudSeenModified) {
+      return {
+        ok: false,
+        problem:
+          'В облаке лежит копия, которую писали не мы: ' +
+          'запись поверх стёрла бы её безвозвратно.',
+        stranger: { bytes: found.bytes, modified: found.modified },
+      }
+    }
+  }
+
+  const sent = await uploadText(token.value, FILE_PATH, built.text)
   if (!sent.ok) return sent
 
   // Отметка о копии пишется ПОСЛЕ успеха: обещание копии, которой нет,
   // хуже отсутствия копии: на первое человек полагается.
   await saveSetting('cloudSavedAt', 'am_cloud_saved_at', built.file.savedAt)
   await saveSetting('cloudSavedCount', 'am_cloud_saved_count', built.file.count)
+  await rememberSeen(token.value)
 
   Logger('DB', `Облако: копия сохранена, записей ${built.file.count}, байт ${built.bytes}`)
 
@@ -168,7 +238,7 @@ export async function copyInfo(): Promise<CloudDone<CloudInfo>> {
   const token = pass()
   if (!token.ok) return token
 
-  const found = await statFile(token.value, CLOUD_PATH)
+  const found = await statFile(token.value, FILE_PATH)
   if (!found.ok) return found
 
   if (found.value === null) {
@@ -285,7 +355,7 @@ export async function pullCopy(mode: PullMode): Promise<CloudDone<CloudApplied>>
 
   await initCollection()
 
-  const got = await downloadText(token.value, CLOUD_PATH)
+  const got = await downloadText(token.value, FILE_PATH)
   if (!got.ok) return got
 
   const read = parseCloudFile(got.value, SNAPSHOT_VERSION)
@@ -314,6 +384,13 @@ export async function pullCopy(mode: PullMode): Promise<CloudDone<CloudApplied>>
 
   const counts = mode === 'replace' ? replaceFromCopy(file) : mergeFromCopy(file)
   await saveSnapshotNow({ backup: true })
+
+  // Копия, которую только что прочли, с этого момента знакомая: сохранение
+  // поверх неё спрашивать не должно. Заодно числа на панели перестают
+  // говорить о прошлой своей записи там, где в облаке уже другая копия.
+  await saveSetting('cloudSavedAt', 'am_cloud_saved_at', file.savedAt)
+  await saveSetting('cloudSavedCount', 'am_cloud_saved_count', file.count)
+  await rememberSeen(token.value)
 
   Logger(
     'DB',
