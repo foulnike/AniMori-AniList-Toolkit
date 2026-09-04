@@ -371,7 +371,7 @@ function buildOwn(): void {
 
 /** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
     и по нему же решается, кому достанется аниме при повторе. Под отбором
-    каруселей нет вовсе — там всь говорит лента подбора. */
+    каруселей нет вовсе — там всё говорит лента подбора. */
 function shelfDefs(): ShelfDef[] {
   if (picked.value) return []
 
@@ -1054,4 +1054,125 @@ watch(
 
 /* Центровка автоотступами, а не justify-content: когда лента шире экрана,
    автоотступ обращается в нуль и начало ряда остаётся доступным прокруткой,
-   а центрованный флекс в этом случае ср
+   а центрованный флекс в этом случае срезал бы первые жанры насовсем. */
+.am-choose__row {
+  display: flex;
+  gap: 8px;
+  width: max-content;
+  margin-inline: auto;
+}
+
+.am-choose .am-chip {
+  flex: 0 0 auto;
+}
+
+/* Что сейчас в отборе: снимается по одному нажатием на сам чип. */
+.am-now {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.am-now__off {
+  margin-left: 2px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+/* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
+.am-empty__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+/* «Показать ещё» по центру под сеткой: у края страницы кнопку
+   приходилось бы искать глазами после каждой порции. */
+.am-more {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 10px;
+}
+
+.am-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: am-shelf-in var(--am-slow) var(--am-ease) both;
+}
+
+@keyframes am-shelf-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Своя полка важнее советов каталога, поэтому лежит на стекле:
+   раньше все полки были одного веса и глаз не знал, где своё. */
+.am-shelf--mine {
+  padding: 16px 18px 8px;
+  background: var(--am-glass);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-drop);
+  box-shadow: inset 0 1px 0 var(--am-edge);
+  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
+}
+
+/* Заголовок полки с акцентной засечкой: шесть одинаковых заголовков
+   подряд читались сплошным текстом. */
+.am-shelf .am-h2 {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.am-shelf .am-h2::before {
+  width: 3px;
+  height: 15px;
+  content: '';
+  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
+  border-radius: var(--am-r-cap);
+}
+
+.am-rail {
+  justify-content: start;
+}
+
+.am-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.am-hold__art {
+  display: block;
+  aspect-ratio: 2 / 3;
+}
+
+.am-hold__line {
+  display: block;
+  width: 72%;
+  height: 12px;
+  border-radius: var(--am-r-s);
+}
+
+/* На узком экране кнопка отбора уходит над лентой жанров: рядом им тесно,
+   и лента сжималась до двух чипов. */
+@media (max-width: 560px) {
+  .am-sift {
+    flex-wrap: wrap;
+  }
+
+  .am-choose {
+    flex-basis: 100%;
+  }
+}
+</style>
