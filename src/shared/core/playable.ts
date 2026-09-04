@@ -2,18 +2,26 @@
 // и самый дорогой бит в приложении: спрашивать приходится службы, которые про
 // перечни ни с кем не договаривались, а показывать — сеткой на полторы сотни постеров.
 //
-// Устройство: склад ответов в mediaCache, память на запуск, одна очередь и один
-// работник над ней. Экраны кладут в очередь всё, что видно, и подпиской узнают
+// Устройство: склад ответов в mediaCache, память на запуск, общая очередь и по
+// работнику на источник. Экраны кладут в очередь всё, что видно, и подпиской узнают
 // о каждом новом ответе: рисовать по мере готовности — единственный способ не
 // выглядеть остановкой, когда полка длиннее пары рядов.
 //
-// ДВЕ ФАЗЫ. Очередь проходится дважды. Сначала целиком — оптовыми источниками:
-// два десятка тайтлов одним запросом, и большинство «да» встаёт на плитки за
-// секунды. Только потом остаток идёт к дорогим, по тайтлу за раз и сверху вниз.
-// Прежний порядок — заход «по двадцать четыре как есть» с потолком на заход —
-// держал дешёвые ответы за чужими минутами и обрывался, не дойдя до хвоста:
-// на списке в полторы сотни постеров метки замирали на первом десятке, а
-// следующий заход начинал с того же начала и сжигал темп на тех же строках.
+// ДОРОЖКА НА ИСТОЧНИК. Работники идут одновременно и друг друга не ждут. Общий
+// работник, проходивший очередь подряд, стоил витрины: один вопрос Aniliberty —
+// это поиск по названию, до двух запросов по десять секунд ожидания, и всё это
+// время оптовый ответ, готовый лечь на два десятка плиток разом, ждал своей череды.
+// На списке в полторы сотни постеров метки замирали на первом десятке.
+//
+// СРЫВ — НЕ ОТВЕТ. Заход, на который служба не сказала ни слова, считается
+// сорванным: тайтлы остаются в очереди, заход ужимается вдвое, а служба отдыхает —
+// с каждым срывом подряд дольше. Прежде срыв записывался как «спрошено», и один
+// HTTP 500 снимал с Kodik два десятка тайтлов до конца прохода, а оборванный поиск
+// Aniliberty — тайтл насовсем.
+//
+// ДОРОГОЕ — ВТОРЫМ. Тайтл, о котором ещё не высказался оптовый источник, дорогой
+// службе не адресуется: незачем спрашивать поимённо о том, про что вот-вот скажут
+// двумя десятками разом. Отдыхающий оптовый источник очередь при этом не держит.
 //
 // ПРО «НЕТ». Метка отказа ставится только когда высказались все источники, кому
 // тайтл вообще адресуем (canAskPresence в core/video.ts). Молчание службы — это
@@ -36,24 +44,50 @@ const YES_TIME_MS = 604800000
 /** Сколько живёт «нет»: сегодня озвучки нет, а завтра она есть. */
 const NO_TIME_MS = 86400000
 
-/** По скольку тайтлов уходит в один оптовый вопрос: столько же берёт и Kodik. */
+/** По скольку тайтлов уходит в оптовый вопрос и до скольких он ужимается после срывов. */
 const BULK_CHUNK = 20
+const BULK_MIN = 5
 
-/** Пауза между вопросами: очередь темпа не единственный жилец сети. */
+/** Пауза между заходами одной дорожки: очередь меток не единственный жилец сети. */
 const REST_MS = 60
 
 /** Не чаще этого зовутся подписчики: перерисовка сетки дороже самого ответа. */
 const NOTIFY_MS = 250
 
-/** Через сколько переспрашивать тайтл, о котором источники промолчали. */
+/**
+ * Сколько ждём ответа на заход. У служб свои сроки на запрос, но заход
+ * складывается из нескольких запросов подряд, и дорожка не должна висеть на нём
+ * дольше, чем человек готов смотреть на пустые плитки.
+ */
+const ASK_TIME_MS = 30000
+
+/** Отдых после срыва: первый, прибавка за каждый следующий подряд и потолок. */
+const REST_FAIL_MS = 3000
+const REST_STEP_MS = 5000
+const REST_MAX_MS = 60000
+
+/** Сколько срывов по одному тайтлу терпим, прежде чем счесть, что служба промолчала. */
+const FAIL_LIMIT = 2
+
+/** Через сколько переспрашивать тайтл, о котором источники так и не высказались. */
 const HUSH_TIME_MS = 600000
+
+/** Потолок очереди: витрина ушла вперёд, и хвост позапрошлой сетки уже никому не нужен. */
+const QUEUE_MAX = 600
+
+/** Сколько ждёт warmPlayable, прежде чем снять с экрана признак работы. */
+const WARM_WAIT_MS = 4000
+const WARM_STEP_MS = 150
+
+/** Через сколько заглянуть в реестр, если к первой полке он ещё пуст. */
+const WAIT_SOURCES_MS = 1000
 
 /** Ответ источников: вход есть или входа нет. Третьего значения нет намеренно. */
 export type PlayState = 'yes' | 'no'
 
 /**
  * Чем спрашивать источники об одном тайтле. Собирает вопрос экран: имена и
- * чужие номера живут у него, а ядро их взять негде.
+ * чужие номера живут у него, а ядру их взять негде.
  */
 export interface PlayAsk {
   mediaId: number
@@ -73,10 +107,11 @@ interface PlayRecord {
   state: PlayState
 }
 
-/** Один заход к источнику: кого спрашиваем и о чём. */
-interface Turn {
-  source: VideoSource
-  asks: PlayAsk[]
+/** Самочувствие службы: срывы подряд, отдых до срока и нынешний размер захода. */
+interface Health {
+  fails: number
+  until: number
+  chunk: number
 }
 
 const memory = new Map<number, Held>()
@@ -87,24 +122,34 @@ const looked = new Set<number>()
 /** Очередь вопросов: ключ — тайтл, значение — чем спрашивать. Порядок — порядок показа. */
 const queue = new Map<number, PlayAsk>()
 
-/** Что уже сказали источники про тайтл. Живёт до решения по нему. */
+/** Что источники сказали про тайтл. Живёт до решения по нему. */
 const heard = new Map<number, Map<string, boolean>>()
 
-/** Кого о чём уже спрашивали в этом заходе. Молчание — тоже спрошено. */
+/** Кто про тайтл уже высказался. Молчание внутри ответа — тоже высказывание. */
 const tried = new Map<number, Set<string>>()
 
-/** Когда о тайтле промолчали: раньше срока переспрашивать нечего. */
+/** Сколько раз служба сорвалась на тайтле. Терпение считается поимённо. */
+const missed = new Map<number, Map<string, number>>()
+
+/** Когда о тайтле так и не высказались: раньше срока переспрашивать нечего. */
 const hushed = new Map<number, number>()
 
 /** Подписчики: экраны, которым надо перерисоваться на новый ответ. */
 const watchers = new Set<() => void>()
 
-/** Идущий заход работника. Он один: два одновременных удвоили бы запросы. */
-let working: Promise<void> | null = null
+/** Идущие дорожки. По одной на службу: две удвоили бы запросы. */
+const lanes = new Map<string, Promise<void>>()
+
+/** Самочувствие служб. Ключ — id источника. */
+const health = new Map<string, Health>()
 
 /** Когда подписчиков звали в последний раз и отложенный зов, если он назначен. */
 let notifiedAt = 0
 let waiting: ReturnType<typeof setTimeout> | null = null
+
+/** Будильник: один на всех, поднимает дорожки к сроку чужого отдыха. */
+let waking: ReturnType<typeof setTimeout> | null = null
+let wakeAt = 0
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -172,7 +217,7 @@ function canAsk(source: VideoSource, ask: PlayAsk): boolean {
   return able === undefined ? true : able.call(source, reqOf(ask))
 }
 
-/** Зовёт подписчиков. Чужая ошибка в перерисовке не должна валить заход. */
+/** Зовёт подписчиков. Чужая ошибка в перерисовке не должна валить дорожку. */
 function callWatchers(): void {
   notifiedAt = Date.now()
 
@@ -204,7 +249,7 @@ function notify(): void {
   }, left)
 }
 
-/** Досылает отложенное: заход кончился, и ждать больше нечего. */
+/** Досылает отложенное: работа кончилась, и ждать больше нечего. */
 function flush(): void {
   if (waiting !== null) {
     clearTimeout(waiting)
@@ -223,37 +268,114 @@ function remember(mediaId: number, state: PlayState): void {
   queue.delete(mediaId)
   heard.delete(mediaId)
   tried.delete(mediaId)
+  missed.delete(mediaId)
   hushed.delete(mediaId)
 
   notify()
+}
+
+/** Тайтл без решения уходит из очереди в тишину: переспросим его своим сроком. */
+function hushOne(mediaId: number): void {
+  hushed.set(mediaId, Date.now())
+
+  queue.delete(mediaId)
+  heard.delete(mediaId)
+  tried.delete(mediaId)
+  missed.delete(mediaId)
+}
+
+function healthOf(source: VideoSource): Health {
+  const found = health.get(source.id)
+  if (found !== undefined) return found
+
+  const fresh: Health = { fails: 0, until: 0, chunk: BULK_CHUNK }
+  health.set(source.id, fresh)
+  return fresh
+}
+
+/** Отдыхает ли служба: до срока её не тревожим. */
+function resting(source: VideoSource): boolean {
+  return healthOf(source).until > Date.now()
+}
+
+/** Заход сорвался: он ужимается вдвое, а отдых растёт с каждым срывом подряд. */
+function fell(source: VideoSource): void {
+  const state = healthOf(source)
+
+  state.fails += 1
+  state.until = Date.now() + Math.min(REST_FAIL_MS + REST_STEP_MS * (state.fails - 1), REST_MAX_MS)
+  state.chunk = Math.max(BULK_MIN, Math.floor(state.chunk / 2))
+
+  Logger('WARN', `Метка доступности: ${source.id} не ответил, срывов подряд ${state.fails}`)
+}
+
+/** Служба ответила: счёт срывов обнуляется, заход возвращается к полному. */
+function stood(source: VideoSource): void {
+  const state = healthOf(source)
+
+  state.fails = 0
+  state.until = 0
+  state.chunk = BULK_CHUNK
+}
+
+/** Отмечает, что служба про тайтл высказалась. */
+function markTried(mediaId: number, sourceId: string): void {
+  const marks = tried.get(mediaId) ?? new Set<string>()
+  marks.add(sourceId)
+  tried.set(mediaId, marks)
+}
+
+function wasTried(mediaId: number, sourceId: string): boolean {
+  return tried.get(mediaId)?.has(sourceId) === true
+}
+
+/** Считает срывы службы на тайтле и отдаёт новый счёт. */
+function markFail(mediaId: number, sourceId: string): number {
+  const row = missed.get(mediaId) ?? new Map<string, number>()
+  const count = (row.get(sourceId) ?? 0) + 1
+
+  row.set(sourceId, count)
+  missed.set(mediaId, row)
+  return count
 }
 
 /**
  * Пробует решить по тому, что уже услышано.
  *
  * «Да» ставится от первого же источника: вход есть, и спорить тут нечему.
- * «Нет» — только когда высказались все, кому тайтл адресуем: молчание одного
- * из них означает «не знаю», а метка «нет видео» на «не знаю» — прямая ложь.
+ * «Нет» — только когда каждый, кому тайтл адресуем, ответил явно. Кто-то
+ * высказался молчанием — значит «не знаю», и такой тайтл уходит в тишину:
+ * метка «нет видео» на «не знаю» — прямая ложь.
  */
 function settle(ask: PlayAsk, sources: readonly VideoSource[]): void {
   const row = heard.get(ask.mediaId)
-  if (row === undefined) return
 
-  for (const state of row.values()) {
-    if (state) {
-      remember(ask.mediaId, 'yes')
-      return
+  if (row !== undefined) {
+    for (const state of row.values()) {
+      if (state) {
+        remember(ask.mediaId, 'yes')
+        return
+      }
     }
   }
 
   const able = sources.filter((source) => canAsk(source, ask))
-  if (able.length === 0) return
-  if (able.some((source) => !row.has(source.id))) return
+  if (able.length === 0) {
+    hushOne(ask.mediaId)
+    return
+  }
 
-  remember(ask.mediaId, 'no')
+  if (able.some((source) => !wasTried(ask.mediaId, source.id))) return
+
+  if (row !== undefined && able.every((source) => row.has(source.id))) {
+    remember(ask.mediaId, 'no')
+    return
+  }
+
+  hushOne(ask.mediaId)
 }
 
-/** Спрашивает источник. Никогда не отклоняется: отказ — это null и запись в журнал. */
+/** Спрашивает службу. Никогда не отклоняется: срыв — это null и запись в журнал. */
 async function askSource(
   source: VideoSource,
   asks: readonly PlayAsk[],
@@ -261,55 +383,95 @@ async function askSource(
   const question = source.askPresence
   if (question === undefined) return null
 
+  let bomb: ReturnType<typeof setTimeout> | null = null
+
+  // Свой срок поверх чужого: у службы он на один запрос, а заход складывается
+  // из нескольких, и повисший заход держал бы дорожку до самого ухода с экрана.
+  const late = new Promise<never>((_, reject) => {
+    bomb = setTimeout(() => {
+      reject(new Error('ответа нет дольше срока'))
+    }, ASK_TIME_MS)
+  })
+
   try {
-    return await question.call(
-      source,
-      asks.map((ask) => reqOf(ask)),
-    )
+    return await Promise.race([
+      question.call(
+        source,
+        asks.map((ask) => reqOf(ask)),
+      ),
+      late,
+    ])
   } catch (e) {
     Logger('WARN', `Метка доступности: источник ${source.id} не ответил`, e)
     return null
+  } finally {
+    if (bomb !== null) clearTimeout(bomb)
   }
 }
 
-/**
- * Следующий заход: первый источник из перечня, которому есть что задать, и
- * столько тайтлов, сколько он берёт за раз. Очередь просматривается в своём
- * порядке, поэтому отвечается сначала то, что человек видит сверху.
- */
-function nextTurn(sources: readonly VideoSource[], limit: number): Turn | null {
+/** Высказались ли оптовые службы по тайтлу. Отдыхающая очередь не держит. */
+function bulkSpoke(ask: PlayAsk, sources: readonly VideoSource[]): boolean {
   for (const source of sources) {
-    const asks: PlayAsk[] = []
+    if (source.presenceCost !== 'batch') continue
+    if (!canAsk(source, ask)) continue
+    if (resting(source)) continue
+    if (!wasTried(ask.mediaId, source.id)) return false
+  }
 
-    for (const ask of queue.values()) {
-      if (tried.get(ask.mediaId)?.has(source.id) === true) continue
-      if (!canAsk(source, ask)) continue
+  return true
+}
 
-      asks.push(ask)
-      if (asks.length >= limit) break
+/** Берёт из очереди то, что этой службе ещё можно задать. Порядок — порядок показа. */
+function pick(source: VideoSource, sources: readonly VideoSource[], limit: number): PlayAsk[] {
+  const asks: PlayAsk[] = []
+  const waitsBulk = source.presenceCost !== 'batch'
+
+  for (const ask of queue.values()) {
+    if (wasTried(ask.mediaId, source.id)) continue
+    if (!canAsk(source, ask)) continue
+    if (waitsBulk && !bulkSpoke(ask, sources)) continue
+
+    asks.push(ask)
+    if (asks.length >= limit) break
+  }
+
+  return asks
+}
+
+/** Один заход: спросили, разложили ответ, попробовали решить. */
+async function runTurn(
+  source: VideoSource,
+  asks: readonly PlayAsk[],
+  sources: readonly VideoSource[],
+): Promise<void> {
+  const answer = await askSource(source, asks)
+
+  // Ни слова про весь заход — это срыв службы, а не ответ о тайтлах: HTTP 500
+  // оптовой и оборванный поиск дорогой приходят сюда одинаково пустыми.
+  if (answer === null || answer.size === 0) {
+    fell(source)
+
+    for (const ask of asks) {
+      // Терпение не бесконечно: иначе дорожка топталась бы на первом тайтле
+      // очереди всё время, пока служба лежит.
+      if (markFail(ask.mediaId, source.id) < FAIL_LIMIT) continue
+
+      markTried(ask.mediaId, source.id)
+      settle(ask, sources)
     }
 
-    if (asks.length > 0) return { source, asks }
+    return
   }
 
-  return null
-}
+  stood(source)
 
-/** Один заход: спросили, отметили спрошенное, попробовали решить. */
-async function runTurn(turn: Turn, sources: readonly VideoSource[]): Promise<void> {
-  const answer = await askSource(turn.source, turn.asks)
+  for (const ask of asks) {
+    markTried(ask.mediaId, source.id)
 
-  for (const ask of turn.asks) {
-    // Отметка ставится и на молчание: иначе работник спрашивал бы одно и то же
-    // по кругу и до хвоста очереди не доходил никогда.
-    const marks = tried.get(ask.mediaId) ?? new Set<string>()
-    marks.add(turn.source.id)
-    tried.set(ask.mediaId, marks)
-
-    const state = answer?.get(ask.mediaId)
+    const state = answer.get(ask.mediaId)
     if (state !== undefined) {
       const row = heard.get(ask.mediaId) ?? new Map<string, boolean>()
-      row.set(turn.source.id, state)
+      row.set(source.id, state)
       heard.set(ask.mediaId, row)
     }
 
@@ -317,70 +479,121 @@ async function runTurn(turn: Turn, sources: readonly VideoSource[]): Promise<voi
   }
 }
 
-/** Остаток, о котором все спрошенные промолчали, уходит в тишину до своего срока. */
-function hush(): void {
-  const now = Date.now()
-
-  for (const mediaId of queue.keys()) {
-    hushed.set(mediaId, now)
-    heard.delete(mediaId)
-    tried.delete(mediaId)
-  }
-
-  queue.clear()
+/** Источники, которым вообще можно задать вопрос о наличии. */
+function askableSources(): VideoSource[] {
+  return listVideoSources().filter((source) => source.askPresence !== undefined)
 }
 
-/** Проход по очереди до конца: сначала дешёвые вопросы, потом дорогие. */
-async function drain(): Promise<void> {
-  tried.clear()
-
+/** Работник одной службы: спрашивает, пока в очереди есть вопросы для неё. */
+async function lane(source: VideoSource): Promise<void> {
   for (;;) {
-    if (queue.size === 0) break
+    const sources = askableSources()
+    if (sources.length === 0) return
 
-    // Реестр собирает слой api, и до первой полки он может быть пуст:
-    // тогда очередь только копила бы память.
-    const sources = listVideoSources().filter((source) => source.askPresence !== undefined)
-    if (sources.length === 0) {
-      queue.clear()
-      break
+    const state = healthOf(source)
+    const rest = state.until - Date.now()
+
+    if (rest > 0) {
+      // Отдых — не повод бросать дорожку: очередь всё это время держит её
+      // тайтлы, и по сроку их спросят снова.
+      await sleep(rest)
+      continue
     }
 
-    const bulk = sources.filter((source) => source.presenceCost === 'batch')
-    const slow = sources.filter((source) => source.presenceCost !== 'batch')
+    const asks = pick(source, sources, source.presenceCost === 'batch' ? state.chunk : 1)
+    if (asks.length === 0) return
 
-    // Дешёвая фаза идёт первой на каждом шаге, а не один раз в начале: пока
-    // работник возится с дорогими, экран мог положить в очередь новую полку,
-    // и её оптовый ответ не должен ждать чужих минут.
-    const turn = nextTurn(bulk, BULK_CHUNK) ?? nextTurn(slow, 1)
-    if (turn === null) {
-      hush()
-      break
-    }
-
-    await runTurn(turn, sources)
+    await runTurn(source, asks, sources)
     await sleep(REST_MS)
   }
-
-  flush()
 }
 
-/** Запускает работника, если он не идёт. Возвращает обещание идущего захода. */
-function pump(): Promise<void> {
-  if (working === null) {
-    working = drain()
-      .catch((e: unknown) => {
-        Logger('WARN', 'Метка доступности: заход сорвался', e)
-      })
-      .finally(() => {
-        working = null
+/** Через сколько будить дорожки: ближайший чужой отдых. Меньше нуля — ждать нечего. */
+function nearestRest(sources: readonly VideoSource[]): number {
+  const now = Date.now()
+  let soon = -1
 
-        // Пока заход кончался, экран мог положить в очередь новое: без этой
-        // проверки просьба ждала бы следующего входа на экран.
-        if (queue.size > 0) void pump()
-      })
+  for (const source of sources) {
+    const left = healthOf(source).until - now
+    if (left <= 0) continue
+    if (soon < 0 || left < soon) soon = left
   }
 
-  return working
+  return soon
+}
+
+/** Убирает из очереди тайтлы, которые уже некому адресовать. */
+function sweep(sources: readonly VideoSource[]): void {
+  for (const ask of [...queue.values()]) {
+    const open = sources.some(
+      (source) => canAsk(source, ask) && !wasTried(ask.mediaId, source.id),
+    )
+    if (open) continue
+
+    hushOne(ask.mediaId)
+  }
+}
+
+/** Заводит будильник на ближайший срок. Раньше назначенного он не переносится. */
+function wake(ms: number): void {
+  if (ms < 0) return
+
+  const at = Date.now() + ms
+  if (waking !== null && wakeAt <= at) return
+  if (waking !== null) clearTimeout(waking)
+
+  wakeAt = at
+  waking = setTimeout(() => {
+    waking = null
+    wakeAt = 0
+    pump()
+  }, ms)
+}
+
+/** Поднимает работников по всем службам, которым есть что спросить. */
+function pump(): void {
+  if (queue.size === 0) return
+
+  const sources = askableSources()
+
+  // Реестр собирает слой api, и до первой полки он может быть пуст. Очередь при
+  // этом не трогаем: службы появятся, и вопросы дождутся их на месте.
+  if (sources.length === 0) {
+    wake(WAIT_SOURCES_MS)
+    return
+  }
+
+  for (const source of sources) {
+    if (lanes.has(source.id)) continue
+    if (pick(source, sources, 1).length === 0) continue
+
+    const work = lane(source)
+      .catch((e: unknown) => {
+        Logger('WARN', `Метка доступности: дорожка ${source.id} сорвалась`, e)
+      })
+      .finally(() => {
+        lanes.delete(source.id)
+        if (lanes.size === 0) flush()
+
+        // Пока дорожка кончалась, экран мог положить в очередь новое, а соседняя
+        // служба — отпустить придержанные вопросы.
+        if (queue.size > 0) pump()
+      })
+
+    lanes.set(source.id, work)
+  }
+
+  if (lanes.size > 0) return
+
+  // Дорожек нет, а очередь не пуста: либо ждём чужого отдыха, либо в ней осели
+  // тайтлы, которые уже некому спросить.
+  const soon = nearestRest(sources)
+  if (soon >= 0) {
+    wake(soon)
+    return
+  }
+
+  sweep(sources)
 }
 
 /**
@@ -415,7 +628,20 @@ function enqueue(asks: readonly PlayAsk[]): number {
   queue.clear()
 
   for (const ask of fresh) queue.set(ask.mediaId, ask)
-  for (const ask of older) if (!queue.has(ask.mediaId)) queue.set(ask.mediaId, ask)
+
+  for (const ask of older) {
+    if (queue.has(ask.mediaId)) continue
+
+    if (queue.size < QUEUE_MAX) {
+      queue.set(ask.mediaId, ask)
+      continue
+    }
+
+    // Не влез в потолок: витрина ушла вперёд, и пометки по нему уже лишние.
+    heard.delete(ask.mediaId)
+    tried.delete(ask.mediaId)
+    missed.delete(ask.mediaId)
+  }
 
   return fresh.length
 }
@@ -473,19 +699,31 @@ export async function primePlayable(mediaIds: readonly number[]): Promise<number
  */
 export function requestPlayable(asks: readonly PlayAsk[]): number {
   const added = enqueue(asks)
-  if (queue.size > 0) void pump()
+  pump()
   return added
 }
 
 /**
- * То же, но с ожиданием конца захода. Нужно там, где экран показывает признак
- * работы: очередь общая, поэтому ждётся она вся, а не только свои вопросы.
+ * То же, но с ожиданием ответов по своим тайтлам. Нужно там, где экран
+ * показывает признак работы.
+ *
+ * Ждёт только свои вопросы и только до срока: очередь общая и живёт минутами,
+ * а верчение на экране столько висеть не должно — остальное дорисует подписка.
  *
  * Возвращает, сколько из спрошенных тайтлов получили метку.
  */
 export async function warmPlayable(asks: readonly PlayAsk[]): Promise<number> {
   requestPlayable(asks)
-  await pump()
+
+  const until = Date.now() + WARM_WAIT_MS
+
+  for (;;) {
+    const left = asks.some((ask) => known(ask.mediaId) === null && queue.has(ask.mediaId))
+    if (!left) break
+    if (Date.now() >= until) break
+
+    await sleep(WARM_STEP_MS)
+  }
 
   let found = 0
   for (const ask of asks) {
@@ -514,5 +752,7 @@ export function forgetPlayable(): void {
   queue.clear()
   heard.clear()
   tried.clear()
+  missed.clear()
   hushed.clear()
+  health.clear()
 }
