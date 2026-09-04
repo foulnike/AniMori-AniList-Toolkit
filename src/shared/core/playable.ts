@@ -22,6 +22,14 @@
 // На складе лежит один бит про наличие входа. Ссылки на поток не лежат нигде
 // и никогда: они подписаны и живут часы (см. docs/ARCHITECTURE-VIDEO.md).
 //
+// Спрашивается реестр в два захода. Источник, умеющий оптовый вопрос, получает
+// всю пачку разом: два десятка тайтлов уходят в один запрос, и полка на шесть
+// десятков строк стоит трёх. Источник, входящий по названию, стоит запроса
+// на тайтл — ему достаётся только нерешённое и только в пределах бюджета,
+// а остаток доберётся следующим заходом. Раньше спрашивалось по четыре тайтла
+// сразу и у всех подряд: полка в триста строк на таком порядке не доходила
+// до конца никогда.
+//
 // В датасет это знание по-прежнему не идёт: датасет выходит под CC0 и несёт
 // факты каталога, а не наблюдения нашего клиента за чужими службами. Правило
 // «Kodik — только рантайм» тем и соблюдено: склад лежит на своём диске
@@ -34,7 +42,12 @@
 import { Logger } from '../utils/logger'
 import { dbGet, dbSet } from './db'
 import type { MediaCacheRecord } from './types'
-import { listVideoSources, type VideoRequest } from './video'
+import {
+  listVideoSources,
+  type PresenceMap,
+  type VideoRequest,
+  type VideoSource,
+} from './video'
 
 /** Что известно про тайтл. «Ещё не спросили» — это отсутствие записи. */
 export type PlayState = 'yes' | 'no'
@@ -61,12 +74,20 @@ const YES_TIME_MS = 604800000
 const NO_TIME_MS = 86400000
 
 /**
- * По скольку тайтлов спрашиваем сеть за раз. Пачка идёт разом, но не вся полка:
- * у источников свои ограничители, и очередь из семидесяти вопросов задержала
- * бы не только метки, но и сам просмотр, если человек нажмёт «Смотреть»
- * посреди неё.
+ * По скольку тайтлов спрашивать источник, не умеющий оптового вопроса.
+ * Пачка идёт разом, но не вся полка: у источников свои ограничители, и очередь
+ * из семидесяти вопросов задержала бы не только метки, но и сам просмотр,
+ * если человек нажмёт «Смотреть» посреди неё.
  */
 const ASK_CHUNK = 4
+
+/**
+ * Сколько тайтлов достаётся дорогим источникам за один заход. Оптовый вопрос
+ * идёт про всю пачку целиком, а тот, кто входит по названию, стоит запроса
+ * на тайтл: полка на триста строк встала бы у него в очередь на пять минут.
+ * Остаток доберётся следующим заходом: склад к тому времени ответит даром.
+ */
+const SLOW_LIMIT = 24
 
 /** Что лежит на складе. Объектом, а не строкой: у записи будет чему прирасти. */
 interface PlayRecord {
@@ -77,6 +98,12 @@ interface PlayRecord {
 interface Held {
   at: number
   state: PlayState
+}
+
+/** Сколько источников высказалось про тайтл и было ли среди них «да». */
+interface Tally {
+  yes: boolean
+  count: number
 }
 
 const memory = new Map<number, Held>()
@@ -183,17 +210,9 @@ export async function primePlayable(mediaIds: readonly number[]): Promise<number
   return found
 }
 
-/**
- * Спрашивает все источники сразу: медленный не держит быстрого.
- *
- * «Нет» ставится только при полном согласии. Отказал хоть один источник —
- * состояние остаётся неизвестным: молчание службы это приговор ей, а не тайтлу.
- */
-async function probe(ask: PlayAsk): Promise<void> {
-  const sources = listVideoSources()
-  if (sources.length === 0) return
-
-  const req: VideoRequest = {
+/** Вопрос источнику из вопроса метки. Собирается так же, как его собирает плеер. */
+function reqOf(ask: PlayAsk): VideoRequest {
+  return {
     anilistId: ask.mediaId,
     malId: ask.malId,
     // У аниме номер Шикимори равен номеру MAL: так же собирает запрос плеер.
@@ -201,43 +220,128 @@ async function probe(ask: PlayAsk): Promise<void> {
     titles: ask.titles,
     year: ask.year,
   }
+}
 
-  let answered = 0
-  let found = false
+/**
+ * Спрашивает один источник про пачку. Умеет оптовый вопрос — задаём его,
+ * не умеет — идём поштучно и мелкими горстями, как раньше.
+ *
+ * Молчание источника про тайтл в ответ не попадает вовсе: карта несёт
+ * только то, что сказано определённо.
+ */
+async function askSource(
+  source: VideoSource,
+  reqs: readonly VideoRequest[],
+): Promise<PresenceMap> {
+  const out: PresenceMap = new Map()
+  if (reqs.length === 0) return out
 
-  await Promise.all(
-    sources.map(async (source) => {
-      try {
-        const voices = await source.listVoices(req)
-        answered += 1
-        if (voices.length > 0) found = true
-      } catch (e) {
-        Logger('WARN', `Доступность: источник ${source.id} не ответил про ${ask.mediaId}`, e)
-      }
-    }),
-  )
+  if (source.askPresence !== undefined) {
+    try {
+      return await source.askPresence(reqs)
+    } catch (e) {
+      Logger('WARN', `Доступность: источник ${source.id} не ответил про пачку из ${reqs.length}`, e)
+      return out
+    }
+  }
 
-  if (found) {
-    memory.set(ask.mediaId, { at: Date.now(), state: 'yes' })
-    await writeCache(ask.mediaId, 'yes')
+  for (let from = 0; from < reqs.length; from += ASK_CHUNK) {
+    await Promise.all(
+      reqs.slice(from, from + ASK_CHUNK).map(async (req) => {
+        try {
+          const voices = await source.listVoices(req)
+          out.set(req.anilistId, voices.length > 0)
+        } catch (e) {
+          Logger('WARN', `Доступность: источник ${source.id} не ответил про ${req.anilistId}`, e)
+        }
+      }),
+    )
+  }
+
+  return out
+}
+
+/**
+ * Спрашивает реестр про всю пачку в два захода: сперва оптовые — один их
+ * запрос закрывает два десятка тайтлов, — потом дорогие, и только про то,
+ * что осталось нерешённым, и только в пределах бюджета.
+ *
+ * «Нет» ставится только при полном согласии. Не высказался хотя бы один
+ * источник — состояние остаётся неизвестным: молчание службы это приговор
+ * ей, а не тайтлу. Тот, кому пачка не досталась из-за бюджета, тоже считается
+ * не высказавшимся.
+ */
+async function askSources(asks: readonly PlayAsk[]): Promise<void> {
+  const sources = listVideoSources()
+  if (sources.length === 0) {
+    Logger('WARN', 'Доступность: реестр источников пуст, спрашивать некого')
     return
   }
 
-  // Высказались не все — значит, «нет» ещё не доказано.
-  if (answered < sources.length) return
+  const said = new Map<number, Tally>()
 
-  // Без номера MAL часть источников входа к тайтлу не имеет вовсе, и пустой
-  // ответ у них ничего не значит. Такому тайтлу «нет видео» не ставится никогда.
-  if (ask.malId === null || ask.malId <= 0) return
+  const mark = (answer: PresenceMap): void => {
+    for (const [mediaId, state] of answer) {
+      const found = said.get(mediaId) ?? { yes: false, count: 0 }
+      found.yes = found.yes || state
+      found.count += 1
+      said.set(mediaId, found)
+    }
+  }
 
-  memory.set(ask.mediaId, { at: Date.now(), state: 'no' })
-  await writeCache(ask.mediaId, 'no')
+  const bulk = sources.filter(
+    (source) => source.askPresence !== undefined && source.presenceCost === 'batch',
+  )
+  const slow = sources.filter((source) => !bulk.includes(source))
+
+  for (const source of bulk) {
+    mark(await askSource(source, asks.map(reqOf)))
+  }
+
+  // Дорогим достаётся только нерешённое: найденный оптом тайтл уже с меткой.
+  const left = asks
+    .filter((ask) => !(said.get(ask.mediaId)?.yes ?? false))
+    .slice(0, SLOW_LIMIT)
+    .map(reqOf)
+
+  for (const source of slow) {
+    mark(await askSource(source, left))
+  }
+
+  const now = Date.now()
+  const writes: Array<Promise<void>> = []
+
+  for (const ask of asks) {
+    const answer = said.get(ask.mediaId)
+    if (answer === undefined) continue
+
+    if (answer.yes) {
+      memory.set(ask.mediaId, { at: now, state: 'yes' })
+      writes.push(writeCache(ask.mediaId, 'yes'))
+      continue
+    }
+
+    // Высказались не все — значит, «нет» ещё не доказано.
+    if (answer.count < sources.length) continue
+
+    // Без номера MAL часть источников входа к тайтлу не имеет вовсе, и пустой
+    // ответ у них ничего не значит. Такому тайтлу «нет видео» не ставится никогда.
+    if (ask.malId === null || ask.malId <= 0) continue
+
+    memory.set(ask.mediaId, { at: now, state: 'no' })
+    writes.push(writeCache(ask.mediaId, 'no'))
+  }
+
+  await Promise.all(writes)
 }
 
 /**
  * Добирает метки показанному куску полки. Сеть тревожится только за тем, чего
  * нет ни в памяти, ни на складе: второй заход на тот же экран не стоит
  * ни одного запроса.
+ *
+ * Вся пачка уходит одним вопросом, а не по тайтлу за раз: именно поэтому
+ * экранам можно просить шесть десятков строк вместо десяти.
  *
  * Возвращает, про сколько тайтлов ответ теперь есть.
  */
@@ -259,36 +363,27 @@ export async function warmPlayable(asks: readonly PlayAsk[]): Promise<number> {
   // Сначала склад: он отвечает даром и снимает вопрос целиком.
   await primePlayable(queue.map((ask) => ask.mediaId))
 
-  const wanted = queue.filter((ask) => known(ask.mediaId) === null)
-  if (wanted.length === 0) return queue.length
-
-  if (listVideoSources().length === 0) {
-    Logger('WARN', 'Доступность: реестр источников пуст, спрашивать некого')
-    return queue.length - wanted.length
+  // Те же тайтлы мог спросить другой экран: ждём его заход, а не свой.
+  const running = new Set<Promise<void>>()
+  for (const ask of queue) {
+    const task = pending.get(ask.mediaId)
+    if (task !== undefined) running.add(task)
   }
+  if (running.size > 0) await Promise.all([...running])
 
-  for (let from = 0; from < wanted.length; from += ASK_CHUNK) {
-    const chunk = wanted.slice(from, from + ASK_CHUNK)
+  const wanted = queue.filter((ask) => known(ask.mediaId) === null && !pending.has(ask.mediaId))
 
-    await Promise.all(
-      chunk.map(async (ask) => {
-        // Тот же тайтл мог спросить другой экран: ждём тот заход, а не свой.
-        const running = pending.get(ask.mediaId)
-        if (running !== undefined) {
-          await running
-          return
-        }
+  if (wanted.length > 0) {
+    // Обещание одно на всю пачку, и в очереди оно записано за каждым тайтлом:
+    // соседний экран дождётся его, а не спросит то же самое вторично.
+    const task = askSources(wanted)
+    for (const ask of wanted) pending.set(ask.mediaId, task)
 
-        const task = probe(ask)
-        pending.set(ask.mediaId, task)
-
-        try {
-          await task
-        } finally {
-          pending.delete(ask.mediaId)
-        }
-      }),
-    )
+    try {
+      await task
+    } finally {
+      for (const ask of wanted) pending.delete(ask.mediaId)
+    }
   }
 
   return queue.filter((ask) => known(ask.mediaId) !== null).length
