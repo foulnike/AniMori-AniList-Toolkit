@@ -4,16 +4,18 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 import { fetchStudioWorks, STUDIO_PAGE_SIZE, type MediaBrief } from '@/api/anilist-media'
+import { setupVideoSources } from '@/api/video-sources'
 import { hiddenCount, keepAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
+import { peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
 import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
 import { currentRoute, navigate } from '../router'
-import { toTileRow, type TileRow } from '../tile-row'
+import { toPlayAsk, toTileRow, type TileRow } from '../tile-row'
 
 /** Сколько плиток-заглушек показать, пока идёт первый ответ: два ряда
     широкого окна, чтобы ожидание не выглядело короче выдачи. */
@@ -21,6 +23,13 @@ const HOLD_COUNT = 18
 
 /** По скольку тайтлов просить русские названия за заход. */
 const TITLE_CHUNK = 20
+
+/**
+ * Скольким верхним работам добирать метку доступности сетью. Склад поднимается
+ * для всей сетки даром, а в сеть идёт только верх: работа стоит вопроса
+ * к каждому источнику, и полная норма показа съела бы очередь темпа.
+ */
+const PLAY_DEPTH = 10
 
 /** Сколько видимых постеров обязан дать один заход: три полных ряда. */
 const WANT = STUDIO_PAGE_SIZE
@@ -70,6 +79,7 @@ let sourceMore = true
 /** Номера идущих работ: ответ на устаревший вопрос в выдачу не попадает. */
 let run = 0
 let titleRun = 0
+let playRun = 0
 
 const studioId = computed<number>(() => {
   const raw = Number(currentRoute.value.params.id ?? '')
@@ -153,6 +163,40 @@ async function fillTitles(targetIds: readonly number[]): Promise<void> {
 }
 
 /**
+ * Добирает метки доступности. Сначала склад — он отвечает даром и разом по всей
+ * сетке, — и только потом сеть, и то верхним работам. У старой студии половина
+ * работ нашим источникам неизвестна, и метка отвечает на это до плеера.
+ */
+async function fillPlay(): Promise<void> {
+  const mine = ++playRun
+  if (briefs.length === 0) return
+
+  try {
+    const primed = await primePlayable(briefs.map((brief) => brief.mediaId))
+    if (mine !== playRun) return
+    if (primed > 0) redraw()
+
+    const wanted = briefs
+      .filter((brief) => peekPlayable(brief.mediaId) === null)
+      .slice(0, PLAY_DEPTH)
+      .map((brief) => toPlayAsk(brief))
+
+    if (wanted.length === 0) return
+
+    // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
+    setupVideoSources()
+
+    await warmPlayable(wanted)
+    if (mine !== playRun) return
+
+    redraw()
+  } catch (e) {
+    // Без метки сетка живая: плитка про доступность просто молчит.
+    Logger('WARN', 'Студия: метки доступности не доехали', e)
+  }
+}
+
+/**
  * Спрашивает работы студии. С `add` добирает норму к уже показанному, без него
  * начинает с первой страницы. Устаревшие ответы отброшены.
  *
@@ -230,6 +274,7 @@ async function load(add = false): Promise<void> {
     briefs = keepAllowed(raw, (brief) => brief.isAdult)
     hasNext.value = sourceMore || spare.length > 0
     redraw()
+    void fillPlay()
     await fillTitles([...new Set(take.map((item) => item.mediaId))])
   } catch (e) {
     if (mine !== run) return
@@ -327,6 +372,7 @@ watch(studioId, () => {
           :note="row.note"
           :done="row.done"
           :soon="row.soon"
+          :play="row.play"
           :adult="row.adult"
           @open="open(row.mediaId)"
         />
