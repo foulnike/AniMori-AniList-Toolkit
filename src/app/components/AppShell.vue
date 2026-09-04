@@ -5,6 +5,21 @@
 //
 // Рельс и шапка — плавающее стекло: подложка окна из theme.css должна
 // просвечивать, иначе она читается картинкой за глухими панелями.
+//
+// РЕЛЬС СЛОЖЕН ПО УМОЛЧАНИЮ
+//
+// Меню из шести пунктов читают один раз, а держало оно 248 пикселей всегда —
+// целую колонку плиток. Теперь рельс всегда узкий и раскрывается под
+// курсором или когда внутрь зашёл фокус с клавиатуры.
+//
+// Раскрытие ложится поверх содержимого, а не раздвигает его: иначе каждый
+// проезд мыши по краю экрана перекладывал бы сетку плиток целиком.
+// Оттуда же fixed вместо sticky: в потоке рельс всё равно тянул бы колонку.
+//
+// Значки при раскрытии не едут: отступы подобраны так, что центр значка
+// и центр знака приложения стоят на одной вертикали в любом состоянии.
+// Подписи просто проявляются в освободившемся месте, а узкому рельсу их
+// заменяет подсказка на каждом пункте.
 import { computed } from 'vue'
 
 import { APPEARANCES, appearance, setAppearance } from '../appearance'
@@ -103,23 +118,30 @@ function onReload(): void {
 </template>
 
 <style scoped>
+/* Колонка под рельс всегда узкая: раскрытие идёт поверх содержимого. */
 .am-shell {
   display: grid;
-  grid-template-columns: var(--am-side) minmax(0, 1fr);
+  grid-template-columns: var(--am-side-slim) minmax(0, 1fr);
   min-height: 100vh;
 }
 
-/* Рельс меню оторван от краёв окна: стекло видно только там, где есть что
-   размывать вокруг. Прижатый к краю он оставался бы просто тёмной полосой. */
+/* Рельс оторван от краёв окна: стекло видно только там, где есть что
+   размывать вокруг. Прижатый к краю он оставался бы просто тёмной полосой.
+
+   Поверх шапки (у неё z-index: 5): раскрытый рельс не должен уезжать под
+   её размытие. Обрезка по краю держит подписи в сложенном состоянии. */
 .am-side {
-  position: sticky;
+  position: fixed;
   top: 14px;
+  bottom: 14px;
+  left: 14px;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: calc(100vh - 28px);
-  margin: 14px 0 14px 14px;
+  width: calc(var(--am-side-slim) - 14px);
   padding: 18px 12px 16px;
+  overflow: hidden;
   background: var(--am-glass);
   border: 1px solid var(--am-line-soft);
   border-radius: var(--am-r-xl);
@@ -127,13 +149,28 @@ function onReload(): void {
     var(--am-sh-1),
     inset 0 1px 0 var(--am-edge);
   backdrop-filter: blur(var(--am-blur-strong)) saturate(1.3);
+  transition:
+    width var(--am-mid) var(--am-ease),
+    box-shadow var(--am-mid) var(--am-ease);
 }
 
+/* Фокус равен курсору: обход меню с клавиатуры иначе шёл бы по слепым
+   значкам. Тень глубже: раскрытый рельс лежит на содержимом, а не рядом. */
+.am-side:hover,
+.am-side:focus-within {
+  width: calc(var(--am-side) - 14px);
+  box-shadow:
+    var(--am-sh-2),
+    inset 0 1px 0 var(--am-edge);
+}
+
+/* Логотип сдвинут так, чтобы его центр совпал с центрами значков меню:
+   6 + 17 ровно 14 + 9. Иначе при раскрытии ряд подпрыгивал бы влево. */
 .am-side__brand {
   display: flex;
   gap: 11px;
   align-items: center;
-  padding: 2px 8px 6px;
+  padding: 2px 6px 6px;
 }
 
 /* Здесь только размер и ореол: сам знак и его темы живут в AppMark.vue. */
@@ -149,6 +186,31 @@ function onReload(): void {
    на чистом чёрном читается грязным пятном. */
 :global([data-am-skin='amoled']) .am-side__logo {
   box-shadow: none;
+}
+
+/* Три подписи рельса гаснут вместе и одинаково. display: none здесь нельзя:
+   его не переходит, и текст вскакивал бы рывком посередине раскрытия.
+   nowrap обязателен: в узком рельсе слово иначе ломается по буквам и тянет
+   высоту кнопки. */
+.am-side__name,
+.am-side__text,
+.am-side__foot {
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    opacity var(--am-fast) var(--am-ease),
+    transform var(--am-mid) var(--am-ease);
+  transform: translateX(-6px);
+}
+
+.am-side:hover .am-side__name,
+.am-side:hover .am-side__text,
+.am-side:hover .am-side__foot,
+.am-side:focus-within .am-side__name,
+.am-side:focus-within .am-side__text,
+.am-side:focus-within .am-side__foot {
+  opacity: 1;
+  transform: none;
 }
 
 .am-side__name {
@@ -202,7 +264,7 @@ function onReload(): void {
 .am-side__item--on::before {
   position: absolute;
   top: 50%;
-  left: 4px;
+  left: 2px;
   width: 3px;
   height: 18px;
   content: '';
@@ -453,35 +515,10 @@ function onReload(): void {
   }
 }
 
-/* Узкое окно: рельс сжимается до значков, содержимое остаётся главным. */
+/* Узкое окно: рельс и так сложен, остаётся убрать слово у «Назад». */
 @media (max-width: 1080px) {
-  .am-shell {
-    grid-template-columns: var(--am-side-slim) minmax(0, 1fr);
-  }
-
-  .am-side {
-    padding: 16px 8px;
-  }
-
-  .am-side__brand {
-    justify-content: center;
-    padding: 2px 0 6px;
-  }
-
-  .am-side__name,
-  .am-side__text,
-  .am-side__foot,
   .am-top__word {
     display: none;
-  }
-
-  .am-side__item {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .am-side__item--on::before {
-    left: 2px;
   }
 }
 
@@ -492,6 +529,9 @@ function onReload(): void {
     animation: none;
   }
 
+  .am-side__name,
+  .am-side__text,
+  .am-side__foot,
   .am-top__back:hover,
   .am-top__back:focus-visible,
   .am-skin__btn:hover > span,
