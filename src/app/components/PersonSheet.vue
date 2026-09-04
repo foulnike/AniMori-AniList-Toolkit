@@ -32,6 +32,7 @@ import { genderWord, langWord, occupationWord } from '../labels'
 import { navigate } from '../router'
 
 import RichText from './RichText.vue'
+import SakuraBloom from './SakuraBloom.vue'
 
 const props = defineProps<{ start: PersonTarget }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -435,6 +436,7 @@ onBeforeUnmount(() => {
           </div>
 
           <button class="am-sheet__close" type="button" aria-label="Закрыть" @click="emit('close')">
+            <SakuraBloom />
             <span aria-hidden="true">×</span>
           </button>
         </div>
@@ -594,9 +596,21 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-/* Цель нажатия в 44 пикселя. В покое круг, под курсором лепесток:
-   форма отвечает на наведение, а не живёт лепестком всё время. */
+/* Цель нажатия в 44 пикселя. Своей одежды у кнопки нет: круг и распускающуюся
+   под курсором сакуру рисует вложенный слой, а сама кнопка остаётся
+   прямоугольной — при ней остаются и попадание курсора по всей цели,
+   и кольцо фокуса.
+
+   Оттенки цветка берутся от --am-hover: это тон приподнятого управления
+   в теме, тот самый, которым кнопка красилась под курсором раньше.
+   Тень мелкая, --am-sh-1: над стеклом окна нужен намёк на слой, а не тот же
+   плотный провал, что над постером. */
 .am-sheet__close {
+  --am-bloom-deep: var(--am-hover);
+  --am-bloom-petal: color-mix(in srgb, var(--am-sakura) 30%, var(--am-hover));
+  --am-bloom-shade: var(--am-sh-1);
+
+  position: relative;
   display: grid;
   flex: none;
   place-items: center;
@@ -609,25 +623,24 @@ onBeforeUnmount(() => {
   line-height: 1;
   color: var(--am-dim);
   cursor: pointer;
-  background: var(--am-fill-1);
-  border: 1px solid var(--am-line-soft);
+  background: none;
+  border: 0;
+
+  /* Ничего не красит: держит круглым только кольцо :focus-visible. */
   border-radius: var(--am-r-cap);
-  transition:
-    color var(--am-fast) var(--am-ease),
-    background-color var(--am-fast) var(--am-ease),
-    border-radius var(--am-mid) var(--am-ease);
+  transition: color var(--am-fast) var(--am-ease);
 }
 
 .am-sheet__close:hover,
 .am-sheet__close:focus-visible {
   color: var(--am-text);
-  background: var(--am-fill-2);
-  border-radius: var(--am-r-drop);
 }
 
-/* Символ поднимается вместе с формой, но своим слоем: центровку держит
-   place-items родителя, и сдвиг её не сбивает. */
+/* Знак поднят над цветком: тот лежит своим слоем, а по правилам рисования
+   слой накрывает обычное содержимое. Центровку держит place-items родителя,
+   и сдвиг её не сбивает. */
 .am-sheet__close > span {
+  position: relative;
   display: block;
   transition: transform var(--am-fast) var(--am-ease);
 }
