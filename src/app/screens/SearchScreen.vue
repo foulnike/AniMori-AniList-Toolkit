@@ -5,15 +5,17 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
+import { setupVideoSources } from '@/api/video-sources'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { searchCatalog } from '@/core/media-search'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
+import { peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
 import { navigate } from '../router'
-import { toTileRow, type TileRow } from '../tile-row'
+import { toPlayAsk, toTileRow, type TileRow } from '../tile-row'
 
 /** Пауза после последнего нажатия: каждая буква в сеть — сожжённый темп. */
 const TYPING_PAUSE_MS = 300
@@ -26,6 +28,13 @@ const TITLE_CHUNK = 10
  * а каждая строка стоит отдельного похода к источнику через очередь темпа.
  */
 const TITLE_DEPTH = 20
+
+/**
+ * Скольким верхним строкам добирать метку доступности сетью. Склад поднимается
+ * для всей выдачи даром, а в сеть идёт только верх: строка стоит вопроса
+ * к каждому источнику, и полная страница выдачи съела бы очередь темпа.
+ */
+const PLAY_DEPTH = 10
 
 /** Сколько плиток-заглушек показать, пока идёт первый ответ. */
 const HOLD_COUNT = 12
@@ -43,6 +52,7 @@ const asked = computed(() => word.value.trim())
 /** Номера идущих работ: ответ на устаревший вопрос в выдачу не попадает. */
 let run = 0
 let titleRun = 0
+let playRun = 0
 let timer: ReturnType<typeof setTimeout> | null = null
 
 /** Найденные выписки этого показа: по ним плитки перерисовываются с названиями. */
@@ -82,6 +92,41 @@ async function fillTitles(): Promise<void> {
   } catch (e) {
     // Без перевода выдача останется на латинице — это не повод ругаться на экране.
     Logger('WARN', 'Поиск: названия добрать не вышло', e)
+  }
+}
+
+/**
+ * Добирает метки доступности. Сначала склад — он отвечает даром и разом по всей
+ * выдаче, — и только потом сеть, и то верхним строкам. Метка нужна здесь больше
+ * всего: половину каталога наши источники не показывают, и без неё человек
+ * узнаёт об этом только внутри плеера.
+ */
+async function fillPlay(): Promise<void> {
+  const mine = ++playRun
+  if (briefs.length === 0) return
+
+  try {
+    const primed = await primePlayable(briefs.map((brief) => brief.mediaId))
+    if (mine !== playRun) return
+    if (primed > 0) redraw()
+
+    const wanted = briefs
+      .filter((brief) => peekPlayable(brief.mediaId) === null)
+      .slice(0, PLAY_DEPTH)
+      .map((brief) => toPlayAsk(brief))
+
+    if (wanted.length === 0) return
+
+    // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
+    setupVideoSources()
+
+    await warmPlayable(wanted)
+    if (mine !== playRun) return
+
+    redraw()
+  } catch (e) {
+    // Без метки выдача живая: плитка про доступность просто молчит.
+    Logger('WARN', 'Поиск: метки доступности не доехали', e)
   }
 }
 
@@ -140,6 +185,7 @@ async function search(add = false): Promise<void> {
   }
 
   void fillTitles()
+  void fillPlay()
 }
 
 /** Набор слова: запрос уходит после паузы, а не на каждую букву. */
@@ -180,6 +226,7 @@ onBeforeUnmount(() => {
   timer = null
   run++
   titleRun++
+  playRun++
 })
 </script>
 
@@ -235,6 +282,7 @@ onBeforeUnmount(() => {
         :note="row.note"
         :done="row.done"
         :soon="row.soon"
+        :play="row.play"
         :adult="row.adult"
         @open="open(row.mediaId)"
       />
