@@ -352,6 +352,9 @@ watch(mediaId, () => {
           </div>
         </div>
 
+        <!-- Признак онгоинга окну нужен для автозакладки: у идущего сезона
+             потолок счёта — последняя вышедшая серия, а не конец истории,
+             и дошёдший до края счёт ещё не значит «просмотрено». -->
         <EntrySheet
           v-if="sheetOpen"
           :title="mainTitle"
@@ -359,6 +362,7 @@ watch(mediaId, () => {
           :score10="score10"
           :progress="progress"
           :parts-total="partsTotal"
+          :ongoing="card.airingEpisode !== null"
           :repeat="repeat"
           :started-at="startedAt"
           :completed-at="completedAt"
