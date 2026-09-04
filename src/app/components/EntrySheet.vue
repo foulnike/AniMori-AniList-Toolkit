@@ -16,10 +16,19 @@
 // Онгоингу закладка не ставится. Потолок счёта — это partsTotal, а он
 // у идущего сезона равен не обещанному итогу, а числу уже вышедших
 // серий: досмотреть вышедшее не значит закончить историю.
+//
+// ДАТЫ — СВОИМ КАЛЕНДАРЁМ
+//
+// Родное поле даты рисовал движок: серый системный календарь посереди
+// стеклянного окна, чёрный значок календаря, поле ввода с своим
+// порядком дня и месяца по языку системы. Теперь дату берёт DatePick:
+// один календарь на все темы, по-русски и с «Сегодня»/«Стереть» внутри,
+// поэтому внешняя кнопка «Сегодня» рядом с полем больше не нужна.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { partsWord, statusList, statusWord } from '../labels'
 
+import DatePick from './DatePick.vue'
 import SakuraBloom from './SakuraBloom.vue'
 
 /** Шаг оценки. Десятибалльная шкала у AniList дробная, половины достаточно. */
@@ -181,12 +190,12 @@ function today(): string {
 }
 
 /** Пустая строка наружу значит «стереть дату»: так договорились с коллекцией. */
-function onStarted(event: Event): void {
-  emit('startedAt', (event.target as HTMLInputElement).value)
+function onStarted(value: string): void {
+  emit('startedAt', value)
 }
 
-function onCompleted(event: Event): void {
-  emit('completedAt', (event.target as HTMLInputElement).value)
+function onCompleted(value: string): void {
+  emit('completedAt', value)
 }
 
 function sendNotes(): void {
@@ -382,42 +391,12 @@ onBeforeUnmount(() => {
 
         <section class="am-field">
           <span class="am-field__name">Начато</span>
-          <div class="am-date-row">
-            <input
-              class="am-input am-date"
-              type="date"
-              :value="startedAt ?? ''"
-              @change="onStarted"
-            />
-            <button
-              v-tip="'Поставить сегодняшний день'"
-              class="am-btn am-btn--ghost am-date__now"
-              type="button"
-              @click="emit('startedAt', today())"
-            >
-              Сегодня
-            </button>
-          </div>
+          <DatePick :value="startedAt" title="Начато" @pick="onStarted" />
         </section>
 
         <section class="am-field">
           <span class="am-field__name">Закончено</span>
-          <div class="am-date-row">
-            <input
-              class="am-input am-date"
-              type="date"
-              :value="completedAt ?? ''"
-              @change="onCompleted"
-            />
-            <button
-              v-tip="'Поставить сегодняшний день'"
-              class="am-btn am-btn--ghost am-date__now"
-              type="button"
-              @click="emit('completedAt', today())"
-            >
-              Сегодня
-            </button>
-          </div>
+          <DatePick :value="completedAt" title="Закончено" @pick="onCompleted" />
         </section>
 
         <section class="am-field am-field--wide">
@@ -738,63 +717,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-
-.am-date-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-/* Поле даты одето под панель. Сам выпадающий календарь рисует движок. */
-.am-date {
-  flex: 1;
-  min-height: var(--am-touch);
-  padding: 9px 14px;
-  color: var(--am-text);
-  background: var(--am-fill-2);
-  border-radius: var(--am-r-m);
-}
-
-.am-date:hover {
-  background: var(--am-hover);
-  border-color: rgb(var(--am-accent-rgb) / 0.5);
-}
-
-.am-date__now {
-  flex: 0 0 auto;
-}
-
-.am-date::-webkit-datetime-edit {
-  color: var(--am-text);
-}
-
-.am-date::-webkit-datetime-edit-fields-wrapper {
-  padding: 0;
-}
-
-.am-date::-webkit-datetime-edit-text {
-  padding: 0 2px;
-  color: var(--am-faint);
-}
-
-.am-date::-webkit-calendar-picker-indicator {
-  padding: 4px;
-  cursor: pointer;
-  border-radius: var(--am-r-s);
-  opacity: 0.55;
-}
-
-.am-date::-webkit-calendar-picker-indicator:hover {
-  background: var(--am-fill-3);
-  opacity: 1;
-}
-
-/* Значок календаря родной и чёрный: на тёмных темах его приходится
-   выворачивать, на светлой же инверсия делала его белым на белом. */
-html[data-am-skin='dark'] .am-date::-webkit-calendar-picker-indicator,
-html[data-am-skin='amoled'] .am-date::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(1.4);
 }
 
 /* Заметка не круглая: скругление полей ввода на большом поле смотрится нелепо. */
