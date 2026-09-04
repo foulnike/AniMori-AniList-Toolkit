@@ -21,11 +21,25 @@
 // Осталось одно число — сколько записей под ударом, — и оно единственное,
 // чего из подписей не узнать.
 //
+// ЗАПИСЬ ПОВЕРХ НЕЗНАКОМОЙ КОПИИ СПРАШИВАЕТ
+// Ядро отказывает третьим состоянием: не «ok» и не ошибка, а вопрос —
+// в облаке лежит копия, которую писали не мы. Здесь этот отказ и становится
+// вопросом с размером и временем чужой копии: цифры дают понять, свежее
+// там или старее, а решение остаётся за человеком. Красной строкой такое
+// показывать нельзя — это не поломка, и пугать здесь нечем.
+//
 // Оформление живёт в settings-screen.css — так же, как у карточки и плеера.
 import { onMounted, ref } from 'vue'
 
 import { Bridge } from '@/bridge'
-import { checkPlace, CLOUD_PATH, copyInfo, pullCopy, saveCopy } from '@/core/cloud'
+import {
+  checkPlace,
+  CLOUD_PATH,
+  copyInfo,
+  pullCopy,
+  saveCopy,
+  type CloudStranger,
+} from '@/core/cloud'
 import {
   eachEntry,
   entryCount,
@@ -192,6 +206,13 @@ const cloudBusy = ref(false)
 
 /** Спрошено ли подтверждение перед тем, как копия ляжет поверх списка. */
 const askingCloud = ref(false)
+
+/**
+ * Незнакомая копия, найденная перед записью. null — вопроса нет. Хранится
+ * сама находка, а не флажок: размер и время чужой копии и есть то, по чему
+ * человек решает, замещать её или сперва забрать.
+ */
+const strangerAsk = ref<CloudStranger | null>(null)
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -435,6 +456,13 @@ function sizeText(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`
 }
 
+/// Чужая копия одной строкой: размер и время правки. Ровно те два числа,
+/// по которым видно, свежее там или старее нашего.
+function strangerText(found: CloudStranger): string {
+  const when = found.modified === null ? '' : ` · ${whenText(Date.parse(found.modified))}`
+  return `${sizeText(found.bytes)}${when}`
+}
+
 /**
  * Спрашивает облако, что там лежит. Отказ здесь не кричит: это строка
  * факта, а не ответ на нажатие, и красная надпись при открытии настроек
@@ -507,24 +535,54 @@ function onCloudHelp(): void {
 }
 
 /**
- * Сохранение копии. Метка устройства идёт в файл, чтобы потом было видно,
+ * Запись копии. Метка устройства идёт в файл, чтобы потом было видно,
  * с какой машины копия: на ТВ это единственный способ понять, свежая ли она.
+ *
+ * Отказ разбирается на два разных: незнакомая копия — вопрос и живёт
+ * в своём узле, всё прочее — ошибка красной строкой.
  */
-function onCloudSave(): void {
-  void cloudGuard(async () => {
-    cloudNote.value = ''
+async function writeCopy(force: boolean): Promise<void> {
+  cloudNote.value = ''
 
-    const done = await saveCopy(system)
-    if (!done.ok) {
-      cloudError.value = done.problem
+  const done = await saveCopy(system, force)
+  if (!done.ok) {
+    if (done.stranger !== undefined) {
+      strangerAsk.value = done.stranger
       return
     }
 
-    cloudSavedAt.value = done.value.savedAt
-    cloudSavedCount.value = done.value.count
-    cloudNote.value = `Копия сохранена: записей ${done.value.count}, ${sizeText(done.value.bytes)}.`
-    await readCloud()
-  })
+    cloudError.value = done.problem
+    return
+  }
+
+  strangerAsk.value = null
+  cloudSavedAt.value = done.value.savedAt
+  cloudSavedCount.value = done.value.count
+  cloudNote.value = `Копия сохранена: записей ${done.value.count}, ${sizeText(done.value.bytes)}.`
+  await readCloud()
+}
+
+function onCloudSave(): void {
+  strangerAsk.value = null
+  void cloudGuard(() => writeCopy(false))
+}
+
+/** «Заменить»: та же запись, но с явным разрешением затереть чужую копию. */
+function onCloudReplace(): void {
+  strangerAsk.value = null
+  void cloudGuard(() => writeCopy(true))
+}
+
+/// «Сначала забрать»: вопрос сменяется вопросом о способе, и ничего
+/// не записывается. Человек почти всегда хочет именно этого — сперва
+/// увидеть чужие записи у себя, а уже потом отдавать своё.
+function onStrangerPull(): void {
+  strangerAsk.value = null
+  onCloudAsk()
+}
+
+function onStrangerCancel(): void {
+  strangerAsk.value = null
 }
 
 /** Нажатие «Забрать копию»: сначала вопрос — копия ляжет поверх живого списка. */
@@ -557,6 +615,11 @@ function onCloudPull(mode: PullMode): void {
     const got = done.value
     await readState()
 
+    // Прочитанная копия теперь знакомая, и панель говорит о ней же:
+    // числа обновляет ядро, здесь остаётся их переспросить.
+    cloudSavedAt.value = settings.cloudSavedAt
+    cloudSavedCount.value = settings.cloudSavedCount
+
     const from = got.from.device === '' ? '' : ` Копия с устройства «${got.from.device}».`
     const lost = got.dropped > 0 ? ` Битых записей в копии: ${got.dropped} — их пропустили.` : ''
 
@@ -566,12 +629,18 @@ function onCloudPull(mode: PullMode): void {
         : `Копия приложена: всего ${got.total}, новых ${got.added}, ` +
           `обновлено ${got.updated}, своих правок сохранено ${got.kept}, ` +
           `только здесь ${got.onlyHere}.${from}${lost}`
+
+    await readCloud()
   })
 }
 
 /**
  * Отключение облака. Файл на Диске остаётся нетронутым: стирать чужое
  * хранилище по кнопке «отключить» программа не вправе.
+ *
+ * Память о времени правки стирается вместе с пропуском: с новым пропуском
+ * это уже может быть другой Диск, и прежняя метка выдала бы чужую копию
+ * за свою — ровно то, от чего сторож и поставлен.
  */
 function onCloudForget(): void {
   void cloudGuard(async () => {
@@ -581,6 +650,7 @@ function onCloudForget(): void {
     await saveSetting('cloudPlace', 'am_cloud_place', 'none')
     await saveSetting('cloudSavedAt', 'am_cloud_saved_at', 0)
     await saveSetting('cloudSavedCount', 'am_cloud_saved_count', 0)
+    await saveSetting('cloudSeenModified', 'am_cloud_seen_modified', '')
 
     cloudPlace.value = 'none'
     cloudSaved.value = false
@@ -589,6 +659,7 @@ function onCloudForget(): void {
     cloudThere.value = ''
     tokenDraft.value = ''
     tokenOpen.value = false
+    strangerAsk.value = null
 
     cloudNote.value = 'Облако отключено. Файл копии на Диске остался нетронутым.'
   })
@@ -966,7 +1037,8 @@ onMounted(() => {
 
           <template v-if="cloudPlace === 'yandex'">
             <p v-if="!cloudSaved || tokenOpen" class="am-meta">
-              Пропуск выдаёт сам Яндекс: заведите приложение с правом на Диск на
+              Пропуск выдаёт сам Яндекс: заведите приложение с правом на папку приложения на Диске
+              на
               <button class="am-link" type="button" @click="onCloudHelp">oauth.yandex.com</button>
               и вставьте выданный токен сюда. Он останется на этом устройстве.
             </p>
@@ -1013,7 +1085,7 @@ onMounted(() => {
 
             <div class="am-row">
               <button
-                v-tip="'Записать нынешний список в облако поверх прежней копии'"
+                v-tip="'Записать нынешний список в облако. Незнакомую копию не затрёт без спроса'"
                 class="am-btn"
                 type="button"
                 :disabled="!cloudOn() || cloudBusy"
@@ -1049,6 +1121,40 @@ onMounted(() => {
               >
                 Отключить облако
               </button>
+            </div>
+
+            <!-- Незнакомая копия: тот же узел вопроса, что и у переноса, но
+                 порядок кнопок обратный. Первым стоит «Сначала забрать»:
+                 замена здесь необратима для чужих записей, и предлагать её
+                 главной кнопкой значило бы толкать под руку. -->
+            <div v-if="strangerAsk" class="am-ask">
+              <p class="am-ask__text">
+                В облаке копия, которую писали не мы: {{ strangerText(strangerAsk) }}. Здесь
+                записей: {{ listCount }}.
+              </p>
+
+              <div class="am-row">
+                <button
+                  class="am-btn"
+                  type="button"
+                  :disabled="cloudBusy"
+                  @click="onStrangerPull"
+                >
+                  Сначала забрать
+                </button>
+                <button
+                  v-tip="'Записать свой список поверх. Чужую копию не вернуть'"
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="cloudBusy"
+                  @click="onCloudReplace"
+                >
+                  Заменить копию
+                </button>
+                <button class="am-btn am-btn--ghost" type="button" @click="onStrangerCancel">
+                  Отмена
+                </button>
+              </div>
             </div>
 
             <!-- Копия ложится поверх живого списка: спрашиваем всегда, теми же
