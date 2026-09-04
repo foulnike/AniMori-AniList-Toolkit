@@ -147,6 +147,17 @@ const editRow = computed<SnapshotEntry | undefined>(() => {
   return editId.value > 0 ? getEntry(editId.value) : undefined
 })
 
+/**
+ * Закладка записи для окна правки.
+ *
+ * У записи в памяти закладки может не быть: снимок допускает пустоту, потому
+ * что запись могла приехать из чужого файла переноса. Окну же нужна строка,
+ * и пустая его устраивает — она просто не подсветит ни одну из кнопок,
+ * а человек выберет закладку сам. Подставлять сюда открытую закладку списка
+ * нельзя: окно соврало бы о том, что у записи уже есть закладка.
+ */
+const editStatus = computed<string>(() => editRow.value?.status ?? '')
+
 /** Облик правимого аниме из склада: оттуда берётся потолок счёта серий. */
 const editLook = computed(() => (editId.value > 0 ? peekLook(editId.value) : null))
 
@@ -582,7 +593,7 @@ onBeforeUnmount(() => {
     <EntrySheet
       v-if="editRow"
       :title="editName"
-      :status="editRow.status"
+      :status="editStatus"
       :score10="editRow.score10"
       :progress="editRow.progress"
       :parts-total="editParts"
