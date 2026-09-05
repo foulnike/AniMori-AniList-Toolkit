@@ -6,8 +6,13 @@
 // AniList служит источником переноса, а не хранилищем, поэтому очереди
 // правок и отправщика больше нет, а перенос по умолчанию сливает список,
 // а не замещает его.
+//
+// Источников переноса два: AniList по входу и Шикимори по нику. Оба кладут
+// записи одного вида и ходят через одни и те же слияние и замещение: второй
+// набор правил для второго источника разошёлся бы с первым на первой же правке.
 
 import { fetchUserList, fetchViewer, type RawListEntry } from '../api/anilist-list'
+import { importShikiList } from '../api/shikimori-list'
 import { Logger } from '../utils/logger'
 import {
   emptySnapshot,
@@ -80,6 +85,26 @@ export interface PullResult {
 }
 
 /**
+ * Итог переноса с Шикимори. К обычным числам добавлены три свои: сколько
+ * записей было у источника, сколько из них нашли пару у AniList и какие не нашли.
+ *
+ * Без них разница между «у меня было 500 тайтлов» и «переехало 480» выглядела бы
+ * поломкой программы, а не тем, что есть: этих тайтлов нет у AniList.
+ */
+export interface ShikiPullResult extends PullResult {
+  /** Ник в том виде, в каком его пишет сам Шикимори. */
+  nick: string
+  /** Сколько закладок отдал Шикимори. */
+  read: number
+  /** Сколько из них привязалось к номерам AniList и доехало до памяти. */
+  matched: number
+  /** Сколько осталось без пары. */
+  lost: number
+  /** Названия потерянного, несколько штук для разговора с человеком. */
+  lostTitles: string[]
+}
+
+/**
  * Записи по номеру тайтла. Словарь, а не массив: карточка и каждая правка
  * ищут запись по номеру, а обход тысяч записей на приставке виден глазом.
  */
@@ -99,6 +124,16 @@ let initInFlight: Promise<number> | null = null
 
 /** Идущий перенос: второй вызов ждёт первый, а не шлёт свой запрос. */
 let refreshInFlight: Promise<PullResult> | null = null
+
+/**
+ * Идущий перенос с Шикимори. Страж свой, а не общий с refreshInFlight:
+ * источники разные и итоги разные, а отдать нажавшему «Перенести с Шикимори»
+ * чужой итог переноса с AniList значило бы соврать в числах.
+ *
+ * Два разных переноса одновременно всё равно не случатся: оба идут с одного
+ * экрана, и кнопки там гаснут на время работы.
+ */
+let shikiInFlight: Promise<ShikiPullResult> | null = null
 
 /** Собирает снимок из памяти. Синхронно: хранилище ждёт готовый слепок. */
 function collectSnapshot(): UserSnapshot {
@@ -318,6 +353,63 @@ export async function refreshFromServer(mode: PullMode = 'merge'): Promise<PullR
     return await refreshInFlight
   } finally {
     refreshInFlight = null
+  }
+}
+
+/**
+ * Переносит список с Шикимори по нику. Правила те же, что у переноса
+ * с AniList: по умолчанию слияние, замещение — только по прямой просьбе.
+ *
+ * Сравнение по времени правки честно и здесь: Шикимори отдаёт настоящее
+ * время правки закладки, а не время ответа, и с нашей меткой оно сравнимо
+ * напрямую.
+ *
+ * Хозяин списка НЕ меняется и НЕ сбрасывается: хозяин — это счёт AniList,
+ * а Шикимори здесь источник записей, а не владелец списка. Поставь мы сюда
+ * чужой номер — следующий перенос с AniList счёл бы список чужим
+ * и заместил его целиком, унеся всё перенесённое.
+ *
+ * @param nick Ник на Шикимори или ссылка на профиль: разбор в shikimori-list.ts.
+ */
+export async function pullFromShikimori(
+  nick: string,
+  mode: PullMode = 'merge',
+): Promise<ShikiPullResult> {
+  if (shikiInFlight) return shikiInFlight
+
+  shikiInFlight = (async () => {
+    await initCollection()
+
+    // Сначала весь ответ целиком, и только потом память. Список читается
+    // в несколько заходов, и обрыв на полпути не должен оставить половину
+    // чужого списка вместо своего целого.
+    const got = await importShikiList(nick)
+
+    const done =
+      mode === 'replace' ? replaceFromServer(got.entries) : mergeFromServer(got.entries)
+
+    await saveSnapshotNow({ backup: true })
+    Logger(
+      'DB',
+      `Коллекция перенесена с Шикимори (${done.mode}, ${got.user.nick}): ` +
+        `всего ${done.total}, новых ${done.added}, обновлено ${done.updated}, ` +
+        `оставлено своих ${done.kept}, без пары ${got.lost}`,
+    )
+
+    return {
+      ...done,
+      nick: got.user.nick,
+      read: got.read,
+      matched: got.matched,
+      lost: got.lost,
+      lostTitles: got.lostTitles,
+    }
+  })()
+
+  try {
+    return await shikiInFlight
+  } finally {
+    shikiInFlight = null
   }
 }
 
