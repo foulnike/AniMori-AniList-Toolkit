@@ -79,6 +79,7 @@ import {
 import type { PullMode } from '@/core/collection'
 import { saveSetting, settings } from '@/core/settings'
 
+import BrandMark from './BrandMark.vue'
 import CloudHelp from './CloudHelp.vue'
 
 const props = defineProps<{
@@ -587,18 +588,13 @@ onMounted(() => {
          Справка стоит сразу за названием, а не у заголовка панели: вопрос
          «где взять пропуск» возникает у этой строки.
 
-         Знак нарисован, а не набран буквой: «Я» в рамке читалась заготовкой.
-         Цвет знака не наследуется сознательно: у фирменного знака свой цвет,
-         и подкрашивать его акцентом было бы неверно. -->
+         Знак берёт components/BrandMark.vue. Прежде «Я» была нарисована
+         здесь руками и с фирменной не совпадала; фирменного вектора Диска
+         в открытых наборах нет, поэтому узнаваемость даёт плита цвета
+         Яндекса, а глиф на ней — диск из lucide, в один штрих с остальными
+         значками панели. -->
     <div class="am-place">
-      <svg class="am-place__mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-        <rect width="24" height="24" rx="6" fill="#fc3f1d" />
-        <path
-          fill="#fff"
-          fill-rule="evenodd"
-          d="M16 4.8h-3.9c-2.5 0-4.2 1.6-4.2 4 0 1.8 1 3.1 2.7 3.7L7.9 19.2h2.7l2.6-6.2h0.7v6.2H16Zm-2.1 2.1h-1.7c-1.3 0-2.1 0.8-2.1 2 0 1.2 0.8 2 2.1 2h1.7Z"
-        />
-      </svg>
+      <BrandMark class="am-place__mark" name="yandex-disk" />
 
       <span class="am-place__text">
         <span class="am-place__name">Яндекс Диск</span>
