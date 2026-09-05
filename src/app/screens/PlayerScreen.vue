@@ -17,6 +17,14 @@
 // «уже развёрнуто» и складывал окно обратно: шапка и панель задач оставались
 // на месте. Верхний слой, который он давал, театру в body не нужен.
 //
+// КАДР УХОДИТ ИЗ ОКНА ДВУМЯ ПУТЯМИ
+// Картинка в картинке и трансляция лежат в player-cast.ts: оба умения живут
+// на теге <video>, а экрану остаются кнопка, подпись и порядок шагов.
+// Маленькое окно и театр исключают друг друга: перед уходом кадра в окошко
+// полный экран складывается, иначе развёрнутое окно накрыло бы окошко собой.
+// Кнопки картинки в картинке нет вовсе, когда движок её не умеет: кнопка,
+// которая умеет только жаловаться, хуже отсутствующей.
+//
 // Ссылка меняется в трёх случаях: другая серия, другая озвучка, другое
 // качество. Первые два начинают с запомненного места, третий — с текущей
 // секунды: иначе переключение на 480p выглядело бы как потеря просмотра.
@@ -43,6 +51,7 @@ import { Logger } from '@/utils/logger'
 
 import { currentRoute } from '../router'
 
+import { attachCast, type Cast, type CastState } from './player-cast'
 import { attachPlayback, type Playback } from './player-hls'
 import {
   CALM_DELAY_MS,
@@ -107,6 +116,7 @@ const SIGN = {
   rewind: 'M11.4 6v12L3 12zm9.6 0v12l-8.4-6z',
   ahead: 'M3 6l8.4 6L3 18zm9.6 0 8.4 6-8.4 6z',
   sound: 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4z',
+  pipIn: 'M13 12h6v4h-6z',
   againHead: 'M12 1.2l3.4 2.8L12 6.8z',
 } as const
 
@@ -116,19 +126,25 @@ const LINE = {
   cross: 'M15.6 9.6l4.8 4.8m0-4.8-4.8 4.8',
   full: 'M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5',
   small: 'M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5',
+  pip: 'M4 7h16v10H4z',
+  cast: 'M4 8V6h16v12h-8M4 12a6 6 0 0 1 6 6M4 15.5a2.5 2.5 0 0 1 2.5 2.5',
   again: 'M20 12a8 8 0 1 1-8-8',
   tick: 'M5 12.5l4.5 4.5L19 7.5',
   rows: 'M4 7h16M4 12h16M4 17h10',
   left: 'M15 5l-7 7 7 7',
 } as const
 
-/** Кнопка панели: подпись, знак и что делать. Разметка из этого списка одна. */
+/**
+ * Кнопка панели: подпись, знак и что делать. Разметка из этого списка одна.
+ * `off` — кнопке нечего делать, `on` — её умение включено прямо сейчас.
+ */
 interface Key {
   tip: string
   sign?: string
   line?: string
   main?: boolean
   off?: boolean
+  on?: boolean
   run: () => void
 }
 
@@ -154,6 +170,15 @@ const rate = ref(peekRate())
 
 /** Кадр во весь экран: театр в body и полный экран окна оболочки. */
 const wide = ref(false)
+
+/** Кадр ушёл в маленькое окно поверх всех программ. */
+const pipOn = ref(false)
+
+/** Умеет ли движок картинку в картинке: кнопки без умения быть не должно. */
+const pipReady = ref(false)
+
+/** Что с трансляцией. Считает player-cast, здесь только подпись кнопки. */
+const castState = ref<CastState>('off')
 
 /** Панель уехала: несколько секунд тишины и только во время игры. */
 const calm = ref(false)
@@ -207,6 +232,9 @@ const {
 /** Связь с hls.js живёт всю жизнь экрана: буферы тяжёлые. */
 let playback: Playback | null = null
 
+/** Кадр за пределами окна: тот же тег, та же жизнь, что и у потока. */
+let cast: Cast | null = null
+
 /** Ключ места остановки того, что сейчас открыто. */
 let spot = ''
 
@@ -232,7 +260,7 @@ const subLine = computed<string>(() => {
 })
 
 const coverStyle = computed<{ backgroundImage: string }>(() => ({
-  backgroundImage: cover.value === null ? 'none' : `url("${cover.value}")`,
+  backgroundImage: cover.value === null ? 'none' : `url(\"${cover.value}\")`,
 }))
 
 /** Заслонка нужна, пока кадра нет: чёрный прямоугольник ничего не говорит. */
@@ -260,6 +288,18 @@ const veilSpin = computed<boolean>(
 const qualityNow = computed<string>(
   () => qualities.value.find((quality) => quality.on)?.label ?? 'Качество',
 )
+
+/**
+ * Подпись кнопки трансляции. Обещать «на устройство» без устройства нельзя:
+ * пока приёмник не нашёлся, кнопка честно говорит про экран — системная
+ * панель зеркалит его целиком, а не одну серию.
+ */
+const castWord = computed<string>(() => {
+  if (castState.value === 'on') return 'Трансляция идёт'
+  if (castState.value === 'linking') return 'Подключаюсь к устройству…'
+  if (castState.value === 'ready') return 'Транслировать на устройство'
+  return 'Транслировать экран'
+})
 
 /** Кнопка пропуска: показывается только внутри своего отрезка. */
 const skip = computed<{ label: string; to: number } | null>(() => {
@@ -712,6 +752,43 @@ function doFullscreen(): void {
   void setWide(!wide.value)
 }
 
+/**
+ * Кадр в маленькое окно и обратно. Театр перед этим складывается: развёрнутое
+ * окно накрыло бы окошко собой, да и движок в ответ на полный экран сам гасит
+ * картинку в картинке — вышло бы нажатие без последствий.
+ */
+async function movePip(): Promise<void> {
+  const link = cast
+  if (link === null || veil.value) return
+
+  if (!pipOn.value && wide.value) await setWide(false)
+
+  // Ответ берём сразу, но правда всё равно за событием тега: окошко закрывают
+  // и своим крестиком, мимо наших кнопок.
+  pipOn.value = await link.togglePip()
+  wake()
+}
+
+function doPip(): void {
+  void movePip()
+}
+
+/**
+ * Трансляция. Устройство или зеркало экрана — решает player-cast, здесь только
+ * нажатие: подпись кнопки скажет, что из этого вышло.
+ */
+async function askCast(): Promise<void> {
+  const link = cast
+  if (link === null) return
+
+  wake()
+  await link.cast()
+}
+
+function doCast(): void {
+  void askCast()
+}
+
 /** Нажатие мимо меню закрывает его: так ведёт себя любое меню. */
 function onDown(event: PointerEvent): void {
   if (menu.value === '') return
@@ -752,21 +829,48 @@ const leftKeys = computed<Key[]>(() => [
   { tip: 'Следующая серия', sign: SIGN.next, off: !hasNext.value, run: nextEpisode },
 ])
 
-/** Правый кластер: ссылка и полный экран. Полный экран всегда последний. */
-const rightKeys = computed<Key[]>(() => [
-  { tip: 'Взять ссылку заново', sign: SIGN.againHead, line: LINE.again, run: refresh },
-  {
+/**
+ * Правый кластер: ссылка, два пути кадра из окна и полный экран. Полный экран
+ * всегда последний. Картинки в картинке в списке нет вовсе, когда движок её
+ * не умеет: кнопка, умеющая только жаловаться, хуже отсутствующей.
+ */
+const rightKeys = computed<Key[]>(() => {
+  const keys: Key[] = [
+    { tip: 'Взять ссылку заново', sign: SIGN.againHead, line: LINE.again, run: refresh },
+  ]
+
+  if (pipReady.value) {
+    keys.push({
+      tip: pipOn.value ? 'Вернуть кадр в окно' : 'Картинка в картинке',
+      sign: SIGN.pipIn,
+      line: LINE.pip,
+      on: pipOn.value,
+      run: doPip,
+    })
+  }
+
+  keys.push({
+    tip: castWord.value,
+    line: LINE.cast,
+    on: castState.value !== 'off',
+    run: doCast,
+  })
+
+  keys.push({
     tip: wide.value ? 'Свернуть кадр' : 'Во весь экран',
     line: wide.value ? LINE.small : LINE.full,
     run: doFullscreen,
-  },
-])
+  })
+
+  return keys
+})
 
 /** Одно место, где желание превращается в действие. */
 function act(intent: PlayerIntent): void {
-  // Под заслонкой играть нечего: пускаем только выход и размер кадра. Клавиши
-  // доходят с окна, а не с кнопок, и спрятанная панель их не держит.
-  if (veil.value && intent !== 'exit' && intent !== 'fullscreen') return
+  // Под заслонкой играть нечего: пускаем выход, размер кадра и трансляцию —
+  // системной панели кадр не нужен, она зеркалит весь экран. Клавиши доходят
+  // с окна, а не с кнопок, и спрятанная панель их не держит.
+  if (veil.value && intent !== 'exit' && intent !== 'fullscreen' && intent !== 'cast') return
 
   switch (intent) {
     case 'toggle':
@@ -811,6 +915,12 @@ function act(intent: PlayerIntent): void {
     case 'fullscreen':
       doFullscreen()
       return
+    case 'pip':
+      doPip()
+      return
+    case 'cast':
+      doCast()
+      return
     case 'exit':
       doExit()
       return
@@ -849,6 +959,19 @@ onMounted(() => {
         trouble.value = text
       },
     })
+
+    // Умения кадра вне окна спрашиваются один раз: движок по ходу дела мнения
+    // не меняет, а вот приёмники в сети приезжают и уезжают сами.
+    cast = attachCast(el, {
+      onPip: (on) => {
+        pipOn.value = on
+      },
+      onCast: (state) => {
+        castState.value = state
+      },
+    })
+    pipReady.value = cast.pipReady
+
     el.addEventListener('timeupdate', onTime)
     el.addEventListener('ended', onEnded)
     el.addEventListener('play', onPlay)
@@ -929,6 +1052,11 @@ onBeforeUnmount(() => {
 
   // Уходим с экрана — возвращаем окно: полный экран был нужен кадру, не спискам.
   void wantWindowWide(false)
+
+  // Маленькое окно уходит раньше потока: оно живёт поверх всех программ
+  // и переживёт и экран, и саму серию.
+  cast?.close()
+  cast = null
 
   playback?.close()
   playback = null
@@ -1172,13 +1300,17 @@ onBeforeUnmount(() => {
                     <Icon :line="LINE.rows" />
                   </button>
 
+                  <!-- Правые кнопки горят, когда их умение включено: кадр ушёл
+                       в окошко, трансляция нашла приёмник или уже идёт. -->
                   <button
                     v-for="key in rightKeys"
                     :key="key.tip"
                     class="am-play__key"
+                    :class="{ 'am-play__key--on': key.on === true }"
                     type="button"
                     :data-tip="key.tip"
                     :aria-label="key.tip"
+                    :aria-pressed="key.on"
                     @click="key.run()"
                   >
                     <Icon :d="key.sign" :line="key.line" />
