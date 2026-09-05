@@ -31,6 +31,10 @@
 // шли сплошняком, и граница между ними существовала только в голове того,
 // кто это писал.
 //
+// Знаки сервисов рисует components/BrandMark.vue: вектор он берёт из файлов
+// в src/app/brand, взятых у самих сервисов. Прежде они были нарисованы
+// вручную прямо здесь, и кривизна букв была видна невооружённым глазом.
+//
 // Ошибки и итоги у них раздельные. Одна общая строка на две половины врала бы
 // первым же промахом: отказ Шикимори читался бы как отказ AniList.
 //
@@ -71,6 +75,7 @@ import {
   submitToken,
   type LoginStart,
 } from '../auth/session'
+import BrandMark from '../components/BrandMark.vue'
 import CloudBox from '../components/CloudBox.vue'
 import { saveXmlFile } from '../save-file'
 
@@ -562,20 +567,11 @@ onMounted(() => {
         <div class="am-panel am-box">
           <h3 class="am-h3">Импорт списка</h3>
 
-          <!-- AniList. Знак фирменный и нарисован вектором: буква «A» белым,
-               «L» фирменной синевой на тёмной плашке. -->
+          <!-- AniList. Знак берёт components/BrandMark.vue из файла
+               src/app/brand/anilist.svg: фирменный вектор, а не наш рисунок. -->
           <div class="am-serv">
             <div class="am-serv__head">
-              <svg class="am-serv__logo" viewBox="0 0 24 24" aria-hidden="true">
-                <rect width="24" height="24" rx="6" fill="#152232" />
-                <rect x="15.5" y="5" width="3.2" height="14" rx="1.1" fill="#02a9ff" />
-                <rect x="15.5" y="15.8" width="5.7" height="3.2" rx="1.1" fill="#02a9ff" />
-                <path
-                  fill="#ffffff"
-                  fill-rule="evenodd"
-                  d="M8 5h2.5l4.4 14h-3.2l-1 -3.1H7.7l-1 3.1H3.4Z M9.25 9 7.85 13.2h2.8Z"
-                />
-              </svg>
+              <BrandMark class="am-serv__logo" name="anilist" />
 
               <span class="am-serv__text">
                 <span class="am-serv__name">AniList</span>
@@ -694,27 +690,11 @@ onMounted(() => {
             </template>
           </div>
 
-          <!-- Шикимори. Знак — иероглиф 示 кистью на светлой плашке, как
-               на самом сайте. Вход не нужен: открытый профиль сайт отдаёт
-               любому по нику. -->
+          <!-- Шикимори. Знак тоже фирменный, из src/app/brand/shikimori.svg.
+               Вход не нужен: открытый профиль сайт отдаёт любому по нику. -->
           <div class="am-serv">
             <div class="am-serv__head">
-              <svg class="am-serv__logo" viewBox="0 0 24 24" aria-hidden="true">
-                <rect width="24" height="24" rx="6" fill="#aad3e7" />
-                <g
-                  fill="none"
-                  stroke="#16202c"
-                  stroke-width="1.9"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M8.6 6.5h6.8" />
-                  <path d="M4.9 10.7h14.2" />
-                  <path d="M12 10.7v6.8" />
-                  <path d="M9 13.4 7.6 17.5" />
-                  <path d="M15 13.4 16.4 17.5" />
-                </g>
-              </svg>
+              <BrandMark class="am-serv__logo" name="shikimori" />
 
               <span class="am-serv__text">
                 <span class="am-serv__name">Шикимори</span>
