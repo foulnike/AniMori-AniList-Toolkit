@@ -380,8 +380,8 @@ const tauriClipboard: IClipboard = {
 
 /**
  * Оболочка: свои команды из lib.rs плюс история WebView. Перезагрузка, внешние
- * ссылки и полный экран — только командами. Команды требуют разрешений:
- * build.rs и capabilities.
+ * ссылки, полный экран и панель трансляции — только командами. Команды требуют
+ * разрешений: build.rs и capabilities.
  */
 const tauriShell: IShell = {
   async reload(): Promise<void> {
@@ -407,6 +407,16 @@ const tauriShell: IShell = {
   async toggleFullscreen(): Promise<boolean> {
     // Ответ команды — состояние ПОСЛЕ переключения, его и отдаём как есть.
     return await invoke<boolean>('animori_toggle_fullscreen')
+  },
+
+  async castPanel(): Promise<void> {
+    // Своя команда, а не animori_open_external: там разрешены только http и https,
+    // а панель системы живёт по своей схеме. Расширять ту проверку значило бы отдать
+    // окну право запускать любое приложение системы по любому адресу.
+    //
+    // Ответа нет намеренно: какая из двух панелей открылась, знает только Rust,
+    // он же пишет это в журнал. Окну важен один факт: открылось или нет.
+    await invoke('animori_cast_panel')
   },
 }
 
