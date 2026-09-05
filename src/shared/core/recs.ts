@@ -8,10 +8,14 @@
 // из общего обещания. Раньше это были три захода подряд через общую паузу
 // клиента, и витрина собиралась ступеньками по несколько секунд.
 //
-// ЛЕНТА ДОБИРАЕТ, А НЕ ОТДАЁТ СТРАНИЦУ
+// ЛЕНТА ОТДАЁТ РОВНУЮ ПОРЦИЮ
 // Своё, скрытое и взрослое выбрасываются после ответа сервера, и страница
-// из тридцати тайтлов у человека с большим списком легко тает до трёх.
+// из сорока аниме у человека с большим списком легко тает до трёх.
 // Поэтому «Показать ещё» просит не страницу, а нужное число плиток.
+//
+// И ровно нужное: набранное сверх порции ждёт в остатке ленты, а не едет
+// в сетку случайным хвостом. Сетка раскладывает плитки по рядам, и лишние
+// три-пять штук оставляли нижний ряд недобранным всю ленту насквозь.
 
 import { Bridge } from '@/bridge'
 import type { MediaBrief } from '../api/anilist-media'
@@ -90,7 +94,7 @@ async function loadHidden(): Promise<Set<number>> {
   return hidden
 }
 
-/** Прячет тайтл из рекомендаций насовсем. Запись идёт вдогонку за памятью. */
+/** Прячет аниме из рекомендаций насовсем. Запись идёт вдогонку за памятью. */
 export async function hideRec(mediaId: number): Promise<void> {
   const known = await loadHidden()
   known.add(mediaId)
@@ -281,25 +285,36 @@ export function tagChoices(): Promise<CatalogTag[]> {
 export interface FeedRun {
   pick: CatalogPick
   page: number
+  /** Каталог кончился и остаток роздан: кнопка «Показать ещё» больше не нужна. */
   done: boolean
+  /** Страницы сервера исчерпаны. Отдельно от `done`: остаток ещё может лежать. */
+  over: boolean
   seen: Set<number>
+  /** Набранное сверх порции: следующее нажатие начинает с него, а не с сети. */
+  rest: MediaBrief[]
 }
 
 /** Новая лента под отбор. Страницы ещё не брали. */
 export function newFeed(pick: CatalogPick): FeedRun {
-  return { pick, page: 0, done: false, seen: new Set() }
+  return { pick, page: 0, done: false, over: false, seen: new Set(), rest: [] }
 }
 
 /**
- * Следующая порция ленты: не менее `want` плиток, пока каталог не кончился.
+ * Следующая порция ленты: ровно `want` плиток, пока каталог не кончился.
+ *
+ * Ровно — это не придирка: порция подобрана под целое число рядов сетки,
+ * и случайный хвост сверх неё оставлял нижний ряд наполовину пустым.
+ * Лишнее не выбрасывается и не спрашивается вторично: оно ждёт в остатке
+ * ленты, и следующее нажатие часто обходится вовсе без сети.
  *
  * Пустой ответ при `done === false` — не конец ленты, а неудачный заход:
  * кнопка остаётся, и следующее нажатие продолжит с той же страницы.
  */
 export async function feedMore(run: FeedRun, want: number): Promise<MediaBrief[]> {
-  const out: MediaBrief[] = []
+  // Остаток прежнего захода идёт вперед сети: он уже отобран и проверен.
+  const out: MediaBrief[] = run.rest.splice(0, want)
 
-  for (let attempt = 0; attempt < FEED_TRIES && !run.done && out.length < want; attempt++) {
+  for (let attempt = 0; attempt < FEED_TRIES && !run.over && out.length < want; attempt++) {
     const page = run.page + 1
 
     let reply: FeedPage
@@ -312,14 +327,20 @@ export async function feedMore(run: FeedRun, want: number): Promise<MediaBrief[]
     }
 
     run.page = page
-    if (!reply.hasNext) run.done = true
+    if (!reply.hasNext) run.over = true
 
     for (const brief of await visible(reply.items)) {
       if (run.seen.has(brief.mediaId)) continue
       run.seen.add(brief.mediaId)
-      out.push(brief)
+
+      // Сверх порции — в остаток. В виденные оно уже записано: иначе
+      // следующая страница привезла бы то же вторым плитками.
+      if (out.length < want) out.push(brief)
+      else run.rest.push(brief)
     }
   }
 
+  // Лента закрывается только когда кончился и каталог, и остаток.
+  run.done = run.over && run.rest.length === 0
   return out
 }
