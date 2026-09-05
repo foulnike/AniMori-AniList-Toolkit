@@ -4,15 +4,18 @@
 // дело документации, а не карточки настроек.
 //
 // РАСКЛАДКА
-// Панели лежат прямо в сетке и разведены по местам через grid-template-areas,
-// а не по трём столбцам-обёрткам. Причина простая: на половине экрана колонок
-// две, на весь экран — три, и столбцы-обёртки пришлось бы перетасовывать
-// разметкой под каждый размер. Имена мест и порядок живут в settings-screen.css,
-// здесь у каждой панели только своё имя.
+// Панели собраны в три колонки-обёртки. Раньше они лежали прямо в сетке
+// и разводились по местам через grid-template-areas — и сетка ставила их
+// в общие строки: высокая панель облака держала строку, а под «Оформлением»
+// и «Импортом» до самого низа зияла пустота. Колонка-обёртка такого не умеет:
+// каждая набирает свои панели встык, и высота соседней ей безразлична.
 //
-// На фуллскрине справа налево: облачная копия, импорт со своими данными,
-// оформление со справкой. Раньше колонок было две при любой ширине, и на
-// широком окне по сторонам оставались пустые поля.
+// Порядок и ширина колонок под каждый размер окна живут в settings-screen.css,
+// поэтому разметка здесь одна на все случаи: на фуллскрине колонок три,
+// на половине экрана две, в узком окне одна.
+//
+// Справа налево на фуллскрине: облачная копия, импорт со своими данными,
+// оформление со справкой.
 //
 // Внутри панели данных тот же порядок: сначала числа, потом необратимое
 // одной строкой, потом выгрузка своим узлом. Пояснения убраны сознательно:
@@ -449,239 +452,242 @@ onMounted(() => {
 
 <template>
   <section class="am-page">
-    <!-- Панели лежат прямо в сетке: места и порядок под каждую ширину окна
-         разведены в settings-screen.css через grid-template-areas. -->
+    <!-- Три колонки-обёртки: каждая набирает свои панели встык, и высота
+         соседней ей безразлична. Порядок и ширина колонок под каждый размер
+         окна живут в settings-screen.css. -->
     <div class="am-set">
-      <!-- Импорт списка: откуда список попадает сюда. AniList работает,
-           Шикимори стоит заглушкой — сделаем по тому же образцу. -->
-      <div class="am-panel am-box am-set__pull">
-        <div class="am-bar">
-          <h3 class="am-h3">Импорт списка</h3>
-          <span class="am-bar__gap" />
-          <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
-            <span class="am-flag__dot" aria-hidden="true" />
-            AniList: {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
-          </span>
-        </div>
+      <div class="am-set__col am-set__col--main">
+        <!-- Импорт списка: откуда список попадает сюда. AniList работает,
+             Шикимори стоит заглушкой — сделаем по тому же образцу. -->
+        <div class="am-panel am-box">
+          <div class="am-bar">
+            <h3 class="am-h3">Импорт списка</h3>
+            <span class="am-bar__gap" />
+            <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
+              <span class="am-flag__dot" aria-hidden="true" />
+              AniList: {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
+            </span>
+          </div>
 
-        <p v-if="!desktop" class="am-meta">
-          Подключение работает только в приложении. Запустите <code>npm run tauri dev</code>.
-        </p>
-
-        <template v-else>
-          <p class="am-meta">
-            {{
-              authStatus.authorized
-                ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
-                : 'Подключите аккаунт, чтобы перенести свой список сюда. Правки остаются здесь: обратно на AniList программа ничего не отправляет.'
-            }}
+          <p v-if="!desktop" class="am-meta">
+            Подключение работает только в приложении. Запустите <code>npm run tauri dev</code>.
           </p>
 
-          <div class="am-row">
-            <button
-              v-if="!authStatus.authorized"
-              class="am-btn"
-              type="button"
-              :disabled="busy"
-              @click="onLogin"
-            >
-              Подключить аккаунт
-            </button>
-            <template v-else>
+          <template v-else>
+            <p class="am-meta">
+              {{
+                authStatus.authorized
+                  ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
+                  : 'Подключите аккаунт, чтобы перенести свой список сюда. Правки остаются здесь: обратно на AniList программа ничего не отправляет.'
+              }}
+            </p>
+
+            <div class="am-row">
               <button
-                v-tip="'Забрать список с AniList: слиянием или с заменой'"
+                v-if="!authStatus.authorized"
                 class="am-btn"
                 type="button"
                 :disabled="busy"
-                @click="onAsk"
+                @click="onLogin"
               >
-                {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
+                Подключить аккаунт
               </button>
+              <template v-else>
+                <button
+                  v-tip="'Забрать список с AniList: слиянием или с заменой'"
+                  class="am-btn"
+                  type="button"
+                  :disabled="busy"
+                  @click="onAsk"
+                >
+                  {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
+                </button>
+                <button
+                  v-tip="'Разорвать связь с AniList. Список останется здесь'"
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="busy"
+                  @click="onLogout"
+                >
+                  Отключить
+                </button>
+              </template>
+
               <button
-                v-tip="'Разорвать связь с AniList. Список останется здесь'"
+                v-if="!authStatus.authorized"
                 class="am-btn am-btn--ghost"
                 type="button"
-                :disabled="busy"
-                @click="onLogout"
+                @click="manualOpen = !manualOpen"
               >
-                Отключить
+                Ввести токен
               </button>
-            </template>
+            </div>
 
+            <!-- Вопрос перед переносом: одно число и два способа рядом.
+                 Разницу говорят подписи кнопок, поэтому абзац объяснений
+                 здесь убран — он повторял их втрое длиннее. -->
+            <div v-if="asking" class="am-ask">
+              <p class="am-ask__text">Записей: {{ listCount }}.</p>
+
+              <div class="am-row">
+                <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
+                  Добавить недостающее
+                </button>
+                <button
+                  class="am-btn am-btn--ghost"
+                  type="button"
+                  :disabled="busy"
+                  @click="onPull('replace')"
+                >
+                  Заменить целиком
+                </button>
+                <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+              </div>
+            </div>
+
+            <!-- Показывается только после нажатия: до него окна входа нет и ждать
+                 человеку нечего. -->
+            <p v-if="login && !authStatus.authorized" class="am-meta">
+              Окно AniList открыто, после разрешения оно закроется само. Ожидание —
+              {{ waitText(login.waitSecs) }}.
+            </p>
+
+            <div v-if="manualOpen && !authStatus.authorized" class="am-row">
+              <label class="am-field">
+                <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
+              </label>
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="busy || !manual.trim()"
+                @click="onManual"
+              >
+                Сохранить
+              </button>
+            </div>
+
+            <p v-if="error" class="am-error">{{ error }}</p>
+          </template>
+
+          <!-- Шикимори: место занято, работы ещё нет. Пунктир и погашенный вид
+               говорят это без слов, а слово «позже» снимает последний вопрос —
+               сломано или не сделано. Обещать сроки строкой в настройках
+               нельзя: обещание живёт дольше, чем помнят, кто его дал. -->
+          <div class="am-place am-place--soon">
+            <span class="am-place__mark am-place__mark--shiki" aria-hidden="true">Ш</span>
+
+            <span class="am-place__text">
+              <span class="am-place__name">Шикимори</span>
+              <span class="am-place__note">
+                Импорт сделаем по образцу AniList: список переносится сюда, правки остаются здесь.
+                Русские названия из Шикимори программа берёт уже сейчас — через датасет.
+              </span>
+            </span>
+
+            <span class="am-place__acts">
+              <span class="am-cloud__soon">позже</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Данные: что лежит на этом диске и что с этим можно сделать. -->
+        <div class="am-panel am-box">
+          <h3 class="am-h3">Данные</h3>
+
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Записей в списке</span>
+              <span class="am-fact__value">{{ listCount }}</span>
+            </li>
+            <li v-if="usedSize" class="am-fact">
+              <span class="am-fact__name">Занято на диске</span>
+              <span class="am-fact__value">{{ usedSize }}</span>
+            </li>
+          </ul>
+
+          <!-- Необратимое одной строкой: сброс памяти и удаление списка стоят
+               рядом, потому что оба про то, что лежит на этом диске. -->
+          <div class="am-row">
             <button
-              v-if="!authStatus.authorized"
+              v-tip="'Убрать сохранённые названия, описания и обложки'"
               class="am-btn am-btn--ghost"
               type="button"
-              @click="manualOpen = !manualOpen"
+              :disabled="busy"
+              @click="onClear"
             >
-              Ввести токен
+              Очистить память
+            </button>
+
+            <button
+              v-if="listCount > 0"
+              v-tip="'Удалить свой список с этого устройства'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onAskDrop"
+            >
+              Удалить мой список
+            </button>
+
+            <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
+              Перезагрузить
             </button>
           </div>
 
-          <!-- Вопрос перед переносом: одно число и два способа рядом.
-               Разницу говорят подписи кнопок, поэтому абзац объяснений
-               здесь убран — он повторял их втрое длиннее. -->
-          <div v-if="asking" class="am-ask">
-            <p class="am-ask__text">Записей: {{ listCount }}.</p>
+          <!-- Выгрузка отдельным узлом строкой ниже: место и действие рядом.
+               Строка папки нажимается целиком, и путь виден всегда.
+
+               Класс свой, am-dir, а не am-pick: тем в styles/theme.css одет
+               нативный select, и совпадение имён отдавало этой строке чужие
+               правила — плотный фон списка и снятую обводку фокуса. -->
+          <div v-if="canPickDir || listCount > 0" class="am-out">
+            <button
+              v-if="canPickDir"
+              v-tip="'Сменить папку, куда уходят выгрузки XML'"
+              class="am-dir"
+              type="button"
+              :disabled="busy"
+              @click="onPickDir"
+            >
+              <span class="am-dir__mark" aria-hidden="true">📁</span>
+              <span class="am-dir__text">
+                <span class="am-dir__name">Папка выгрузок</span>
+                <span class="am-dir__path" :class="{ 'am-dir__path--none': !exportDir }">
+                  {{ exportDir || 'Не выбрана — файл уйдёт в загрузки окна' }}
+                </span>
+              </span>
+              <span class="am-dir__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
+            </button>
+
+            <button
+              v-if="listCount > 0"
+              v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
+              class="am-btn am-btn--ghost"
+              type="button"
+              :disabled="busy"
+              @click="onExport"
+            >
+              Выгрузить в XML
+            </button>
+          </div>
+
+          <!-- Удаление списка необратимо для местных записей: спрашиваем всегда.
+               Вопрос коротким: подпись кнопки под ним и есть весь ответ. -->
+          <div v-if="askingDrop" class="am-ask">
+            <p class="am-ask__text">Удалить список с этого устройства?</p>
 
             <div class="am-row">
-              <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
-                Добавить недостающее
+              <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
+                Удалить список
               </button>
-              <button
-                class="am-btn am-btn--ghost"
-                type="button"
-                :disabled="busy"
-                @click="onPull('replace')"
-              >
-                Заменить целиком
+              <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">
+                Отмена
               </button>
-              <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
             </div>
           </div>
 
-          <!-- Показывается только после нажатия: до него окна входа нет и ждать
-               человеку нечего. -->
-          <p v-if="login && !authStatus.authorized" class="am-meta">
-            Окно AniList открыто, после разрешения оно закроется само. Ожидание —
-            {{ waitText(login.waitSecs) }}.
-          </p>
-
-          <div v-if="manualOpen && !authStatus.authorized" class="am-row">
-            <label class="am-field">
-              <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
-            </label>
-            <button
-              class="am-btn"
-              type="button"
-              :disabled="busy || !manual.trim()"
-              @click="onManual"
-            >
-              Сохранить
-            </button>
-          </div>
-
-          <p v-if="error" class="am-error">{{ error }}</p>
-        </template>
-
-        <!-- Шикимори: место занято, работы ещё нет. Пунктир и погашенный вид
-             говорят это без слов, а слово «позже» снимает последний вопрос —
-             сломано или не сделано. Обещать сроки строкой в настройках
-             нельзя: обещание живёт дольше, чем помнят, кто его дал. -->
-        <div class="am-place am-place--soon">
-          <span class="am-place__mark am-place__mark--shiki" aria-hidden="true">Ш</span>
-
-          <span class="am-place__text">
-            <span class="am-place__name">Шикимори</span>
-            <span class="am-place__note">
-              Импорт сделаем по образцу AniList: список переносится сюда, правки остаются здесь.
-              Русские названия из Шикимори программа берёт уже сейчас — через датасет.
-            </span>
-          </span>
-
-          <span class="am-place__acts">
-            <span class="am-cloud__soon">позже</span>
-          </span>
+          <p v-if="note" class="am-note">{{ note }}</p>
         </div>
-      </div>
-
-      <!-- Данные: что лежит на этом диске и что с этим можно сделать. -->
-      <div class="am-panel am-box am-set__data">
-        <h3 class="am-h3">Данные</h3>
-
-        <ul class="am-facts">
-          <li class="am-fact">
-            <span class="am-fact__name">Записей в списке</span>
-            <span class="am-fact__value">{{ listCount }}</span>
-          </li>
-          <li v-if="usedSize" class="am-fact">
-            <span class="am-fact__name">Занято на диске</span>
-            <span class="am-fact__value">{{ usedSize }}</span>
-          </li>
-        </ul>
-
-        <!-- Необратимое одной строкой: сброс памяти и удаление списка стоят
-             рядом, потому что оба про то, что лежит на этом диске. -->
-        <div class="am-row">
-          <button
-            v-tip="'Убрать сохранённые названия, описания и обложки'"
-            class="am-btn am-btn--ghost"
-            type="button"
-            :disabled="busy"
-            @click="onClear"
-          >
-            Очистить память
-          </button>
-
-          <button
-            v-if="listCount > 0"
-            v-tip="'Удалить свой список с этого устройства'"
-            class="am-btn am-btn--ghost"
-            type="button"
-            :disabled="busy"
-            @click="onAskDrop"
-          >
-            Удалить мой список
-          </button>
-
-          <button v-if="cleared" class="am-btn am-btn--ghost" type="button" @click="onReload">
-            Перезагрузить
-          </button>
-        </div>
-
-        <!-- Выгрузка отдельным узлом строкой ниже: место и действие рядом.
-             Строка папки нажимается целиком, и путь виден всегда.
-
-             Класс свой, am-dir, а не am-pick: тем в styles/theme.css одет
-             нативный select, и совпадение имён отдавало этой строке чужие
-             правила — плотный фон списка и снятую обводку фокуса. -->
-        <div v-if="canPickDir || listCount > 0" class="am-out">
-          <button
-            v-if="canPickDir"
-            v-tip="'Сменить папку, куда уходят выгрузки XML'"
-            class="am-dir"
-            type="button"
-            :disabled="busy"
-            @click="onPickDir"
-          >
-            <span class="am-dir__mark" aria-hidden="true">📁</span>
-            <span class="am-dir__text">
-              <span class="am-dir__name">Папка выгрузок</span>
-              <span class="am-dir__path" :class="{ 'am-dir__path--none': !exportDir }">
-                {{ exportDir || 'Не выбрана — файл уйдёт в загрузки окна' }}
-              </span>
-            </span>
-            <span class="am-dir__act">{{ exportDir ? 'Сменить' : 'Выбрать' }}</span>
-          </button>
-
-          <button
-            v-if="listCount > 0"
-            v-tip="'Сохранить список файлом XML для переноса в другой сервис'"
-            class="am-btn am-btn--ghost"
-            type="button"
-            :disabled="busy"
-            @click="onExport"
-          >
-            Выгрузить в XML
-          </button>
-        </div>
-
-        <!-- Удаление списка необратимо для местных записей: спрашиваем всегда.
-             Вопрос коротким: подпись кнопки под ним и есть весь ответ. -->
-        <div v-if="askingDrop" class="am-ask">
-          <p class="am-ask__text">Удалить список с этого устройства?</p>
-
-          <div class="am-row">
-            <button class="am-btn" type="button" :disabled="busy" @click="onDropList">
-              Удалить список
-            </button>
-            <button class="am-btn am-btn--ghost" type="button" @click="onCancelDrop">
-              Отмена
-            </button>
-          </div>
-        </div>
-
-        <p v-if="note" class="am-note">{{ note }}</p>
       </div>
 
       <!-- Облачная копия своим узлом: площадка, вход и копия туда и обратно
@@ -689,79 +695,79 @@ onMounted(() => {
            для вопросов и метка устройства для файла копии, а обратно
            приходит весть, что список сменился.
 
-           Место в сетке задаётся снаружи классом: узел о раскладке экрана
-           ничего не знает и знать не должен. -->
-      <CloudBox
-        class="am-set__cloud"
-        :list="listCount"
-        :device="system"
-        @changed="onCloudChanged"
-      />
-
-      <!-- Оформление и справка: то, что смотрят, а не то, чем правят. -->
-      <div class="am-panel am-box am-set__look">
-        <h3 class="am-h3">Оформление</h3>
-
-        <div class="am-skins">
-          <button
-            v-for="item in APPEARANCES"
-            :key="item.name"
-            v-tip="item.hint"
-            class="am-skins__btn"
-            :class="{ 'am-skins__btn--on': item.name === appearance }"
-            type="button"
-            @click="setAppearance(item.name)"
-          >
-            <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
-            <span class="am-skins__name">{{ item.title }}</span>
-          </button>
-        </div>
-
-        <label class="am-switch">
-          <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
-          <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
-        </label>
+           Своя колонка: панель самая высокая на экране, и в общей строке
+           с соседями она держала бы под ними пустоту. О раскладке сам узел
+           по-прежнему ничего не знает. -->
+      <div class="am-set__col am-set__col--cloud">
+        <CloudBox :list="listCount" :device="system" @changed="onCloudChanged" />
       </div>
 
-      <div class="am-panel am-box am-set__about">
-        <h3 class="am-h3">О программе</h3>
+      <!-- Оформление и справка: то, что смотрят, а не то, чем правят. -->
+      <div class="am-set__col am-set__col--look">
+        <div class="am-panel am-box">
+          <h3 class="am-h3">Оформление</h3>
 
-        <ul class="am-facts">
-          <li class="am-fact">
-            <span class="am-fact__name">Версия</span>
-            <span class="am-fact__value">{{ version }}</span>
-          </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Система</span>
-            <span class="am-fact__value">{{ system }}</span>
-          </li>
-          <li class="am-fact">
-            <span class="am-fact__name">Датасет названий</span>
-            <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
-              {{ datasetText }}
-            </span>
-          </li>
-        </ul>
+          <div class="am-skins">
+            <button
+              v-for="item in APPEARANCES"
+              :key="item.name"
+              v-tip="item.hint"
+              class="am-skins__btn"
+              :class="{ 'am-skins__btn--on': item.name === appearance }"
+              type="button"
+              @click="setAppearance(item.name)"
+            >
+              <span class="am-skins__mark" aria-hidden="true">{{ item.mark }}</span>
+              <span class="am-skins__name">{{ item.title }}</span>
+            </button>
+          </div>
 
-        <!-- Имя источника, лицензия и ссылка. Обязанностью строка быть
-             перестала: CC0-1.0 атрибуции не требует, и это вежливость
-             к единственному источнику кириллицы. Манами из цепочки убрана
-             3 сентября 2026 — номера теперь свои, перечислением каталога. -->
-        <p class="am-meta am-fine">
-          Русские названия поставляет датасет
-          <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-          (лицензия CC0-1.0): номера и связки собраны перечислением каталога Шикимори,
-          сами названия — из открытых API Шикимори и anime365.
-        </p>
+          <label class="am-switch">
+            <input v-model="adult" type="checkbox" class="am-switch__box" @change="onAdult" />
+            <span class="am-switch__name">Показывать контент для взрослых (18+)</span>
+          </label>
+        </div>
 
-        <!-- Свежесть датасета — единственное, за чем человеку приходится следить
-             руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
-        <p v-if="datasetStale" class="am-stale">
-          Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет,
-          программа добирает из сети по одному — это медленно. Загляните в
-          <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
-          и запустите сборку кнопкой.
-        </p>
+        <div class="am-panel am-box">
+          <h3 class="am-h3">О программе</h3>
+
+          <ul class="am-facts">
+            <li class="am-fact">
+              <span class="am-fact__name">Версия</span>
+              <span class="am-fact__value">{{ version }}</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Система</span>
+              <span class="am-fact__value">{{ system }}</span>
+            </li>
+            <li class="am-fact">
+              <span class="am-fact__name">Датасет названий</span>
+              <span class="am-fact__value" :class="{ 'am-fact__value--stale': datasetStale }">
+                {{ datasetText }}
+              </span>
+            </li>
+          </ul>
+
+          <!-- Имя источника, лицензия и ссылка. Обязанностью строка быть
+               перестала: CC0-1.0 атрибуции не требует, и это вежливость
+               к единственному источнику кириллицы. Манами из цепочки убрана
+               3 сентября 2026 — номера теперь свои, перечислением каталога. -->
+          <p class="am-meta am-fine">
+            Русские названия поставляет датасет
+            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+            (лицензия CC0-1.0): номера и связки собраны перечислением каталога Шикимори,
+            сами названия — из открытых API Шикимори и anime365.
+          </p>
+
+          <!-- Свежесть датасета — единственное, за чем человеку приходится следить
+               руками, поэтому про просрочку говорим словами, а не одной цифрой выше. -->
+          <p v-if="datasetStale" class="am-stale">
+            Датасет не обновлялся больше {{ STALE_DAYS }} дней. Названия, которых в нём нет,
+            программа добирает из сети по одному — это медленно. Загляните в
+            <button class="am-link" type="button" @click="onDatasetLink">animori-data</button>
+            и запустите сборку кнопкой.
+          </p>
+        </div>
       </div>
     </div>
   </section>
