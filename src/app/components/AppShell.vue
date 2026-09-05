@@ -20,6 +20,14 @@
 // и центр знака приложения стоят на одной вертикали в любом состоянии.
 // Подписи просто проявляются в освободившемся месте, а узкому рельсу их
 // заменяет подсказка на каждом пункте.
+//
+// МЫШИНОМУ НАЖАТИЮ ФОКУС НЕ НУЖЕН
+//
+// Раскрытие держится и на :focus-within, а кнопка, нажатая мышью, остаётся
+// в фокусе. Из-за этого рельс стоял разложенным и после ухода курсора — до
+// первого нажатия куда-нибудь мимо. Теперь после нажатия мышью фокус снимается
+// тут же, а нажатие с клавиатуры остаётся как было: там фокус — единственная
+// ниточка обхода меню.
 import { computed } from 'vue'
 
 import { APPEARANCES, appearance, setAppearance } from '../appearance'
@@ -33,6 +41,9 @@ const version = __ANIMORI_VERSION__
 const active = computed(() => currentRoute.value.name)
 const title = computed(() => SCREEN_TITLES[active.value])
 
+/** Имя экрана из меню: берётся из самого состава, а не перечисляется вторично. */
+type MenuName = (typeof MENU)[number]['name']
+
 // «Назад» нужен только там, куда пришли изнутри приложения:
 // на экранах из меню он увёл бы в пустую историю окна.
 // Кнопка живёт только здесь: вторая в карточке была дублём.
@@ -42,6 +53,18 @@ const title = computed(() => SCREEN_TITLES[active.value])
 const BACK_SCREENS: ReadonlyArray<string> = ['media', 'studio', 'log']
 
 const canGoBack = computed(() => BACK_SCREENS.includes(active.value))
+
+/**
+ * Выбор пункта меню.
+ *
+ * detail у нажатия с клавиатуры равен нулю — там фокус остаётся на кнопке,
+ * иначе обход меню оборвётся на первом же выборе. У мыши detail больше
+ * нуля, и фокус ей не нужен вовсе: он лишь держал рельс разложенным.
+ */
+function onPick(name: MenuName, e: MouseEvent): void {
+  if (e.detail > 0 && e.currentTarget instanceof HTMLElement) e.currentTarget.blur()
+  navigate(name)
+}
 
 /** Обновление окна целиком, как в браузере: одна кнопка на все экраны. */
 function onReload(): void {
@@ -68,7 +91,7 @@ function onReload(): void {
           class="am-side__item"
           :class="{ 'am-side__item--on': item.name === active }"
           type="button"
-          @click="navigate(item.name)"
+          @click="onPick(item.name, $event)"
         >
           <span class="am-side__icon" aria-hidden="true">{{ item.icon }}</span>
           <span class="am-side__text">{{ item.title }}</span>
@@ -163,7 +186,10 @@ function onReload(): void {
 }
 
 /* Фокус равен курсору: обход меню с клавиатуры иначе шёл бы по слепым
-   значкам. Тень глубже: раскрытый рельс лежит на содержимом, а не рядом. */
+   значкам. Тень глубже: раскрытый рельс лежит на содержимом, а не рядом.
+
+   После мышиного выбора пункта фокус снимает onPick: иначе именно это
+   правило держало рельс разложенным после ухода курсора. */
 .am-side:hover,
 .am-side:focus-within {
   width: calc(var(--am-side) - 14px);
