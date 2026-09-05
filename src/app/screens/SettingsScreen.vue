@@ -26,11 +26,12 @@
 // список сменился.
 //
 // ДВА ИСТОЧНИКА СПИСКА
-// AniList просит вход, потому что чужой список он не отдаёт. Шикимори
-// открытый профиль отдаёт любому, поэтому там достаточно ника: ни входа,
-// ни пропуска, ни своего приложения OAuth ради чтения.
+// AniList и Шикимори стоят в панели импорта двумя одинаковыми половинами:
+// знак сервиса, название, строка состояния, кнопки, свои ответы. Раньше они
+// шли сплошняком, и граница между ними существовала только в голове того,
+// кто это писал.
 //
-// Ошибки и итоги у них раздельные. Одна общая строка на две кнопки врала бы
+// Ошибки и итоги у них раздельные. Одна общая строка на две половины врала бы
 // первым же промахом: отказ Шикимори читался бы как отказ AniList.
 //
 // ВОПРОСЫ КОРОТКИЕ, ОТВЕТ ЖИВЁТ В КНОПКАХ
@@ -556,187 +557,230 @@ onMounted(() => {
          окна живут в settings-screen.css. -->
     <div class="am-set">
       <div class="am-set__col am-set__col--main">
-        <!-- Импорт списка: откуда список попадает сюда. AniList просит вход,
-             Шикимори — только ник. -->
+        <!-- Импорт списка: две половины одного вида. У каждой знак сервиса,
+             название, строка состояния, кнопки и свои ответы. -->
         <div class="am-panel am-box">
-          <div class="am-bar">
-            <h3 class="am-h3">Импорт списка</h3>
-            <span class="am-bar__gap" />
-            <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
-              <span class="am-flag__dot" aria-hidden="true" />
-              AniList: {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
-            </span>
-          </div>
+          <h3 class="am-h3">Импорт списка</h3>
 
-          <p v-if="!desktop" class="am-meta">
-            Подключение работает только в приложении. Запустите <code>npm run tauri dev</code>.
-          </p>
+          <!-- AniList. Знак фирменный и нарисован вектором: буква «A» белым,
+               «L» фирменной синевой на тёмной плашке. -->
+          <div class="am-serv">
+            <div class="am-serv__head">
+              <svg class="am-serv__logo" viewBox="0 0 24 24" aria-hidden="true">
+                <rect width="24" height="24" rx="6" fill="#152232" />
+                <rect x="15.5" y="5" width="3.2" height="14" rx="1.1" fill="#02a9ff" />
+                <rect x="15.5" y="15.8" width="5.7" height="3.2" rx="1.1" fill="#02a9ff" />
+                <path
+                  fill="#ffffff"
+                  fill-rule="evenodd"
+                  d="M8 5h2.5l4.4 14h-3.2l-1 -3.1H7.7l-1 3.1H3.4Z M9.25 9 7.85 13.2h2.8Z"
+                />
+              </svg>
 
-          <template v-else>
-            <p class="am-meta">
-              {{
-                authStatus.authorized
-                  ? `Свой список подключён ${expiryText(authStatus.expiresAt)}.`
-                  : 'Подключите аккаунт, чтобы перенести свой список сюда. Правки остаются здесь: обратно на AniList программа ничего не отправляет.'
-              }}
+              <span class="am-serv__text">
+                <span class="am-serv__name">AniList</span>
+                <span class="am-serv__note">
+                  {{
+                    authStatus.authorized
+                      ? `Подключён ${expiryText(authStatus.expiresAt)}.`
+                      : 'Нужен вход в аккаунт.'
+                  }}
+                </span>
+              </span>
+
+              <span class="am-flag" :class="{ 'am-flag--on': authStatus.authorized }">
+                <span class="am-flag__dot" aria-hidden="true" />
+                {{ authStatus.authorized ? 'подключён' : 'не подключён' }}
+              </span>
+            </div>
+
+            <p v-if="!desktop" class="am-meta">
+              Вход работает только в приложении. Запустите <code>npm run tauri dev</code>.
             </p>
 
-            <div class="am-row">
-              <button
-                v-if="!authStatus.authorized"
-                class="am-btn"
-                type="button"
-                :disabled="busy"
-                @click="onLogin"
-              >
-                Подключить аккаунт
-              </button>
-              <template v-else>
+            <template v-else>
+              <div class="am-row">
                 <button
-                  v-tip="'Забрать список с AniList: слиянием или с заменой'"
+                  v-if="!authStatus.authorized"
                   class="am-btn"
                   type="button"
                   :disabled="busy"
-                  @click="onAsk"
+                  @click="onLogin"
                 >
-                  {{ busy ? 'Переносим…' : 'Перенести список с AniList' }}
+                  Подключить аккаунт
                 </button>
+                <template v-else>
+                  <button
+                    v-tip="'Забрать список с AniList: слиянием или с заменой'"
+                    class="am-btn"
+                    type="button"
+                    :disabled="busy"
+                    @click="onAsk"
+                  >
+                    {{ busy ? 'Переносим…' : 'Перенести список' }}
+                  </button>
+                  <button
+                    v-tip="'Разорвать связь с AniList. Список останется здесь'"
+                    class="am-btn am-btn--ghost"
+                    type="button"
+                    :disabled="busy"
+                    @click="onLogout"
+                  >
+                    Отключить
+                  </button>
+                </template>
+
                 <button
-                  v-tip="'Разорвать связь с AniList. Список останется здесь'"
+                  v-if="!authStatus.authorized"
                   class="am-btn am-btn--ghost"
                   type="button"
-                  :disabled="busy"
-                  @click="onLogout"
+                  @click="manualOpen = !manualOpen"
                 >
-                  Отключить
+                  Ввести токен
                 </button>
-              </template>
+              </div>
 
+              <!-- Вопрос перед переносом: одно число и два способа рядом.
+                   Разницу говорят подписи кнопок, поэтому абзац объяснений
+                   здесь убран — он повторял их втрое длиннее. -->
+              <div v-if="asking" class="am-ask">
+                <p class="am-ask__text">Записей: {{ listCount }}.</p>
+
+                <div class="am-row">
+                  <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
+                    Добавить недостающее
+                  </button>
+                  <button
+                    class="am-btn am-btn--ghost"
+                    type="button"
+                    :disabled="busy"
+                    @click="onPull('replace')"
+                  >
+                    Заменить целиком
+                  </button>
+                  <button class="am-btn am-btn--ghost" type="button" @click="onCancel">
+                    Отмена
+                  </button>
+                </div>
+              </div>
+
+              <!-- Показывается только после нажатия: до него окна входа нет
+                   и ждать человеку нечего. -->
+              <p v-if="login && !authStatus.authorized" class="am-meta">
+                Окно AniList открыто, после разрешения оно закроется само. Ожидание —
+                {{ waitText(login.waitSecs) }}.
+              </p>
+
+              <div v-if="manualOpen && !authStatus.authorized" class="am-row">
+                <label class="am-field">
+                  <input
+                    v-model="manual"
+                    class="am-input"
+                    type="text"
+                    placeholder="Токен AniList"
+                  />
+                </label>
+                <button
+                  class="am-btn"
+                  type="button"
+                  :disabled="busy || !manual.trim()"
+                  @click="onManual"
+                >
+                  Сохранить
+                </button>
+              </div>
+
+              <p v-if="error" class="am-error">{{ error }}</p>
+            </template>
+          </div>
+
+          <!-- Шикимори. Знак — иероглиф 示 кистью на светлой плашке, как
+               на самом сайте. Вход не нужен: открытый профиль сайт отдаёт
+               любому по нику. -->
+          <div class="am-serv">
+            <div class="am-serv__head">
+              <svg class="am-serv__logo" viewBox="0 0 24 24" aria-hidden="true">
+                <rect width="24" height="24" rx="6" fill="#aad3e7" />
+                <g
+                  fill="none"
+                  stroke="#16202c"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M8.6 6.5h6.8" />
+                  <path d="M4.9 10.7h14.2" />
+                  <path d="M12 10.7v6.8" />
+                  <path d="M9 13.4 7.6 17.5" />
+                  <path d="M15 13.4 16.4 17.5" />
+                </g>
+              </svg>
+
+              <span class="am-serv__text">
+                <span class="am-serv__name">Шикимори</span>
+                <span class="am-serv__note">Профиль на Шикимори должен быть открытым.</span>
+              </span>
+
+              <span class="am-flag">
+                <span class="am-flag__dot" aria-hidden="true" />
+                вход не нужен
+              </span>
+            </div>
+
+            <div class="am-row">
+              <label class="am-field">
+                <input
+                  v-model="shikiNick"
+                  class="am-input"
+                  type="text"
+                  placeholder="Ник на Шикимори"
+                  :disabled="shikiBusy"
+                  @change="onShikiNick"
+                />
+              </label>
               <button
-                v-if="!authStatus.authorized"
-                class="am-btn am-btn--ghost"
+                v-tip="'Забрать список с Шикимори: слиянием или с заменой'"
+                class="am-btn"
                 type="button"
-                @click="manualOpen = !manualOpen"
+                :disabled="shikiBusy || !shikiNick.trim()"
+                @click="onShikiAsk"
               >
-                Ввести токен
+                {{ shikiBusy ? 'Переносим…' : 'Перенести список' }}
               </button>
             </div>
 
-            <!-- Вопрос перед переносом: одно число и два способа рядом.
-                 Разницу говорят подписи кнопок, поэтому абзац объяснений
-                 здесь убран — он повторял их втрое длиннее. -->
-            <div v-if="asking" class="am-ask">
+            <!-- Вопрос тот же, что у AniList, и по той же причине: замена
+                 вычищает список целиком, включая перенесённое и набранное
+                 руками. -->
+            <div v-if="askingShiki" class="am-ask">
               <p class="am-ask__text">Записей: {{ listCount }}.</p>
 
               <div class="am-row">
-                <button class="am-btn" type="button" :disabled="busy" @click="onPull('merge')">
+                <button
+                  class="am-btn"
+                  type="button"
+                  :disabled="shikiBusy"
+                  @click="onShikiPull('merge')"
+                >
                   Добавить недостающее
                 </button>
                 <button
                   class="am-btn am-btn--ghost"
                   type="button"
-                  :disabled="busy"
-                  @click="onPull('replace')"
+                  :disabled="shikiBusy"
+                  @click="onShikiPull('replace')"
                 >
                   Заменить целиком
                 </button>
-                <button class="am-btn am-btn--ghost" type="button" @click="onCancel">Отмена</button>
+                <button class="am-btn am-btn--ghost" type="button" @click="onShikiCancel">
+                  Отмена
+                </button>
               </div>
             </div>
 
-            <!-- Показывается только после нажатия: до него окна входа нет и ждать
-                 человеку нечего. -->
-            <p v-if="login && !authStatus.authorized" class="am-meta">
-              Окно AniList открыто, после разрешения оно закроется само. Ожидание —
-              {{ waitText(login.waitSecs) }}.
-            </p>
-
-            <div v-if="manualOpen && !authStatus.authorized" class="am-row">
-              <label class="am-field">
-                <input v-model="manual" class="am-input" type="text" placeholder="Токен AniList" />
-              </label>
-              <button
-                class="am-btn"
-                type="button"
-                :disabled="busy || !manual.trim()"
-                @click="onManual"
-              >
-                Сохранить
-              </button>
-            </div>
-
-            <p v-if="error" class="am-error">{{ error }}</p>
-          </template>
-
-          <!-- Шикимори: ни входа, ни пропуска — только ник. Открытый профиль
-               сайт отдаёт любому, и заводить ради чтения своё приложение OAuth
-               значило бы поставить лишнюю чужую проверку на пути к чужим же
-               данным. Закрытый профиль так не прочитать, и об этом говорится
-               прямо текстом отказа, а не пустым списком. -->
-          <div class="am-place">
-            <span class="am-place__mark am-place__mark--shiki" aria-hidden="true">Ш</span>
-
-            <span class="am-place__text">
-              <span class="am-place__name">Шикимори</span>
-              <span class="am-place__note">
-                Список забирается по нику, без входа: профиль на Шикимори должен быть открытым.
-                Правки, как и с AniList, остаются здесь.
-              </span>
-            </span>
+            <p v-if="shikiNote" class="am-note">{{ shikiNote }}</p>
+            <p v-if="shikiError" class="am-error">{{ shikiError }}</p>
           </div>
-
-          <div class="am-row">
-            <label class="am-field">
-              <input
-                v-model="shikiNick"
-                class="am-input"
-                type="text"
-                placeholder="Ник на Шикимори"
-                :disabled="shikiBusy"
-                @change="onShikiNick"
-              />
-            </label>
-            <button
-              v-tip="'Забрать список с Шикимори: слиянием или с заменой'"
-              class="am-btn"
-              type="button"
-              :disabled="shikiBusy || !shikiNick.trim()"
-              @click="onShikiAsk"
-            >
-              {{ shikiBusy ? 'Переносим…' : 'Перенести список' }}
-            </button>
-          </div>
-
-          <!-- Вопрос тот же, что у AniList, и по той же причине: замена
-               вычищает список целиком, включая перенесённое и набранное руками. -->
-          <div v-if="askingShiki" class="am-ask">
-            <p class="am-ask__text">Записей: {{ listCount }}.</p>
-
-            <div class="am-row">
-              <button
-                class="am-btn"
-                type="button"
-                :disabled="shikiBusy"
-                @click="onShikiPull('merge')"
-              >
-                Добавить недостающее
-              </button>
-              <button
-                class="am-btn am-btn--ghost"
-                type="button"
-                :disabled="shikiBusy"
-                @click="onShikiPull('replace')"
-              >
-                Заменить целиком
-              </button>
-              <button class="am-btn am-btn--ghost" type="button" @click="onShikiCancel">
-                Отмена
-              </button>
-            </div>
-          </div>
-
-          <p v-if="shikiNote" class="am-note">{{ shikiNote }}</p>
-          <p v-if="shikiError" class="am-error">{{ shikiError }}</p>
         </div>
 
         <!-- Данные: что лежит на этом диске и что с этим можно сделать. -->
