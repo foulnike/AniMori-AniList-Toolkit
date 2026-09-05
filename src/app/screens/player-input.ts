@@ -25,6 +25,8 @@ export type PlayerIntent =
   | 'nextEpisode'
   | 'skip'
   | 'fullscreen'
+  | 'pip'
+  | 'cast'
   | 'exit'
   | 'focusUp'
   | 'focusDown'
@@ -174,6 +176,15 @@ export function readIntent(event: KeyboardEvent, inList: boolean): PlayerIntent 
     case 'а':
     case 'F11':
       return 'fullscreen'
+    // Три соседних желания про одно: куда девать кадр. Полный экран — f,
+    // маленькое окно поверх всего — i (image in image), трансляция — c (cast).
+    // Буквы взяты из веба, а не придуманы: так их жмут в чужих плеерах.
+    case 'i':
+    case 'ш':
+      return 'pip'
+    case 'c':
+    case 'с':
+      return 'cast'
     case 's':
     case 'ы':
       return 'skip'
@@ -282,7 +293,7 @@ export function moveFocus(root: ParentNode, intent: PlayerIntent): boolean {
  *
  * Родной полный экран элемента (requestFullscreen) отвергнут совсем: оболочка
  * сама разворачивала окно в ответ на него, и следующий же переключатель видел
- * «уже развёрнуто» и складывал окно обратно — шапка окна и панель задач
+ * «уже развернуто» и складывал окно обратно — шапка окна и панель задач
  * оставались на месте.
  *
  * Возвращает новое состояние окна; в браузере оболочка честно отвечает false.
