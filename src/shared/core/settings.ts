@@ -103,6 +103,16 @@ export interface AniMoriSettings {
    */
   exportDir: string
   /**
+   * Ник на Шикимори, с которого переносился список. Пустая строка значит
+   * «ни разу не переносили».
+   *
+   * Хранится ради одного: не заставлять набирать ник заново каждый раз,
+   * тем более пультом на телевизоре. Пропуска здесь нет и не будет:
+   * открытый профиль Шикимори читается без входа вовсе, и заводить ради
+   * чтения своё приложение OAuth было бы лишней точкой отказа.
+   */
+  shikiNick: string
+  /**
    * Где держать облачную копию списка — этап 6. По умолчанию нигде: облако
    * включает человек, а не установщик, и до его выбора наружу не уходит
    * ни один запрос.
@@ -196,6 +206,7 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   showSyncButton: true,
   showCompareButton: true,
   exportDir: '',
+  shikiNick: '',
   cloudPlace: 'none',
   cloudToken: '',
   cloudSavedAt: 0,
@@ -236,6 +247,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     showSyncButton,
     showCompareButton,
     exportDir,
+    shikiNick,
     cloudPlace,
     cloudToken,
     cloudSavedAt,
@@ -268,6 +280,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('set_btn_sync', DEFAULT_SETTINGS.showSyncButton),
     storage.get('set_btn_compare', DEFAULT_SETTINGS.showCompareButton),
     storage.get('set_export_dir', DEFAULT_SETTINGS.exportDir),
+    storage.get('am_shiki_nick', DEFAULT_SETTINGS.shikiNick),
     storage.get<CloudPlace>('am_cloud_place', DEFAULT_SETTINGS.cloudPlace),
     storage.get('am_cloud_token', DEFAULT_SETTINGS.cloudToken),
     storage.get('am_cloud_saved_at', DEFAULT_SETTINGS.cloudSavedAt),
@@ -306,6 +319,7 @@ async function readSettings(): Promise<AniMoriSettings> {
     showSyncButton,
     showCompareButton,
     exportDir,
+    shikiNick,
     cloudPlace,
     cloudToken,
     cloudSavedAt,
