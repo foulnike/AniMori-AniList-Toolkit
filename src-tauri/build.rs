@@ -8,6 +8,7 @@
 //   animori_reload            -> allow-animori-reload
 //   animori_toggle_fullscreen -> allow-animori-toggle-fullscreen
 //   animori_open_external     -> allow-animori-open-external
+//   animori_cast_panel        -> allow-animori-cast-panel
 //   animori_auth_start        -> allow-animori-auth-start
 //   animori_auth_submit       -> allow-animori-auth-submit
 //   animori_auth_status       -> allow-animori-auth-status
@@ -43,6 +44,11 @@ const COMMANDS: &[&str] = &[
     // чтобы код в окне не мог запереть его в полном экране повторными вызовами.
     "animori_toggle_fullscreen",
     "animori_open_external",
+    // Картинка в картинке движку по силам самому, а отдать поток устройству — нет:
+    // приёмника трансляции в WebView2 нет. Остаётся зеркало экрана силами Windows,
+    // и команда только показывает системную панель выбора приёмника. Параметров
+    // нет и здесь: адреса панелей зашиты в lib.rs.
+    "animori_cast_panel",
     // Пункт 2.2: вход в AniList. Все четыре выданы только своему окну: окно входа
     // ничего не вызывает, оно лишь показывает чужую форму, а пропуск приезжает
     // в приёмник обычным запросом.
