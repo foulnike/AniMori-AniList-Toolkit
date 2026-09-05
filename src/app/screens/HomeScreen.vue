@@ -15,11 +15,19 @@
 // один жанр, тэг, год или формат, каруселей нет вовсе: вместо них
 // вертикальная лента подбора с «Показать ещё». Прежнее поведение — пять
 // полок превращались в три — было задумано, но читалось пропажей.
+//
+// ЛЕНТА ДОБИРАЕТ РОВНЫМИ РЯДАМИ
+// Порция ленты — целое число рядов сетки, а не «сколько пришло
+// со страницы»: нижний ряд иначе стоял недобранным при полном каталоге
+// впереди — отбор выкидывал анонсы и повторы, а число плиток бралось
+// из остатка. Ровную порцию держит сама лента: лишнее со страницы
+// ждёт в запасе до следующего нажатия.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { emptyPick, pickIsSet, pickKey, type CatalogPick } from '@/api/anilist-catalog'
 import type { MediaBrief } from '@/api/anilist-media'
 import { setupVideoSources } from '@/api/video-sources'
+import { genreAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { selectEntries } from '@/core/collection-view'
 import {
@@ -66,8 +74,10 @@ const HOLD_COUNT = 7
     картинок после чистки повторов выглядит ошибкой загрузки. */
 const SHELF_MIN = 3
 
-/** Сколько плиток добирать в ленту за одно «Показать ещё». */
-const FEED_WANT = 24
+/** Сколько плиток добирать в ленту за одно «Показать ещё». Четыре ряда
+    по девять плиток: сетка широкого экрана кладёт в ряд девять,
+    и прежние два десятка обрывали нижний ряд на середине. */
+const FEED_WANT = 36
 
 /** Плитка своей полки. Тот же вид, что в списках: вид аниме везде один. */
 interface Row {
@@ -140,6 +150,12 @@ const pickCount = computed(
     homePick.value.tags.length +
     homePick.value.formats.length +
     (homePick.value.yearFrom !== null || homePick.value.yearTo !== null ? 1 : 0),
+)
+
+/** Быстрые жанры под политикой показа взрослого: при выключенном 18+
+    «Хентая» нет и в быстрой ленте, а не только в выдаче. */
+const genreList = computed<string[]>(() =>
+  GENRE_CHOICES.filter((genre) => genreAllowed(genre)),
 )
 
 /** Заголовок ленты: под отбором это результат подбора, без него — добавка
@@ -371,7 +387,7 @@ function buildOwn(): void {
 
 /** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
     и по нему же решается, кому достанется аниме при повторе. Под отбором
-    каруселей нет вовсе — там всё говорит лента подбора. */
+    каруселей нет вовсе — там вся речь у ленты подбора. */
 function shelfDefs(): ShelfDef[] {
   if (picked.value) return []
 
@@ -765,7 +781,7 @@ watch(
       <div class="am-choose">
         <div class="am-choose__row">
           <button
-            v-for="genre in GENRE_CHOICES"
+            v-for="genre in genreList"
             :key="genre"
             class="am-chip"
             :class="{ 'am-chip--on': homePick.genres.includes(genre) }"
@@ -951,228 +967,4 @@ watch(
   box-shadow:
     var(--am-sh-2),
     inset 0 1px 0 var(--am-edge);
-  backdrop-filter: blur(var(--am-blur-strong)) saturate(1.5);
-}
-
-/* Две капли под стеклом: без них размывать нечего и панель выглядит
-   грязным серым прямоугольником. Форма текучая и медленно ездит. */
-.am-hey__blob {
-  position: absolute;
-  z-index: -1;
-  border-radius: var(--am-r-blob);
-  filter: blur(42px);
-  pointer-events: none;
-}
-
-.am-hey__blob--a {
-  top: -40%;
-  right: -6%;
-  width: 46%;
-  height: 210%;
-  background: rgb(var(--am-accent-2-rgb) / 0.34);
-  animation: am-hey-float var(--am-drift) var(--am-ease-soft) infinite alternate;
-}
-
-.am-hey__blob--b {
-  bottom: -80%;
-  left: 12%;
-  width: 34%;
-  height: 170%;
-  background: rgb(var(--am-accent-rgb) / 0.3);
-  animation: am-hey-float calc(var(--am-drift) * 1.4) var(--am-ease-soft) infinite alternate-reverse;
-}
-
-@keyframes am-hey-float {
-  from {
-    transform: translate3d(-6%, -4%, 0) scale(1);
-  }
-  to {
-    transform: translate3d(7%, 5%, 0) scale(1.14);
-  }
-}
-
-.am-hey__text {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  max-width: 74ch;
-}
-
-.am-hey__title {
-  margin: 0;
-  font-size: clamp(24px, 2.6vw, 34px);
-  font-weight: 700;
-  letter-spacing: -0.025em;
-}
-
-.am-hey__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-/* Ряд отбора: кнопка меню слева, лента жанров занимает остальное.
-   min-width: 0 на ленте обязателен — иначе прокрутчик распирает флекс
-   и кнопка уезжает за край. */
-.am-sift {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.am-sift__open {
-  flex: 0 0 auto;
-}
-
-.am-sift__num {
-  padding: 0 7px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--am-bg);
-  background: linear-gradient(135deg, var(--am-accent), var(--am-accent-2));
-  border-radius: var(--am-r-cap);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Жанры одной лентой: восемнадцать чипов переносом занимали три строки
-   и уводили первую полку за сгиб. Края растворяются маской: обрезанный
-   по краю чип честно говорит, что ряд прокручивается. */
-.am-choose {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 2px 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 28px), transparent);
-  overscroll-behavior-x: contain;
-}
-
-.am-choose::-webkit-scrollbar {
-  height: 0;
-}
-
-/* Центровка автоотступами, а не justify-content: когда лента шире экрана,
-   автоотступ обращается в нуль и начало ряда остаётся доступным прокруткой,
-   а центрованный флекс в этом случае срезал бы первые жанры насовсем. */
-.am-choose__row {
-  display: flex;
-  gap: 8px;
-  width: max-content;
-  margin-inline: auto;
-}
-
-.am-choose .am-chip {
-  flex: 0 0 auto;
-}
-
-/* Что сейчас в отборе: снимается по одному нажатием на сам чип. */
-.am-now {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.am-now__off {
-  margin-left: 2px;
-  font-size: 13px;
-  opacity: 0.7;
-}
-
-/* Кнопки в пустом состоянии: выход есть сразу, а не в совете текстом. */
-.am-empty__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 6px;
-}
-
-/* «Показать ещё» по центру под сеткой: у края страницы кнопку
-   приходилось бы искать глазами после каждой порции. */
-.am-more {
-  display: flex;
-  justify-content: center;
-  padding: 6px 0 10px;
-}
-
-.am-shelf {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  animation: am-shelf-in var(--am-slow) var(--am-ease) both;
-}
-
-@keyframes am-shelf-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Своя полка важнее советов каталога, поэтому лежит на стекле:
-   раньше все полки были одного веса и глаз не знал, где своё. */
-.am-shelf--mine {
-  padding: 16px 18px 8px;
-  background: var(--am-glass);
-  border: 1px solid var(--am-line-soft);
-  border-radius: var(--am-r-drop);
-  box-shadow: inset 0 1px 0 var(--am-edge);
-  backdrop-filter: blur(var(--am-blur)) saturate(1.4);
-}
-
-/* Заголовок полки с акцентной засечкой: шесть одинаковых заголовков
-   подряд читались сплошным текстом. */
-.am-shelf .am-h2 {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.am-shelf .am-h2::before {
-  width: 3px;
-  height: 15px;
-  content: '';
-  background: linear-gradient(180deg, var(--am-accent), var(--am-accent-2));
-  border-radius: var(--am-r-cap);
-}
-
-.am-rail {
-  justify-content: start;
-}
-
-.am-hold {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.am-hold__art {
-  display: block;
-  aspect-ratio: 2 / 3;
-}
-
-.am-hold__line {
-  display: block;
-  width: 72%;
-  height: 12px;
-  border-radius: var(--am-r-s);
-}
-
-/* На узком экране кнопка отбора уходит над лентой жанров: рядом им тесно,
-   и лента сжималась до двух чипов. */
-@media (max-width: 560px) {
-  .am-sift {
-    flex-wrap: wrap;
-  }
-
-  .am-choose {
-    flex-basis: 100%;
-  }
-}
-</style>
+  backdrop-filter: blur(var(--am-blur-strong)) saturate(
