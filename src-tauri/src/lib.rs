@@ -98,6 +98,73 @@ fn animori_open_external(app: AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Запускает адрес системной панели двумя заходами. Проводник вторым: тот же
+/// адрес по нажатию в самой Windows открывает он, и там, где плагин отказал,
+/// панель всё равно появляется. Текст отказа несёт обе причины: разбираться
+/// придётся по журналу, и половина ответа там бесполезна.
+#[cfg(windows)]
+fn launch_cast_panel(app: &AppHandle, uri: &str) -> Result<(), String> {
+    if let Err(first) = app.opener().open_url(uri, None::<&str>) {
+        std::process::Command::new("explorer.exe")
+            .arg(uri)
+            .spawn()
+            .map_err(|second| format!("{first}; проводник: {second}"))?;
+    }
+
+    Ok(())
+}
+
+/// Открывает системную панель трансляции экрана и больше ничего: выбор
+/// приёмника делает человек, и чем он кончился, система не сообщает никому.
+///
+/// Своей трансляции у программы нет: отдать поток устройству умеет движок окна,
+/// а WebView2 собран без приёмника вовсе. Зеркалить экран умеет сама Windows,
+/// и весь наш вклад — показать её панель выбора.
+///
+/// Адреса два, и порядок не случаен: в Windows 11 приёмники живут в быстрых
+/// настройках (ms-actioncenter), а если их там вырезали или система старше —
+/// остаётся страница устройств в параметрах. Открылась первая — вторую
+/// не трогаем: две панели подряд хуже, чем ни одной.
+///
+/// Мимо animori_open_external намеренно: там разрешены только http и https.
+/// Расширить ту проверку схемами системы значило бы отдать окну право
+/// запускать любое приложение системы по любому адресу; здесь адреса зашиты
+/// и параметров нет вовсе.
+#[tauri::command]
+fn animori_cast_panel(app: AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        const PANELS: [&str; 2] = [
+            "ms-actioncenter:controlcenter/CAST",
+            "ms-settings:connecteddevices",
+        ];
+
+        let mut last = String::new();
+
+        for uri in PANELS.iter().copied() {
+            match launch_cast_panel(&app, uri) {
+                Ok(()) => {
+                    // Какая из двух открылась — видно только здесь, а разница
+                    // в жалобах «открылось не то» решает всё.
+                    log::info!("Панель трансляции открыта: {uri}");
+                    return Ok(());
+                }
+                Err(e) => last = e,
+            }
+        }
+
+        Err(format!("Панель трансляции не открылась: {last}"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        // Параметр не убран из подписи: команда одна на все платформы,
+        // и разные подписи сломали бы generate_handler! под cfg.
+        let _ = app;
+        Err("Панель трансляции экрана есть только в Windows".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -134,6 +201,7 @@ pub fn run() {
             animori_reload,
             animori_toggle_fullscreen,
             animori_open_external,
+            animori_cast_panel,
             auth::animori_auth_start,
             auth::animori_auth_submit,
             auth::animori_auth_status,
