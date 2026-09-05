@@ -20,7 +20,7 @@ import { toPlayAsk, toTileRow, type TileRow } from '../tile-row'
 /** Пауза после последнего нажатия: каждая буква в сеть — сожжённый темп. */
 const TYPING_PAUSE_MS = 300
 
-/** По скольку тайтлов просить русские названия за заход. */
+/** По скольку аниме просить русские названия за заход. */
 const TITLE_CHUNK = 10
 
 /**
@@ -41,6 +41,27 @@ const hasNext = ref(false)
 const page = ref(1)
 
 const asked = computed(() => word.value.trim())
+
+/**
+ * СЧЁТЧИК ГОВОРИТ О ПОКАЗАННОМ
+ *
+ * Точное число приезжает только с последней страницы. Пока страницы
+ * не кончились, у AniList вместо подсчёта оценка с потолком, и слой сети
+ * отдаёт вместо неё пустоту: над двумя дюжинами постеров стояло «5000».
+ * В таком случае счётчик считает по своей выдаче и честно добавляет плюс —
+ * «27 и ещё», — а не выдумывает каталог целиком.
+ */
+const countText = computed<string>(() => {
+  if (total.value !== null) return String(total.value)
+  return hasNext.value ? `${rows.value.length}+` : String(rows.value.length)
+})
+
+/** Подсказка к счётчику: у точного числа и у «столько-то и ещё» они разные. */
+const countTip = computed<string>(() =>
+  total.value === null && hasNext.value
+    ? 'Показано находок, в каталоге их больше'
+    : 'Найдено в каталоге',
+)
 
 /** Номера идущих работ: ответ на устаревший вопрос в выдачу не попадает. */
 let run = 0
@@ -203,7 +224,7 @@ function onMore(): void {
   void search(true)
 }
 
-/** Переход на карточку найденного тайтла. */
+/** Переход на карточку найденного аниме. */
 function open(mediaId: number): void {
   navigate('media', { id: String(mediaId) })
 }
@@ -245,8 +266,8 @@ onBeforeUnmount(() => {
         placeholder="Название на любом языке"
         @input="onType"
       />
-      <span v-if="total !== null" v-tip="'Найдено в каталоге'" class="am-hunt__num">
-        {{ total }}
+      <span v-if="rows.length > 0" v-tip="countTip" class="am-hunt__num">
+        {{ countText }}
       </span>
     </label>
 
