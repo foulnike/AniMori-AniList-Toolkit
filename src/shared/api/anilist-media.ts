@@ -9,14 +9,28 @@ import { anilistQuery } from './anilist'
 /** Сколько тайтлов просим одним запросом. Потолок страницы у AniList — пятьдесят. */
 const PAGE_SIZE = 50
 
-/** Сколько находок на странице поиска. Больше одного экрана всё равно не читают. */
-export const SEARCH_PAGE_SIZE = 20
+/**
+ * Сколько находок на странице поиска. Двадцать семь, а не двадцать: на широком
+ * окне сетка постеров встаёт по девять в ряд, и число, не кратное девяти,
+ * оставляло последнюю строку рваной — две картинки и пустота до края экрана.
+ * Двадцать семь дают ровно три полных ряда, а на узком окне лишнее просто
+ * уходит ниже сгиба.
+ */
+export const SEARCH_PAGE_SIZE = 27
 
 /**
- * Сколько работ студии просим за заход. Двадцать семь, а не двадцать, как
- * у поиска: на широком окне сетка постеров встаёт по девять в ряд, и число,
- * не кратное девяти, оставляло последнюю строку рваной. Двадцать семь дают
- * ровно три полных ряда, а на узком окне лишнее просто уходит ниже сгиба.
+ * Потолок общего числа находок у AniList.
+ *
+ * Число в ответе — не подсчёт, а оценка сверху: на любом слове, где нашлось
+ * больше одной страницы, сервер отдаёт ровно пять тысяч. Счётчик над двадцатью
+ * постерами показывал именно его и выглядел откровенным враньём. Упёршееся
+ * в потолок число наружу уходит пустотой: пусть выдача считает по себе.
+ */
+const SEARCH_TOTAL_CAP = 5000
+
+/**
+ * Сколько работ студии просим за заход. Двадцать семь по той же причине, что
+ * и у поиска: девять постеров в ряд на широком окне, три полных ряда за заход.
  */
 export const STUDIO_PAGE_SIZE = 27
 
@@ -117,7 +131,7 @@ const CARD_QUERY = `query ($id: Int!) {
 // надо сразу видеть, что из найденного уже в своём списке.
 // Обложка просится large: в сетке постеров medium заметно мылится.
 // Пересмотры, даты и комментарий здесь не спрашиваются: в плитке их не видно,
-// а ответ на двадцать находок тяжелеет зазря.
+// а ответ на две дюжины находок тяжелеет зазря.
 const SEARCH_QUERY = `query ($word: String!, $page: Int!, $perPage: Int!) {
   Page(page: $page, perPage: $perPage) {
     pageInfo {
@@ -396,7 +410,10 @@ export interface MediaBrief {
   ownEntry: ServerEntry | null
 }
 
-/** Страница находок. Общего числа у AniList может и не быть — тогда `null`. */
+/**
+ * Страница находок. Общее число бывает неизвестно — тогда `null`: у поиска
+ * сервер отдаёт оценку с потолком, и врать ею счётчику нельзя.
+ */
 export interface SearchPage {
   items: MediaBrief[]
   hasNext: boolean
@@ -483,6 +500,26 @@ function rememberMalId(mediaId: number, malId: number | null): void {
 /** Целое неотрицательное или `null`: чужие пустоты в числа превращать нельзя. */
 function countOrNull(value: number | null | undefined): number | null {
   return typeof value === 'number' && value > 0 ? value : null
+}
+
+/**
+ * Общее число находок, которому можно верить.
+ *
+ * На последней странице оно считается по себе и точно: сколько страниц прошло
+ * плюс сколько пришло сейчас. Пока страницы не кончились, берётся ответ
+ * сервера, и только если он не упёрся в свой потолок; иначе — пустота,
+ * и подпись над выдачей скажет «столько-то и ещё».
+ */
+function searchTotal(
+  total: number | null | undefined,
+  page: number,
+  got: number,
+  hasNext: boolean,
+): number | null {
+  if (!hasNext) return (page - 1) * SEARCH_PAGE_SIZE + got
+
+  const num = countOrNull(total)
+  return num !== null && num < SEARCH_TOTAL_CAP ? num : null
 }
 
 /** Строка или `null`. Пустая строка равносильна отсутствию значения. */
@@ -645,12 +682,14 @@ export async function searchMedia(word: string, page = 1): Promise<SearchPage | 
     if (brief) items.push(brief)
   }
 
+  const hasNext = found.pageInfo?.hasNextPage === true
+
   Logger('API', `Поиск «${asked}»: страница ${page}, нашлось ${items.length}`)
 
   return {
     items,
-    hasNext: found.pageInfo?.hasNextPage === true,
-    total: countOrNull(found.pageInfo?.total),
+    hasNext,
+    total: searchTotal(found.pageInfo?.total, page, items.length, hasNext),
   }
 }
 
