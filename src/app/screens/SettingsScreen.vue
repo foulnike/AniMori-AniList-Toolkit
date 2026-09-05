@@ -25,6 +25,14 @@
 // нужны только число записей и метка устройства, а обратно — весть, что
 // список сменился.
 //
+// ДВА ИСТОЧНИКА СПИСКА
+// AniList просит вход, потому что чужой список он не отдаёт. Шикимори
+// открытый профиль отдаёт любому, поэтому там достаточно ника: ни входа,
+// ни пропуска, ни своего приложения OAuth ради чтения.
+//
+// Ошибки и итоги у них раздельные. Одна общая строка на две кнопки врала бы
+// первым же промахом: отказ Шикимори читался бы как отказ AniList.
+//
 // ВОПРОСЫ КОРОТКИЕ, ОТВЕТ ЖИВЁТ В КНОПКАХ
 // Раньше подтверждения объясняли разницу способов абзацем на три строки.
 // Абзац этот никто не читал: под ним стоят «Добавить недостающее»
@@ -41,9 +49,11 @@ import {
   entryCount,
   forgetCollection,
   initCollection,
+  pullFromShikimori,
   refreshFromServer,
   unlinkCollection,
   type PullMode,
+  type ShikiPullResult,
 } from '@/core/collection'
 import { datasetStatus, initDatasetNames } from '@/core/dataset-names'
 import { clearCache, getDbStats } from '@/core/db'
@@ -122,6 +132,25 @@ const asking = ref(false)
  * местные записи вернуть потом неоткуда, их нет ни на каком сервере.
  */
 const askingDrop = ref(false)
+
+/**
+ * Ник на Шикимори. Списывается с памяти настроек один раз: общий объект
+ * настроек не реактивен, и v-model по его полю не показал бы набранное.
+ */
+const shikiNick = ref(settings.shikiNick)
+
+/** Спрошено ли подтверждение переноса с Шикимори. Спрашивается по тем же причинам. */
+const askingShiki = ref(false)
+
+/**
+ * Занятость и ответы Шикимори держатся отдельно от общих busy/error/note.
+ * Перенос списка идёт минутами, и общая занятость гасила бы на это время
+ * кнопки AniList и своих данных, к делу непричастные. Общая строка ответа
+ * к тому же встала бы в панели данных — далеко от кнопки, которую нажали.
+ */
+const shikiBusy = ref(false)
+const shikiNote = ref('')
+const shikiError = ref('')
 
 const listCount = ref(0)
 const usedSize = ref('')
@@ -294,6 +323,76 @@ function onCancel(): void {
   asking.value = false
 }
 
+/**
+ * Ник запоминается сразу по уходу из поля, а не только после переноса:
+ * набирать его заново на телевизоре пультом — то ещё удовольствие.
+ */
+function onShikiNick(): void {
+  const clean = shikiNick.value.trim()
+  shikiNick.value = clean
+  void saveSetting('shikiNick', 'am_shiki_nick', clean)
+}
+
+/** Нажатие на перенос с Шикимори: сначала вопрос, действие потом. */
+function onShikiAsk(): void {
+  shikiNote.value = ''
+  shikiError.value = ''
+  askingShiki.value = true
+}
+
+function onShikiCancel(): void {
+  askingShiki.value = false
+}
+
+/**
+ * Потери словами. Тайтлы, которых нет у AniList, в список не попадают вовсе,
+ * и молчать об этом нельзя: человек считает записи глазами и решит, что
+ * программа половину списка съела.
+ */
+function lostText(done: ShikiPullResult): string {
+  if (done.lost === 0) return ''
+  if (done.lostTitles.length === 0) return ` Без пары на AniList: ${done.lost}.`
+
+  const more = done.lost > done.lostTitles.length ? ' и другие' : ''
+  return ` Без пары на AniList ${done.lost}: ${done.lostTitles.join(', ')}${more}.`
+}
+
+/**
+ * Перенос списка с Шикимори по нику. Способы те же два, и вопрос тот же:
+ * замена вычищает всё, включая перенесённое с AniList и добавленное руками.
+ */
+function onShikiPull(mode: PullMode): void {
+  askingShiki.value = false
+
+  void (async () => {
+    shikiBusy.value = true
+    shikiError.value = ''
+    shikiNote.value = ''
+
+    try {
+      // Ник сохраняется до переноса, а не после: перенос долгий, и уйти
+      // с экрана посреди него человек вправе.
+      onShikiNick()
+
+      const done = await pullFromShikimori(shikiNick.value, mode)
+      await readState()
+
+      shikiNote.value =
+        done.mode === 'replace'
+          ? `Список замещён списком ${done.nick} с Шикимори: записей ${done.total}.` +
+            lostText(done)
+          : `Списки слиты: всего ${done.total}, новых ${done.added}, ` +
+            `обновлено ${done.updated}, своих правок сохранено ${done.kept}, ` +
+            `только здесь ${done.onlyHere}.` +
+            lostText(done)
+    } catch (e) {
+      shikiError.value = describe(e)
+    } finally {
+      shikiBusy.value = false
+    }
+  })()
+}
+
 /** Нажатие на удаление списка: тоже только вопрос, без действия. */
 function onAskDrop(): void {
   note.value = ''
@@ -457,8 +556,8 @@ onMounted(() => {
          окна живут в settings-screen.css. -->
     <div class="am-set">
       <div class="am-set__col am-set__col--main">
-        <!-- Импорт списка: откуда список попадает сюда. AniList работает,
-             Шикимори стоит заглушкой — сделаем по тому же образцу. -->
+        <!-- Импорт списка: откуда список попадает сюда. AniList просит вход,
+             Шикимори — только ник. -->
         <div class="am-panel am-box">
           <div class="am-bar">
             <h3 class="am-h3">Импорт списка</h3>
@@ -569,25 +668,75 @@ onMounted(() => {
             <p v-if="error" class="am-error">{{ error }}</p>
           </template>
 
-          <!-- Шикимори: место занято, работы ещё нет. Пунктир и погашенный вид
-               говорят это без слов, а слово «позже» снимает последний вопрос —
-               сломано или не сделано. Обещать сроки строкой в настройках
-               нельзя: обещание живёт дольше, чем помнят, кто его дал. -->
-          <div class="am-place am-place--soon">
+          <!-- Шикимори: ни входа, ни пропуска — только ник. Открытый профиль
+               сайт отдаёт любому, и заводить ради чтения своё приложение OAuth
+               значило бы поставить лишнюю чужую проверку на пути к чужим же
+               данным. Закрытый профиль так не прочитать, и об этом говорится
+               прямо текстом отказа, а не пустым списком. -->
+          <div class="am-place">
             <span class="am-place__mark am-place__mark--shiki" aria-hidden="true">Ш</span>
 
             <span class="am-place__text">
               <span class="am-place__name">Шикимори</span>
               <span class="am-place__note">
-                Импорт сделаем по образцу AniList: список переносится сюда, правки остаются здесь.
-                Русские названия из Шикимори программа берёт уже сейчас — через датасет.
+                Список забирается по нику, без входа: профиль на Шикимори должен быть открытым.
+                Правки, как и с AniList, остаются здесь.
               </span>
             </span>
-
-            <span class="am-place__acts">
-              <span class="am-cloud__soon">позже</span>
-            </span>
           </div>
+
+          <div class="am-row">
+            <label class="am-field">
+              <input
+                v-model="shikiNick"
+                class="am-input"
+                type="text"
+                placeholder="Ник на Шикимори"
+                :disabled="shikiBusy"
+                @change="onShikiNick"
+              />
+            </label>
+            <button
+              v-tip="'Забрать список с Шикимори: слиянием или с заменой'"
+              class="am-btn"
+              type="button"
+              :disabled="shikiBusy || !shikiNick.trim()"
+              @click="onShikiAsk"
+            >
+              {{ shikiBusy ? 'Переносим…' : 'Перенести список' }}
+            </button>
+          </div>
+
+          <!-- Вопрос тот же, что у AniList, и по той же причине: замена
+               вычищает список целиком, включая перенесённое и набранное руками. -->
+          <div v-if="askingShiki" class="am-ask">
+            <p class="am-ask__text">Записей: {{ listCount }}.</p>
+
+            <div class="am-row">
+              <button
+                class="am-btn"
+                type="button"
+                :disabled="shikiBusy"
+                @click="onShikiPull('merge')"
+              >
+                Добавить недостающее
+              </button>
+              <button
+                class="am-btn am-btn--ghost"
+                type="button"
+                :disabled="shikiBusy"
+                @click="onShikiPull('replace')"
+              >
+                Заменить целиком
+              </button>
+              <button class="am-btn am-btn--ghost" type="button" @click="onShikiCancel">
+                Отмена
+              </button>
+            </div>
+          </div>
+
+          <p v-if="shikiNote" class="am-note">{{ shikiNote }}</p>
+          <p v-if="shikiError" class="am-error">{{ shikiError }}</p>
         </div>
 
         <!-- Данные: что лежит на этом диске и что с этим можно сделать. -->
