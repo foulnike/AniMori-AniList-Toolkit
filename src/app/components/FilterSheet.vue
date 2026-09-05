@@ -16,6 +16,13 @@
 // без шанса найти нужный, и тысяча узлов в показе разом. Открыта всегда одна
 // группа, а поиск идёт по всему сразу и группы временно отменяет.
 //
+// ВЗРОСЛОГО НЕТ И СРЕДИ КНОПОК
+// Жанры и тэги проходят через политику показа взрослого, а не только выдача.
+// Прежде проверялась лишь серверная метка у тэгов, а жанр её не носит вовсе:
+// «Хентай» стоял в списке при выключенном тумблере и обещал выдачу, которая
+// всегда приходила пустой. Сам чёрный список живёт в core/adult: разбросать
+// его по экранам значит забыть обновить один из пяти.
+//
 // СВОИ СТРЕЛКИ У ГОДА
 // Поле года — обычный текст с цифровой клавиатурой, а не число: родной
 // счётчик браузера в каждом движке свой, в тёмной теме выглядит чужим
@@ -29,7 +36,7 @@ import {
   type CatalogTag,
   type FeedSort,
 } from '@/api/anilist-catalog'
-import { adultShown } from '@/core/adult'
+import { genreAllowed, tagAllowed } from '@/core/adult'
 import { tagChoices } from '@/core/recs'
 
 import { formatWord, GENRE_CHOICES, genreWord } from '../labels'
@@ -143,10 +150,14 @@ const spans = computed<YearSpan[]>(() => {
   return out
 })
 
-/** Тэги под политикой показа взрослого. */
-const pool = computed<CatalogTag[]>(() =>
-  adultShown() ? tags.value : tags.value.filter((tag) => !tag.adult),
+/** Жанры под политикой показа взрослого. */
+const genreList = computed<string[]>(() =>
+  GENRE_CHOICES.filter((genre) => genreAllowed(genre)),
 )
+
+/** Тэги под политикой показа взрослого: метка сервера, закрытые разделы
+    справочника и свой список имён — всё решается в core/adult. */
+const pool = computed<CatalogTag[]>(() => tags.value.filter((tag) => tagAllowed(tag)))
 
 /** Группы справочника в порядке прихода: он уже по алфавиту. */
 const groups = computed<TagGroup[]>(() => {
@@ -420,7 +431,7 @@ onBeforeUnmount(() => {
             <h3 class="am-h3">Жанры</h3>
             <div class="am-wrap">
               <button
-                v-for="genre in GENRE_CHOICES"
+                v-for="genre in genreList"
                 :key="genre"
                 class="am-chip"
                 :class="{ 'am-chip--on': draft.genres.includes(genre) }"
@@ -585,7 +596,7 @@ onBeforeUnmount(() => {
                     class="am-fold__arrow"
                     :class="{ 'am-fold__arrow--on': openGroup === group.key }"
                     aria-hidden="true"
-                    >⌄</span
+                    >⌊</span
                   >
                 </button>
 
