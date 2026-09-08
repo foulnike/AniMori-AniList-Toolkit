@@ -13,9 +13,16 @@
 // открытую карточку того же тайтла целиком.
 //
 // Датасет — первый источник, но не последняя инстанция: чего в нём нет,
-// спрашивается в рантайме. Сетки тратят на это один заход на тайтл за всю
-// жизнь установки, отказ ложится на склад. Открытая карточка ходит в сеть
-// всегда: один запрос на осознанное нажатие — не та цена, чтобы её копить.
+// спрашивается в рантайме. Сетки спрашивают пачками по пятьдесят номеров
+// и берут только строку имени, отказ ложится на склад. Открытая карточка
+// ходит в сеть всегда: один запрос на осознанное нажатие — не та цена,
+// чтобы её копить.
+//
+// Отсюда следствие, важное для склада: пачечный путь наполняет склад имён
+// (`NAME1_`), но не склад карточек (`RU4_`). Прежде он тащил описание
+// с оценками и голосами на каждый прокрученный тайтл — пятьсот полных
+// карточек ради одной, которую откроют. Теперь описание приезжает при
+// открытии: один запрос по нажатию вместо пятисот на прокрутку.
 //
 // Описание ложится как приехало, с разметкой источника: разбирает его
 // core/rich-text.ts на слое показа.
@@ -23,7 +30,9 @@
 import { CACHE_TIME } from './constants'
 import { lookupDatasetName } from './dataset-names'
 import { dbGet, dbSet } from './db'
+import { settings } from './settings'
 import { fetchMalIds } from '../api/anilist-media'
+import { fetchShikiNames, forgetShikiCards } from '../api/shikimori-media'
 import { resolveTitle } from '../api/titles'
 import { Logger } from '../utils/logger'
 import type { MediaCacheRecord } from './types'
@@ -64,6 +73,12 @@ export interface RussianTitle {
   score: number | null
   /** Распределение голосов Шикимори для их собственной средней. */
   rates: Array<{ name: string; value: number }> | null
+}
+
+/** Тайтл и его номер MAL: пачечным путям нужны оба сразу. */
+interface TitlePair {
+  mediaId: number
+  malId: number
 }
 
 /**
@@ -329,6 +344,70 @@ export async function warmRussianNames(mediaIds: number[]): Promise<number> {
 }
 
 /**
+ * Разрешён ли Шикимори настройками источников. Пачками умеет только он,
+ * и молча обойти чужой выбор нельзя: кто отключил Шикимори, тот отключил
+ * его и для сеток.
+ */
+function shikimoriAllowed(): boolean {
+  return settings.titlePrimary === 'shikimori' || settings.titleFallback === 'shikimori'
+}
+
+/**
+ * Имена пачками: один запрос на пятьдесят тайтлов вместо пятидесяти запросов.
+ * Берётся только строка имени — описание, оценки и голоса сетке не видны,
+ * а весят они в десятки раз больше.
+ *
+ * Три исхода на тайтл, и путать их нельзя. Имя нашлось — в память и на склад
+ * имён. Источник ответил и имени не знает — вечный отказ на склад, сетки
+ * больше не пойдут, но открытая карточка по-прежнему попробует всех.
+ * Источник не ответил вовсе — молчим до следующего раза: записать отказ
+ * из-за упавшего зеркала значило бы соврать навсегда.
+ */
+async function namesInBulk(pairs: TitlePair[]): Promise<number> {
+  const reply = await fetchShikiNames(pairs.map((pair) => pair.malId))
+  let added = 0
+
+  for (const pair of pairs) {
+    try {
+      const russian = reply.names.get(pair.malId)
+      if (russian) {
+        names.set(pair.mediaId, russian)
+        await writeNameCache(pair.mediaId, russian)
+        added++
+        continue
+      }
+
+      if (reply.answered.has(pair.malId)) await writeNoname(pair.mediaId)
+    } catch (e) {
+      // Склад мог не открыться: имя всё равно уже в памяти запуска.
+      Logger('WARN', `Русское имя: тайтл ${pair.mediaId} не лёг на склад`, e)
+    }
+  }
+
+  return added
+}
+
+/**
+ * Прежний путь по одному через все настроенные источники. Остаётся для тех,
+ * кто отключил Шикимори: пачками отвечает только он, а anime365 берёт
+ * по одному номеру за запрос.
+ */
+async function namesOneByOne(pairs: TitlePair[]): Promise<number> {
+  let added = 0
+
+  for (const pair of pairs) {
+    try {
+      if (await fetchByMal(pair.mediaId, pair.malId)) added++
+    } catch (e) {
+      // Один упавший тайтл не повод бросать остальной экран без названий.
+      Logger('WARN', `Русское имя: тайтл ${pair.mediaId} пропущен`, e)
+    }
+  }
+
+  return added
+}
+
+/**
  * Готовит имена для видимого куска списка. Датасет спрашивается первым,
  * склад имён вторым, склад карточек третьим: у давнего пользователя имена
  * лежат только внутри карточек, и без третьего чтения сеть спросили бы
@@ -338,7 +417,9 @@ export async function warmRussianNames(mediaIds: number[]): Promise<number> {
  * один раз и запомнить ответ навсегда: выпуск собран из трёх источников,
  * но спрошенных в другой день, и один тайтл из десятка всё-таки находится.
  *
- * Соответствия MAL берутся пачкой, источники опрашиваются по очереди.
+ * Соответствия MAL берутся пачкой, имена — тоже пачкой: полсотни номеров
+ * за один запрос. Прежде здесь стоял цикл по одному тайтлу, и прокрутка
+ * списка в пятьсот строк стоила источнику пятисот запросов.
  */
 export async function prefetchRussianNames(mediaIds: number[]): Promise<number> {
   const unknown: number[] = []
@@ -389,7 +470,7 @@ export async function prefetchRussianNames(mediaIds: number[]): Promise<number> 
   }
 
   const malIds = await fetchMalIds(unknown)
-  let added = 0
+  const pairs: TitlePair[] = []
 
   for (const mediaId of unknown) {
     const malId = malIds.get(mediaId)
@@ -400,13 +481,16 @@ export async function prefetchRussianNames(mediaIds: number[]): Promise<number> 
       continue
     }
 
-    try {
-      if (await fetchByMal(mediaId, malId)) added++
-    } catch (e) {
-      // Один упавший тайтл не повод бросать остальной экран без названий.
-      Logger('WARN', `Русское имя: тайтл ${mediaId} пропущен`, e)
-    }
+    pairs.push({ mediaId, malId })
   }
+
+  if (pairs.length === 0) {
+    const noMal = unknown.length
+    Logger('INFO', `Русские имена: соответствий MAL нет ни у одного из ${noMal}`)
+    return 0
+  }
+
+  const added = shikimoriAllowed() ? await namesInBulk(pairs) : await namesOneByOne(pairs)
 
   const tail = skipped > 0 ? `, пропущено ${skipped}` : ''
   Logger('INFO', `Русские имена: добыто ${added} из ${unknown.length}${tail}`)
@@ -430,4 +514,9 @@ export function forgetRussianTitles(): void {
   askedNames.clear()
   askedNoname.clear()
   pending.clear()
+
+  // Карточки Шикимори — тоже знание запуска, и лежат они в чужом модуле.
+  // Без этой строки «забыть всё» оставляло бы источник отвечать из памяти,
+  // в том числе прошлым отказом.
+  forgetShikiCards()
 }
