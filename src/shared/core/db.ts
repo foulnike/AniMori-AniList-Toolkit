@@ -354,4 +354,189 @@ export async function clearCache(): Promise<void> {
     }
 
     tx.onerror = () => {
-      Logger('ERRO
+      Logger('ERROR', 'Сброс кэша: транзакция завершилась ошибкой', tx.error)
+      finish()
+    }
+
+    tx.onabort = () => {
+      Logger('ERROR', 'Сброс кэша: транзакция прервана', tx.error)
+      finish()
+    }
+  })
+}
+
+/**
+ * Фоновый GC: курсором по mediaCache удаляет записи старше CACHE_TIME.
+ * При бессрочном сроке хранения выходит сразу, не обходя базу.
+ */
+export async function runGarbageCollector(): Promise<void> {
+  // Срока жизни у записей нет: чистит только clearCache() из настроек.
+  if (!Number.isFinite(CACHE_TIME)) return
+
+  try {
+    const db = await openDB()
+    if (!db) return
+
+    const store = db.transaction(['mediaCache'], 'readwrite').objectStore('mediaCache')
+    const req = store.openCursor()
+    let deletedCount = 0
+
+    req.onsuccess = () => {
+      const cursor = req.result
+      if (cursor) {
+        const record = cursor.value as { ts?: number }
+        if (typeof record.ts === 'number' && Date.now() - record.ts > CACHE_TIME) {
+          cursor.delete()
+          deletedCount++
+        }
+        cursor.continue()
+      } else if (deletedCount > 0) {
+        Logger('DB', `Garbage Collector очистил ${deletedCount} устаревших записей из кэша`)
+      }
+    }
+  } catch (e) {
+    Logger('ERROR', 'Ошибка Garbage Collector', e)
+  }
+}
+
+/**
+ * Снимок БД: оценка размера и количество записей по типам ключей.
+ * На экран настроек идёт одно число — занятый объём; остальное читает экран журнала.
+ *
+ * Обход всех ключей склада — не ежесекундное дело: зовётся по кнопке, а не по таймеру.
+ */
+export async function getDbStats(): Promise<DbStats | DbStatsError> {
+  try {
+    const db = await openDB()
+    if (!db) return { error: 'БД недоступна' }
+
+    // Размер памяти — до открытия транзакции, иначе она успеет закрыться на await.
+    let estimatedSize = 'Неизвестно'
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate()
+        estimatedSize = ((est.usage ?? 0) / 1024 / 1024).toFixed(2) + ' MB'
+      }
+    } catch (e) {
+      Logger('WARN', 'getDbStats: navigator.storage.estimate() недоступен', e)
+    }
+
+    return await new Promise<DbStats | DbStatsError>((resolve) => {
+      const tx = db.transaction(['mediaCache', 'malCache', 'franchiseCache'], 'readonly')
+      const mediaStore = tx.objectStore('mediaCache')
+      const malStore = tx.objectStore('malCache')
+      const franchiseStore = tx.objectStore('franchiseCache')
+
+      const stats: DbStats = {
+        media: 0,
+        characters: 0,
+        staff: 0,
+        themes: 0,
+        russianTitles: 0,
+        noRussianNames: 0,
+        looks: 0,
+        ratings: 0,
+        playable: 0,
+        anilibertyLinks: 0,
+        malMappings: 0,
+        franchises: 0,
+        other: 0,
+        totalCacheRecords: 0,
+        estimatedSize,
+      }
+
+      const malReq = malStore.count()
+      malReq.onsuccess = () => {
+        stats.malMappings = malReq.result
+      }
+
+      const franchiseReq = franchiseStore.count()
+      franchiseReq.onsuccess = () => {
+        stats.franchises = franchiseReq.result
+      }
+
+      const mediaReq = mediaStore.getAllKeys()
+      mediaReq.onsuccess = () => {
+        const keys = mediaReq.result
+        stats.totalCacheRecords = keys.length
+
+        for (const key of keys) {
+          if (typeof key !== 'string') continue
+
+          const known = KEY_PREFIXES.find(([prefix]) => key.startsWith(prefix))
+          if (known) stats[known[1]]++
+          // Незнакомый префикс не пропадает: остаток и есть признак того,
+          // что склад пополнился, а таблица выше про это не знает.
+          else stats.other++
+        }
+      }
+
+      tx.oncomplete = () => resolve(stats)
+      tx.onerror = () => resolve({ error: 'Ошибка чтения метрик БД' })
+      tx.onabort = () => resolve({ error: 'Транзакция чтения метрик БД прервана' })
+    })
+  } catch (e) {
+    Logger('ERROR', 'Сбой getDbStats', e)
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Поле статистики, которое наполняется по префиксу ключа. Отдельный тип,
+ * а не строки в таблице: опечатка в имени поля станет ошибкой сборки,
+ * а не вечным нулём на экране.
+ */
+type PrefixField =
+  | 'media'
+  | 'characters'
+  | 'staff'
+  | 'themes'
+  | 'russianTitles'
+  | 'noRussianNames'
+  | 'looks'
+  | 'ratings'
+  | 'playable'
+  | 'anilibertyLinks'
+
+/**
+ * Что за запись лежит под префиксом ключа. Таблица, а не череда else if:
+ * счётчик тем уже показывал ноль при живом кэше, потому что ветка искала
+ * THEMES_ вместо THEMES2_, а для RU3_, LOOK2_ и RATE1_ веток не было вовсе.
+ *
+ * И второй раз та же беда: таблица отстала от кода на целое поколение
+ * ключей. Искались CHR2_, STF3_, RU3_ и LOOK2_, а пишутся давно уже CHR3_,
+ * STF4_, RU4_ и LOOK3_: при полном складе люди, облики и русские названия
+ * показывали ноль, а всё живое сваливалось в other. Сводка склада — это мерило
+ * того, сколько запросов мы уже не делаем; врущее мерило хуже отсутствующего.
+ *
+ * Мёртвые строки убраны целиком: записей с такими префиксами не пишет никто,
+ * а при следующей смене поколения они бы только подтверждали собой, что
+ * таблица — мусорка, а не опись.
+ *
+ * Порядок важен только внутри одного вида: сравнение идёт первым совпадением.
+ */
+const KEY_PREFIXES: ReadonlyArray<readonly [string, PrefixField]> = [
+  // Писателя у этого префикса пока нет, и ноль в сводке честен: карточка
+  // тайтла на диск не ложится вовсе. Строка стоит заранее, чтобы появление
+  // записи не потребовало правки ещё и здесь.
+  ['MED3_', 'media'],
+  ['CHR3_', 'characters'],
+  ['STF4_', 'staff'],
+  ['THEMES2_', 'themes'],
+  ['RU4_', 'russianTitles'],
+  // Имя тайтла лежит отдельной записью от карточки, но в сводке это один
+  // и тот же вид кэша: два префикса намеренно ведут в одно поле.
+  ['NAME1_', 'russianTitles'],
+  // Отказ «русского имени нет» — тоже знание и тоже запись на диске,
+  // но в russianTitles его складывать нельзя: сводка показывала бы добытых
+  // имён больше, чем добыто. С NAME1_ префикс не путается: ключ NONAME1_123
+  // на NAME1_ не начинается, так что порядок строк здесь ни на что не влияет.
+  ['NONAME1_', 'noRussianNames'],
+  ['LOOK3_', 'looks'],
+  ['RATE1_', 'ratings'],
+  // Два самых многочисленных вида записей до сих пор были безымянными
+  // и целиком уходили в other: метка доступности ставится на каждую виденную
+  // плитку, а соответствие Aniliberty — на каждый опрошенный тайтл.
+  ['PLAY1_', 'playable'],
+  ['ALIB1_', 'anilibertyLinks'],
+]
