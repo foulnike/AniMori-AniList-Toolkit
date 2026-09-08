@@ -1,8 +1,15 @@
 // Соответствие номеров AniList и MyAnimeList, подробности тайтла, поиск
 // и работы студий. Отдельно от anilist-list.ts: там записи пользователя,
 // здесь сами тайтлы. Запрос номеров пакетный: поодиночке темп сгорит.
+//
+// У сети соответствие номеров спрашивается последним: сначала память запуска,
+// потом своя запись списка и карта выпуска animori-data на диске, потом склад
+// IndexedDB. Пара номеров у тайтла не меняется никогда, а спрашивалась она
+// пачками по пятьдесят при каждом запуске заново.
 
-import type { MediaType } from '../core/types'
+import { datasetMalId, initDatasetNames } from '../core/dataset-names'
+import { dbGet, dbSet } from '../core/db'
+import type { MalCacheRecord, MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
 
@@ -48,7 +55,16 @@ function dedupeBriefs(items: MediaBrief[]): MediaBrief[] {
 
 /** MAL-соответствия живут весь запуск: один тайтл нужен нескольким виджетам. */
 const malMemory = new Map<number, number | null>()
-let malInFlight: Promise<void> | null = null
+
+/**
+ * Очередь сетевых обходов за соответствиями: один обход за раз на всё приложение.
+ *
+ * Прежний одиночный флаг проверялся и присваивался в разных тиках, так что два
+ * одновременных вызова успевали увидеть пустоту оба и уходили в сеть с
+ * пересекающимися пачками. Здесь второй обход честно ждёт первого, а дождавшись
+ * — пересчитывает остаток: добытое соседом второй раз не спрашивается.
+ */
+let malChain: Promise<void> = Promise.resolve()
 
 // Вид вписан словом, а не вынесен в переменную: переменная была единственным
 // местом, где ошибка вызова привела бы мангу обратно в ответ.
@@ -433,68 +449,147 @@ export interface StudioPage {
 /**
  * Номера MAL для набора тайтлов AniList. Ключ соответствия — номер AniList.
  * Тайтлы без номера MAL в ответ не попадают: русского источника для них нет.
+ *
+ * Четыре ступени, и сеть — последняя. Память запуска бесплатна; своя запись
+ * списка и карта выпуска лежат на диске и покрывают две трети всего, что
+ * приложение вообще спрашивает; склад помнит то, что когда-то было добыто
+ * сетью, и переживает перезапуск. До этой лестницы каждый холодный старт
+ * заново выкупал у AniList пары номеров, которые не меняются никогда.
  */
 export async function fetchMalIds(ids: number[]): Promise<Map<number, number>> {
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)))
   const found = new Map<number, number>()
-  const unknown = unique.filter((id) => !malMemory.has(id))
+  if (unique.length === 0) return found
 
-  if (unknown.length > 0) {
-    if (malInFlight) await malInFlight
+  // Ступень первая: память запуска.
+  const askDisk = unique.filter((id) => !malMemory.has(id))
 
-    const remaining = unique.filter((id) => !malMemory.has(id))
-    if (remaining.length > 0) {
-      malInFlight = (async () => {
-        for (let from = 0; from < remaining.length; from += PAGE_SIZE) {
-          const chunk = remaining.slice(from, from + PAGE_SIZE)
-          const reply = await anilistQuery<MalReply>(MAL_QUERY, {
-            ids: chunk,
-            perPage: PAGE_SIZE,
-          })
-
-          const media = reply.data?.Page?.media
-          if (!Array.isArray(media)) {
-            Logger('WARN', `Соответствия MAL: пустой ответ на пачку из ${chunk.length}`)
-            continue
-          }
-
-          const seen = new Set<number>()
-          for (const item of media) {
-            if (!item || typeof item.id !== 'number') continue
-            seen.add(item.id)
-            malMemory.set(
-              item.id,
-              typeof item.idMal === 'number' && item.idMal > 0 ? item.idMal : null,
-            )
-          }
-          for (const id of chunk) {
-            if (!seen.has(id)) malMemory.set(id, null)
-          }
-        }
-      })()
-      try {
-        await malInFlight
-      } finally {
-        malInFlight = null
-      }
+  // Ступень вторая: своя запись списка и обратная карта выпуска. Обе на диске,
+  // и подъём датасета ждётся один раз на всю пачку, а не на каждый номер.
+  let fromDataset = 0
+  if (askDisk.length > 0) {
+    await initDatasetNames()
+    for (const id of askDisk) {
+      const malId = datasetMalId(id)
+      if (malId === null) continue
+      malMemory.set(id, malId)
+      fromDataset++
     }
   }
+
+  // Ступень третья: склад. Там лежит добытое сетью в прошлые запуски.
+  const askStore = askDisk.filter((id) => !malMemory.has(id))
+  let fromStore = 0
+  if (askStore.length > 0) {
+    const stored = await Promise.all(
+      askStore.map(async (id) => {
+        const record = await dbGet<MalCacheRecord>('malCache', id)
+        const malId = record?.data?.idMal
+        return { id, malId: typeof malId === 'number' && malId > 0 ? malId : null }
+      }),
+    )
+
+    for (const item of stored) {
+      if (item.malId === null) continue
+      malMemory.set(item.id, item.malId)
+      fromStore++
+    }
+  }
+
+  // Ступень четвёртая: сеть — только за тем, чего не нашлось нигде.
+  const askNet = askStore.filter((id) => !malMemory.has(id))
+  if (askNet.length > 0) await askServerForMal(askNet)
 
   for (const id of unique) {
     const malId = malMemory.get(id)
     if (malId !== null && malId !== undefined) found.set(id, malId)
   }
 
-  if (unique.length > 0) {
-    Logger('API', `Соответствия MAL: спросили ${unique.length}, нашли ${found.size}`)
-  }
+  // Журнал называет цену ответа поимённо: строка, где у сети спрошен ноль,
+  // и есть то, ради чего лестница написана.
+  Logger(
+    'API',
+    `Соответствия MAL: спросили ${unique.length}, из выпуска ${fromDataset}, ` +
+      `со склада ${fromStore}, у сети ${askNet.length}, нашли ${found.size}`,
+  )
 
   return found
 }
 
-/** Запоминает уже полученную пару из подробной карточки. */
+/**
+ * Сетевой обход за соответствиями, пачками по пятьдесят. Идёт по одному
+ * на всё приложение: очередь дешевле, чем две пачки с пересечением.
+ */
+function askServerForMal(wanted: number[]): Promise<void> {
+  const ask = async (): Promise<void> => {
+    // Пока ждали очереди, соседний обход мог добыть часть номеров сам.
+    const remaining = wanted.filter((id) => !malMemory.has(id))
+    if (remaining.length === 0) return
+
+    for (let from = 0; from < remaining.length; from += PAGE_SIZE) {
+      const chunk = remaining.slice(from, from + PAGE_SIZE)
+      const reply = await anilistQuery<MalReply>(MAL_QUERY, {
+        ids: chunk,
+        perPage: PAGE_SIZE,
+      })
+
+      const media = reply.data?.Page?.media
+      if (!Array.isArray(media)) {
+        Logger('WARN', `Соответствия MAL: пустой ответ на пачку из ${chunk.length}`)
+        continue
+      }
+
+      const seen = new Set<number>()
+      for (const item of media) {
+        if (!item || typeof item.id !== 'number') continue
+        seen.add(item.id)
+        rememberMalId(item.id, typeof item.idMal === 'number' && item.idMal > 0 ? item.idMal : null)
+      }
+      // Тайтл, о котором сервер промолчал, номера MAL не имеет: в памяти
+      // запуска это помнится, чтобы не спрашивать снова.
+      for (const id of chunk) {
+        if (!seen.has(id)) malMemory.set(id, null)
+      }
+    }
+  }
+
+  // Хвост очереди берётся и на успехе, и на отказе: упавший обход не имеет
+  // права запереть за собой всех остальных.
+  const next = malChain.then(ask, ask)
+  malChain = next.catch(() => undefined)
+  return next
+}
+
+/**
+ * Запоминает уже полученную пару: в памяти запуска и, если номер есть, на складе.
+ *
+ * Отрицательный ответ на диск не ложится сознательно: у новинки номера MAL
+ * может ещё не быть, а завтра он появится. Вечное «нет» на складе означало бы,
+ * что русского имени у тайтла не будет уже никогда.
+ */
 function rememberMalId(mediaId: number, malId: number | null): void {
-  if (mediaId > 0) malMemory.set(mediaId, malId)
+  if (mediaId <= 0) return
+
+  malMemory.set(mediaId, malId)
+  if (malId === null) return
+
+  void rememberOnDisk(mediaId, malId).catch((e) => {
+    Logger('WARN', `Соответствие MAL ${mediaId}: на склад не легло`, e)
+  })
+}
+
+/**
+ * Кладёт пару номеров на склад. Форма записи полная ради типа стора, но
+ * значение в ней одно — номер MAL: остальное карточка спросит сама, когда
+ * её откроют, и врать складом о ней незачем.
+ */
+async function rememberOnDisk(mediaId: number, malId: number): Promise<void> {
+  const record: MalCacheRecord = {
+    id: mediaId,
+    data: { id: mediaId, type: 'ANIME', idMal: malId },
+  }
+
+  await dbSet('malCache', record)
 }
 
 /** Целое неотрицательное или `null`: чужие пустоты в числа превращать нельзя. */
@@ -621,6 +716,8 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     return null
   }
 
+  // Пара номеров досталась бесплатно вместе с карточкой: пусть переживёт
+  // запуск и снимет с сети один вопрос из пачки в следующий раз.
   rememberMalId(media.id, countOrNull(media.idMal))
 
   return {
