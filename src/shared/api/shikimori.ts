@@ -1,6 +1,11 @@
-// REST-клиент Shikimori: публичные карточки тайтлов с перебором зеркал.
+// Клиент Shikimori: публичные карточки тайтлов и GraphQL, с перебором зеркал.
 // Трактовка кодов и порядок зеркал живут здесь, а не в мосте: мост знает только про HTTP.
 // Куки не шлём: карточкам они не нужны, а 'include' уже давал HTTP 400 из-за размера заголовка.
+//
+// Перебор зеркал, общий бюджет темпа, пауза по 429, учёт доступности и выбор
+// предпочтённого адреса собраны в askMirrors: и GET за карточкой, и POST
+// в GraphQL идут одной дорогой. Прежде GraphQL знали только поиск персон
+// и состав тайтла, и у них была своя копия этой логики со своим таймаутом.
 
 import { Bridge } from '@/bridge'
 import { SHIKI_DOMAINS } from '../core/constants'
@@ -12,6 +17,11 @@ import { MAX_RATE_RETRIES, RateLimitError, shikiLimiter } from './rate-limit'
 const RATE_PAUSE_MS = 5000
 /** Таймаут одного зеркала: дольше ждать нет смысла, лучше уйти на следующее. */
 const MIRROR_TIMEOUT_MS = 5000
+/**
+ * Таймаут запроса в GraphQL. Больше, чем у карточки: одна пачка отвечает
+ * за пятьдесят тайтлов сразу, и пять секунд ей коротки.
+ */
+const GRAPHQL_TIMEOUT_MS = 8000
 
 /**
  * Зеркало, ответившее данными последним. Пробуется первым на остаток сеанса.
@@ -81,16 +91,41 @@ export interface ShikiResponse<T = unknown> {
   domain: string | null
 }
 
+/** Что именно отправляем на зеркало. Путь всегда без домена. */
+interface MirrorRequest {
+  method: 'GET' | 'POST'
+  path: string
+  headers?: Record<string, string>
+  body?: string
+  timeoutMs?: number
+  /** Приписка к строке журнала: у GraphQL путь один на все запросы. */
+  note?: string
+}
+
+/** Конверт ответа GraphQL. Ошибки при наличии данных — частичный ответ, а не сбой. */
+interface GraphqlReply<T> {
+  data?: T | null
+  errors?: unknown
+}
+
 /**
- * GET к Shikimori REST с перебором зеркал и повтором при 429.
- * @param path Путь вида `/api/animes/123`, без домена.
+ * Общий обход зеркал: слот темпа, отчёт о доступности, трактовка кодов,
+ * повтор по 429 и выбор предпочтённого адреса.
+ *
+ * Разбор тела передан вызывающему: `read` обязан бросить исключение на негодном
+ * ответе. Это не придирка к стилю — брошенное здесь исключение означает «беда
+ * ответа, не адреса», и обход честно уходит на следующее зеркало.
+ *
  * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
  */
-export async function fetchShiki<T = unknown>(
-  path: string,
-  attempt = 0,
+async function askMirrors<T>(
+  req: MirrorRequest,
+  read: (text: string) => T,
+  attempt: number,
 ): Promise<ShikiResponse<T>> {
-  Logger('API', `Запрос к Shikimori API: ${path}`)
+  const tail = req.note ? ` — ${req.note}` : ''
+  Logger('API', `Запрос к Shikimori API: ${req.path}${tail}`)
+
   let lastNotFound: ShikiResponse<T> | null = null
   let mirrorFailures = 0
 
@@ -103,9 +138,11 @@ export async function fetchShiki<T = unknown>(
       await shikiLimiter.acquireSlot()
 
       const r = await Bridge.http.request({
-        method: 'GET',
-        url: mirrorUrl(domain, path),
-        timeoutMs: MIRROR_TIMEOUT_MS,
+        method: req.method,
+        url: mirrorUrl(domain, req.path),
+        headers: req.headers,
+        body: req.body,
+        timeoutMs: req.timeoutMs ?? MIRROR_TIMEOUT_MS,
         credentials: 'omit',
       })
 
@@ -117,20 +154,20 @@ export async function fetchShiki<T = unknown>(
         shikiLimiter.pause(RATE_PAUSE_MS)
 
         if (attempt + 1 >= MAX_RATE_RETRIES) {
-          Logger('ERROR', `Shikimori: лимит 429 не отпустил, запрос отменён: ${path}`, {
+          Logger('ERROR', `Shikimori: лимит 429 не отпустил, запрос отменён: ${req.path}`, {
             domain,
             attempts: attempt + 1,
           })
-          throw new RateLimitError('Shikimori', path)
+          throw new RateLimitError('Shikimori', req.path)
         }
 
         Logger(
           'WARN',
           `Shikimori 429 (${domain}): пауза ${RATE_PAUSE_MS}мс, ` +
-            `повтор ${attempt + 2}/${MAX_RATE_RETRIES} — ${path}`,
+            `повтор ${attempt + 2}/${MAX_RATE_RETRIES} — ${req.path}`,
         )
         // Повтор пойдёт через шлюз и сам дождётся конца паузы.
-        return fetchShiki<T>(path, attempt + 1)
+        return await askMirrors<T>(req, read, attempt + 1)
       }
 
       // 404 — возможно удалён по РКН, пробуем следующее зеркало (например .rip).
@@ -144,13 +181,16 @@ export async function fetchShiki<T = unknown>(
         throw new Error(`Shikimori HTTP ${r.status}`)
       }
 
-      // Отметка ставится до разбора JSON: битое тело — беда ответа, а не адреса.
+      const data = read(r.text)
+
+      // Отметка ставится после разбора тела: битое тело — беда ответа, а не адреса,
+      // но и предпочтённым такое зеркало объявлять рано.
       if (preferredDomain !== domain) {
         preferredDomain = domain
         Logger('API', `Shikimori: рабочее зеркало на этот сеанс — ${domain}`)
       }
 
-      return { data: JSON.parse(r.text) as T, domain }
+      return { data, domain }
     } catch (e) {
       // Исчерпание повторов по 429 — не сбой зеркала: бюджет у них общий.
       if (e instanceof RateLimitError) throw e
@@ -166,16 +206,62 @@ export async function fetchShiki<T = unknown>(
 
       // reportError учитывает только транспорт и таймаут; ответ со статусом уже учтён выше.
       reportError(netId(domain), `Shikimori (${domain})`, e, Date.now() - startedAt)
-      Logger('WARN', `Shikimori: зеркало ${domain} не ответило по ${path}`, e)
+      Logger('WARN', `Shikimori: зеркало ${domain} не ответило по ${req.path}`, e)
     }
   }
 
   if (lastNotFound) {
     // Для вызывающего это штатный исход, но в логе он должен быть виден: перевод не появится.
-    Logger('WARN', `Shikimori: данных нет ни на одном зеркале (404): ${path}`)
+    Logger('WARN', `Shikimori: данных нет ни на одном зеркале (404): ${req.path}`)
     return lastNotFound
   }
 
-  Logger('ERROR', `Все зеркала Shikimori недоступны для ${path}`, { mirrorFailures })
-  throw new Error(`Все зеркала Shikimori недоступны для ${path}`)
+  Logger('ERROR', `Все зеркала Shikimori недоступны для ${req.path}`, { mirrorFailures })
+  throw new Error(`Все зеркала Shikimori недоступны для ${req.path}`)
+}
+
+/**
+ * GET к Shikimori REST с перебором зеркал и повтором при 429.
+ * @param path Путь вида `/api/animes/123`, без домена.
+ * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
+ */
+export async function fetchShiki<T = unknown>(
+  path: string,
+  attempt = 0,
+): Promise<ShikiResponse<T>> {
+  return await askMirrors<T>({ method: 'GET', path }, (text) => JSON.parse(text) as T, attempt)
+}
+
+/**
+ * POST в Shikimori GraphQL с тем же перебором зеркал и тем же бюджетом темпа.
+ *
+ * GraphQL отвечает кодом 200 почти всегда, поэтому негодный ответ распознаётся
+ * по пустому `data`: для обхода это равносильно битому телу, и он идёт дальше.
+ * Ошибки рядом с данными не мешают — сервер вправе отдать часть пачки.
+ *
+ * @param note Приписка для журнала: путь у всех запросов один, `/api/graphql`.
+ */
+export async function fetchShikiGraphql<T = unknown>(
+  query: string,
+  variables: Record<string, unknown>,
+  note?: string,
+): Promise<ShikiResponse<T>> {
+  return await askMirrors<T>(
+    {
+      method: 'POST',
+      path: '/api/graphql',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ query, variables }),
+      timeoutMs: GRAPHQL_TIMEOUT_MS,
+      note,
+    },
+    (text) => {
+      const reply = JSON.parse(text) as GraphqlReply<T>
+      if (reply.data === undefined || reply.data === null) {
+        throw new Error('Shikimori GraphQL: ответ без данных')
+      }
+      return reply.data
+    },
+    0,
+  )
 }
