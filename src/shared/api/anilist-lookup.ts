@@ -1,6 +1,10 @@
 // Выписки тайтлов AniList: по чужим номерам MyAnimeList и по своим номерам.
 // Первое нужно поиску на кириллице, второе — постерам своего списка.
 // Отдельно от anilist-media.ts: тот вырос до предела, а дело здесь самостоятельное.
+//
+// Просьбы, пришедшие одновременно, уезжают одной пачкой: на главном экране
+// выписки спрашивают сразу несколько полок, и каждая раньше брала свой
+// запрос, хотя потолок страницы — пятьдесят тайтлов и три полки в него влезают.
 
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
@@ -8,6 +12,23 @@ import type { MediaBrief, ServerEntry } from './anilist-media'
 
 /** Потолок страницы у AniList — пятьдесят записей за запрос. */
 const LOOKUP_PAGE_SIZE = 50
+
+/**
+ * Сколько ждём соседних просьб, миллисекунды.
+ *
+ * Полки главного экрана просят выписки не строго одновременно, а вразброс по
+ * ближайшим тикам, так что микрозадачей их не соберёшь. Пятьдесят миллисекунд
+ * человеку незаметны и в любом случае меньше шага ограничителя темпа,
+ * а выигрыш — целые запросы, которые вовсе не уедут.
+ */
+const MERGE_WINDOW_MS = 50
+
+/**
+ * Потолок копления: четыре полные страницы. Список на полтысячи тайтлов
+ * ждать окна не должен: ему всё равно ехать многими пачками, и склеивать
+ * его с соседями уже незачем.
+ */
+const MERGE_MAX_IDS = LOOKUP_PAGE_SIZE * 4
 
 /** По какому полю сервер отбирает пачку: чужие номера MAL или свои номера. */
 type LookupField = 'idMal_in' | 'id_in'
@@ -85,6 +106,25 @@ interface LookupReply {
     media?: Array<MediaReply | null> | null
   } | null
 }
+
+/** Кто ждёт пачку: обещание одного вызова выписок. */
+interface Waiter {
+  resolve: (found: Map<number, MediaBrief>) => void
+  reject: (reason: unknown) => void
+}
+
+/** Копящаяся пачка по одному полю отбора. */
+interface Batch {
+  ids: Set<number>
+  waiters: Waiter[]
+  timer: number
+}
+
+/**
+ * Незакрытые пачки: по одной на поле отбора. Смешивать поля нельзя:
+ * одни и те же числа у одного поля — номера MAL, у другого — номера AniList.
+ */
+const batches = new Map<LookupField, Batch>()
 
 /** Целое положительное или `null`: чужие пустоты в нули превращать нельзя. */
 function countOrNull(value: number | null | undefined): number | null {
@@ -187,6 +227,67 @@ async function lookupBriefs(field: LookupField, wanted: number[]): Promise<Media
 }
 
 /**
+ * Закрывает копившуюся пачку и раздаёт ответ всем, кто её ждал.
+ *
+ * Найденное раздаётся картой, а не списком: каждый ждущий спрашивал своё
+ * и собирает порядок сам. Отказ тоже общий: один упавший запрос — отказ
+ * всем, иначе полка ждала бы обещания вечно.
+ */
+async function flushBatch(field: LookupField): Promise<void> {
+  const batch = batches.get(field)
+  if (!batch) return
+
+  // Снята сразу: просьбы, пришедшие во время запроса, начнут свою пачку,
+  // а не дольются в ту, которая уже уехала.
+  batches.delete(field)
+  window.clearTimeout(batch.timer)
+
+  const wanted = Array.from(batch.ids)
+
+  try {
+    const byKey = new Map<number, MediaBrief>()
+    for (const brief of await lookupBriefs(field, wanted)) {
+      const key = field === 'idMal_in' ? brief.malId : brief.mediaId
+      if (key !== null) byKey.set(key, brief)
+    }
+
+    for (const waiter of batch.waiters) waiter.resolve(byKey)
+  } catch (e) {
+    for (const waiter of batch.waiters) waiter.reject(e)
+  }
+}
+
+/**
+ * Ставит номера в общую очередь и ждёт общий ответ.
+ *
+ * Две полки по четырнадцать тайтлов раньше стоили двух запросов, хотя вместе
+ * занимают половину страницы. Теперь запрос один, а повторяющиеся номера
+ * уезжают вовсе один раз: пачка — множество.
+ */
+function askLater(field: LookupField, wanted: number[]): Promise<Map<number, MediaBrief>> {
+  return new Promise<Map<number, MediaBrief>>((resolve, reject) => {
+    let batch = batches.get(field)
+
+    if (!batch) {
+      batch = {
+        ids: new Set<number>(),
+        waiters: [],
+        timer: window.setTimeout(() => {
+          void flushBatch(field)
+        }, MERGE_WINDOW_MS),
+      }
+      batches.set(field, batch)
+    }
+
+    for (const id of wanted) batch.ids.add(id)
+    batch.waiters.push({ resolve, reject })
+
+    // Пачка распухла сверх потолка — едет не дожидаясь окна.
+    if (batch.ids.size >= MERGE_MAX_IDS) void flushBatch(field)
+  })
+}
+
+/**
  * Выписки тайтлов по номерам MAL. Порядок ответа — порядок спрошенных
  * номеров: сортировка поиска живёт у того, кто искал, а сервер о ней не знает.
  */
@@ -194,10 +295,7 @@ export async function fetchBriefsByMal(malIds: number[]): Promise<MediaBrief[]> 
   const wanted = cleanIds(malIds)
   if (wanted.length === 0) return []
 
-  const byMal = new Map<number, MediaBrief>()
-  for (const brief of await lookupBriefs('idMal_in', wanted)) {
-    if (brief.malId !== null) byMal.set(brief.malId, brief)
-  }
+  const byMal = await askLater('idMal_in', wanted)
 
   // Порядок собирается по списку спрошенного: так лучшая находка останется сверху.
   const ordered: MediaBrief[] = []
@@ -213,12 +311,22 @@ export async function fetchBriefsByMal(malIds: number[]): Promise<MediaBrief[]> 
 /**
  * Выписки тайтлов по своим номерам AniList. Нужно спискам: снимок держит
  * только состояние записей, а обложки и вид приходят сюда пачками.
+ *
+ * Порядок теперь тоже по списку спрошенного, а не по ответу сервера: пачка
+ * общая, и чужие номера в ней сбили бы порядок сервера. Спискам это даже лучше:
+ * порядок плиток задаёт сам список, а не ответ сети.
  */
 export async function fetchBriefsByIds(mediaIds: number[]): Promise<MediaBrief[]> {
   const wanted = cleanIds(mediaIds)
   if (wanted.length === 0) return []
 
-  const found = await lookupBriefs('id_in', wanted)
+  const byId = await askLater('id_in', wanted)
+
+  const found: MediaBrief[] = []
+  for (const mediaId of wanted) {
+    const brief = byId.get(mediaId)
+    if (brief) found.push(brief)
+  }
 
   Logger('API', `Выписки по номерам: спросили ${wanted.length}, нашли ${found.length}`)
   return found
