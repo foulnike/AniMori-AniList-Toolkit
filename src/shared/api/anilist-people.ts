@@ -1,14 +1,42 @@
 // Персонажи и авторы тайтла. Отдельно от anilist-media.ts: там сам тайтл,
 // здесь люди, и спрашиваются они своим запросом уже после карточки.
+//
+// ОДИН ЗАПРОС НА ВСЮ ЖИЗНЬ УСТАНОВКИ
+// Состав снят с готового тайтла и больше не меняется: озвучка не меняется
+// задним числом, режиссёр вышедшего аниме — тем более. Поэтому люди ложатся
+// на склад бессрочно, и каждый второй взгляд на карточку стоит сети ноль.
+// До этого «главная → тайтл → назад → тот же тайтл» покупало двадцать четыре
+// персонажа с озвучкой дважды.
+//
+// ПУСТОТА НА СКЛАД НЕ ЛОЖИТСЯ
+// У анонса состава ещё нет, а через месяц он появится. Бессрочная запись
+// «людей нет» означала бы, что их не будет уже никогда. Та же развилка, что
+// у отрицательных записей в соседних модулях: вечное «нет» пишется только
+// тогда, когда иначе быть не может.
 
+import { isFresh, LIFE_PEOPLE } from '../core/cache-life'
+import { dbGet, dbSet } from '../core/db'
+import type { MediaCacheRecord } from '../core/types'
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
+import { once } from './rate-limit'
 
 /** Сколько персонажей просим. Дальше первой пачки в карточке не смотрят. */
 const CHARACTER_LIMIT = 24
 
 /** Сколько авторов просим: значимых ролей у тайтла редко больше десятка. */
 const STAFF_LIMIT = 12
+
+/**
+ * Ключи склада. Два разных, а не один общий: сводка склада считает персонажей
+ * и персонал отдельными строками, и эти два префикса в её таблице уже ждут
+ * своего писателя. Цифра — поколение формы записи.
+ */
+const CHAR_PREFIX = 'CHR3_'
+const STAFF_PREFIX = 'STF4_'
+
+/** Люди, уже поднятые со склада в этом запуске: перерисовка не трогает диск. */
+const memory = new Map<number, MediaPeople>()
 
 // Порядок персонажей задаёт сервер: ROLE выносит главных вперёд, и своей
 // сортировки не нужно. Озвучка просится японская: она есть почти всегда,
@@ -138,10 +166,37 @@ function readPerson(raw: PersonReply | null | undefined): PersonRef | null {
 }
 
 /**
- * Персонажи и авторы одного тайтла. Ключ не нужен: люди у всех одни и те же,
- * своей записи в этом ответе нет.
+ * Люди со склада. Обе записи читаются разом и принимаются только вместе:
+ * карточка с персонажами и без авторов выглядит битой, а стоит вторая
+ * половина того же самого запроса.
  */
-export async function fetchMediaPeople(mediaId: number): Promise<MediaPeople> {
+async function readCache(mediaId: number): Promise<MediaPeople | null> {
+  const charKey = `${CHAR_PREFIX}${mediaId}`
+  const staffKey = `${STAFF_PREFIX}${mediaId}`
+
+  const [chars, staff] = await Promise.all([
+    dbGet<MediaCacheRecord<CharacterRef[]>>('mediaCache', charKey),
+    dbGet<MediaCacheRecord<StaffRef[]>>('mediaCache', staffKey),
+  ])
+
+  if (!Array.isArray(chars?.data) || !Array.isArray(staff?.data)) return null
+  if (!isFresh(charKey, chars?.ts, LIFE_PEOPLE)) return null
+
+  return { characters: chars.data, staff: staff.data }
+}
+
+/** Кладёт людей на склад двумя записями. Отказ склада делу не мешает. */
+async function writeCache(mediaId: number, people: MediaPeople): Promise<void> {
+  const ts = Date.now()
+
+  await Promise.all([
+    dbSet('mediaCache', { key: `${CHAR_PREFIX}${mediaId}`, data: people.characters, ts }),
+    dbSet('mediaCache', { key: `${STAFF_PREFIX}${mediaId}`, data: people.staff, ts }),
+  ])
+}
+
+/** Сетевой поход за людьми тайтла и запись добытого на склад. */
+async function load(mediaId: number): Promise<MediaPeople> {
   const reply = await anilistQuery<PeopleReply>(PEOPLE_QUERY, {
     id: mediaId,
     characters: CHARACTER_LIMIT,
@@ -175,7 +230,44 @@ export async function fetchMediaPeople(mediaId: number): Promise<MediaPeople> {
     staff.push({ ...node, role: textOrNull(edge?.role) })
   }
 
+  const people: MediaPeople = { characters, staff }
+
   Logger('API', `Люди тайтла ${mediaId}: ${characters.length} персонажей, ${staff.length} авторов`)
 
-  return { characters, staff }
+  // На склад идёт только найденное: пустота у анонса ещё наполнится,
+  // а бессрочная запись о ней закрыла бы вопрос навсегда.
+  if (characters.length > 0 || staff.length > 0) {
+    memory.set(mediaId, people)
+    void writeCache(mediaId, people).catch((e) => {
+      Logger('WARN', `Люди тайтла ${mediaId}: на склад не легли`, e)
+    })
+  }
+
+  return people
+}
+
+/**
+ * Персонажи и авторы одного тайтла. Ключ не нужен: люди у всех одни и те же,
+ * своей записи в этом ответе нет.
+ *
+ * Память запуска, затем склад, затем сеть. Два одновременных вопроса об одном
+ * тайтле — один запрос: карточку открывают и сразу листают вниз к составу,
+ * а подписок у этого вопроса бывает две сразу.
+ */
+export async function fetchMediaPeople(mediaId: number): Promise<MediaPeople> {
+  const known = memory.get(mediaId)
+  if (known) return known
+
+  const stored = await readCache(mediaId)
+  if (stored) {
+    memory.set(mediaId, stored)
+    return stored
+  }
+
+  return await once(`people-${mediaId}`, () => load(mediaId))
+}
+
+/** Забыть людей в памяти запуска. Зовётся при ручной очистке склада. */
+export function forgetMediaPeople(): void {
+  memory.clear()
 }
