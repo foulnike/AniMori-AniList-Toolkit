@@ -7,9 +7,16 @@
 // Экран не отладочный по замыслу: замеры этапа 2 снимать больше нечем,
 // а «пришлите, что в журнале» — единственный внятный вопрос человеку,
 // у которого что-то не работает.
+//
+// Здесь же живут два счётчика бережливости: бюджет источников и склад.
+// Оба существовали и раньше, но читателя у них не было ни одного, а мерило,
+// которое никто не видит, не удерживает от лишнего запроса.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+import { collectRateStats, type RateLimiterStats } from '@/api/rate-limit'
 import { Bridge } from '@/bridge'
+import { getDbStats } from '@/core/db'
+import type { DbStats } from '@/core/types'
 import { clearLogs, readLogs, registerLogSink, type LogEntry, type LogType } from '@/utils/logger'
 
 /**
@@ -24,6 +31,9 @@ const KINDS: ReadonlyArray<LogType> = ['ERROR', 'WARN', 'INFO', 'API', 'DB']
  */
 const PAGE = 120
 
+/** Как часто обновляется бюджет, пока панель открыта. Чаще секунды читать нечего. */
+const BUDGET_TICK_MS = 1000
+
 const rows = ref<LogEntry[]>([])
 const kind = ref<LogType | 'all'>('all')
 const limit = ref(PAGE)
@@ -31,6 +41,14 @@ const note = ref('')
 
 /** Развёрнутые подробности: по номеру записи, а не флагом в самой записи. */
 const opened = ref<Set<number>>(new Set())
+
+const budgetOn = ref(false)
+const budget = ref<RateLimiterStats[]>([])
+let budgetTimer: number | undefined
+
+const store = ref<DbStats | null>(null)
+const storeNote = ref('')
+const storeBusy = ref(false)
 
 /** Свежие сверху: читают последнее, а не первое. */
 function fresh(all: ReadonlyArray<LogEntry>): LogEntry[] {
@@ -68,6 +86,55 @@ function toggle(id: number): void {
   if (next.has(id)) next.delete(id)
   else next.add(id)
   opened.value = next
+}
+
+function refreshBudget(): void {
+  budget.value = collectRateStats()
+}
+
+/**
+ * Панель бюджета складная и опрашивается только открытой. Снимок дешёвый,
+ * но опрос ради закрытой панели — та же расточительность, о которой весь
+ * этот экран и заведён, только обращённая внутрь программы.
+ */
+function toggleBudget(): void {
+  budgetOn.value = !budgetOn.value
+
+  if (!budgetOn.value) {
+    if (budgetTimer !== undefined) window.clearInterval(budgetTimer)
+    budgetTimer = undefined
+    return
+  }
+
+  refreshBudget()
+  budgetTimer = window.setInterval(refreshBudget, BUDGET_TICK_MS)
+}
+
+/** Секунды для человека: «12 с» читается быстрее, чем 11713 мс. */
+function secs(ms: number): string {
+  return `${Math.ceil(ms / 1000)} с`
+}
+
+/**
+ * Склад считается по кнопке, а не сам собой: getDbStats обходит все ключи
+ * mediaCache, а их бывает под сотню тысяч. Открытый экран не должен стоить
+ * полного обхода базы каждую секунду — это ровно та беспечность, от которой
+ * страдают чужие серверы, только здесь страдает свой диск.
+ */
+async function onStore(): Promise<void> {
+  storeBusy.value = true
+  storeNote.value = ''
+
+  const res = await getDbStats()
+  storeBusy.value = false
+
+  if ('error' in res) {
+    store.value = null
+    storeNote.value = res.error
+    return
+  }
+
+  store.value = res
 }
 
 /** Подробности строкой. Ошибка разбора не должна ронять сам просмотрщик. */
@@ -135,6 +202,9 @@ onBeforeUnmount(() => {
   // Снимать обязательно: иначе подписка переживёт экран и будет дёргать
   // перерисовку выброшенных строк до конца жизни окна.
   registerLogSink(null)
+
+  // То же и с опросом бюджета: экран закрыт, а таймер тикал бы до конца сессии.
+  if (budgetTimer !== undefined) window.clearInterval(budgetTimer)
 })
 </script>
 
@@ -171,6 +241,71 @@ onBeforeUnmount(() => {
       </div>
 
       <span v-if="note" class="am-meta">{{ note }}</span>
+    </div>
+
+    <div class="am-log__tools">
+      <button class="am-btn am-btn--soft" type="button" @click="toggleBudget">
+        {{ budgetOn ? 'Скрыть бюджет' : 'Бюджет источников' }}
+      </button>
+      <button class="am-btn am-btn--soft" type="button" :disabled="storeBusy" @click="onStore">
+        {{ storeBusy ? 'Считаем склад…' : 'Пересчитать склад' }}
+      </button>
+      <span v-if="storeNote" class="am-meta">{{ storeNote }}</span>
+    </div>
+
+    <div v-if="budgetOn" class="am-log__panel">
+      <table class="am-log__grid">
+        <thead>
+          <tr>
+            <th>Источник</th>
+            <th>В окне</th>
+            <th>Осталось</th>
+            <th>Темп</th>
+            <th>Пауза</th>
+            <th>Ушло всего</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="one in budget" :key="one.name">
+            <td>{{ one.name }}</td>
+            <td>{{ one.inWindow }} / {{ one.ceiling }}</td>
+            <td>{{ one.remaining }}</td>
+            <td>{{ one.intervalMs }} мс</td>
+            <td>{{ one.pauseRemaining > 0 ? secs(one.pauseRemaining) : '—' }}</td>
+            <td>{{ one.sentTotal }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="am-meta">
+        Окно учёта — минута. «Ушло всего» считается с запуска программы: это и есть
+        цена сеанса для чужих серверов.
+      </p>
+    </div>
+
+    <div v-if="store" class="am-log__panel">
+      <ul class="am-log__store">
+        <li><span>Русские названия</span><b>{{ store.russianTitles }}</b></li>
+        <li><span>Отказы «имени нет»</span><b>{{ store.noRussianNames }}</b></li>
+        <li><span>Облики плиток</span><b>{{ store.looks }}</b></li>
+        <li><span>Метки доступности</span><b>{{ store.playable }}</b></li>
+        <li><span>Соответствия Aniliberty</span><b>{{ store.anilibertyLinks }}</b></li>
+        <li><span>Персонажи</span><b>{{ store.characters }}</b></li>
+        <li><span>Персонал</span><b>{{ store.staff }}</b></li>
+        <li><span>Темы</span><b>{{ store.themes }}</b></li>
+        <li><span>Оценки площадок</span><b>{{ store.ratings }}</b></li>
+        <li><span>Карточки тайтлов</span><b>{{ store.media }}</b></li>
+        <li><span>Номера MAL</span><b>{{ store.malMappings }}</b></li>
+        <li><span>Франшизы</span><b>{{ store.franchises }}</b></li>
+        <li><span>Прочее</span><b>{{ store.other }}</b></li>
+        <li class="am-log__store--sum">
+          <span>Всего записей</span><b>{{ store.totalCacheRecords }}</b>
+        </li>
+        <li class="am-log__store--sum"><span>Занято</span><b>{{ store.estimatedSize }}</b></li>
+      </ul>
+      <p class="am-meta">
+        Каждая запись здесь — запрос, которого мы больше не делаем. Нули у карточек
+        и номеров MAL правдивы: на диск они пока не ложатся.
+      </p>
     </div>
 
     <div v-if="rows.length === 0" class="am-empty">
@@ -249,6 +384,83 @@ onBeforeUnmount(() => {
 
 .am-log__kinds .am-seg__btn {
   flex: 0 0 auto;
+}
+
+/* Две кнопки счётчиков стоят своей полосой, а не в шапке: там уже живут
+   действия над самим журналом, и путать их не надо. */
+.am-log__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.am-log__panel {
+  padding: 12px 14px;
+  background: var(--am-fill-1);
+  border: 1px solid var(--am-line-soft);
+  border-radius: var(--am-r-m);
+}
+
+.am-log__panel .am-meta {
+  display: block;
+  margin: 10px 0 0;
+}
+
+.am-log__grid {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.am-log__grid th {
+  padding: 0 10px 8px 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--am-faint);
+  text-align: left;
+  letter-spacing: 0.04em;
+}
+
+.am-log__grid td {
+  padding: 6px 10px 6px 0;
+  color: var(--am-text);
+  border-top: 1px solid var(--am-line-soft);
+}
+
+/* Склад — не таблица: пар «что» и «сколько» много, а колонок всего две,
+   и на узком окне сетка ложится в один столбец сама. */
+.am-log__store {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 18px;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  list-style: none;
+}
+
+.am-log__store li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--am-line-soft);
+}
+
+.am-log__store span {
+  color: var(--am-dim);
+}
+
+.am-log__store b {
+  color: var(--am-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.am-log__store--sum b {
+  color: var(--am-accent);
 }
 
 .am-log {
