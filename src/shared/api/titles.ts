@@ -5,11 +5,14 @@
 // Описание отдаётся как приехало, с разметкой источника: разбирает её
 // core/rich-text.ts на слое показа. Прежде теги вырезались здесь, и вместе
 // с ними терялись ссылки на другие тайтлы, спойлеры и начертания.
+//
+// Карточка Шикимори берётся через общего добытчика (shikimori-media.ts):
+// оценки площадок грузятся рядом и просят ту же самую запись, а раньше
+// каждый ходил за ней сам — два одинаковых запроса на одно открытие тайтла.
 
 import { settings } from '../core/settings'
-import { fetchShiki } from './shikimori'
+import { fetchShikiAnime } from './shikimori-media'
 import { fetchAnime365ByMal } from './anime365'
-import type { ShikiMedia } from '../core/types'
 
 export interface ResolvedTitle {
   russian: string
@@ -44,7 +47,11 @@ export async function resolveTitle(malId: number | null): Promise<ResolvedTitle 
 
   for (const src of order) {
     if (src === 'shikimori') {
-      const shiki = await fetchShiki<ShikiMedia>(`/api/animes/${malId}`)
+      // Без номера MAL спрашивать не по чему: прежде такой вызов уезжал
+      // за `/api/animes/null` и тратил чужой бюджет ради гарантированного 404.
+      if (malId === null) continue
+
+      const shiki = await fetchShikiAnime(malId)
       if (shiki.data?.russian) {
         const rawScore = Number(shiki.data.score)
         return {

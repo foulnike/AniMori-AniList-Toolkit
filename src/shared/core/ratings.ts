@@ -4,11 +4,16 @@
 // Поле score у карточки Шикимори — зеркало оценки MAL, а собственная
 // средняя Шикимори считается из распределения голосов: перенос виджета
 // оценок скрипта.
+//
+// Сама карточка берётся через общего добытчика api/shikimori-media.ts: ту же
+// запись в тот же миг просит русское название, и второй запрос был бы
+// буквально копией первого. Склад у них по-прежнему свой: оценки ложатся
+// под `RATE1_`, а название с описанием — под `RU4_`.
 
 import { dbGet, dbSet } from './db'
-import { fetchShiki } from '../api/shikimori'
+import { fetchShikiAnime } from '../api/shikimori-media'
 import { Logger } from '../utils/logger'
-import type { MediaCacheRecord, ShikiMedia } from './types'
+import type { MediaCacheRecord } from './types'
 
 /** Префикс ключа на складе. Цифра — версия формы записи. */
 const KEY_PREFIX = 'RATE1_'
@@ -61,7 +66,7 @@ async function load(mediaId: number, malId: number): Promise<TitleRatings | null
     }
   }
 
-  const reply = await fetchShiki<ShikiMedia>(`/api/animes/${malId}`)
+  const reply = await fetchShikiAnime(malId)
 
   if (!reply.data) {
     memory.set(mediaId, null)
