@@ -203,10 +203,34 @@ function learnRateHeaders(headers: Record<string, string>): void {
   anilistLimiter.pause(Math.min(wait + 500, 60000))
 }
 
-/** Сколько ждать после 429: заголовок retry-after в секундах либо дефолт. */
+/**
+ * Сколько ждать после 429.
+ *
+ * Заголовок retry-after приходит в двух видах: числом секунд и датой по HTTP.
+ * Разбирались только секунды, а дата превращалась в NaN и молча подменялась
+ * дефолтом — то есть сервер называл срок, а мы шли на своих пяти секундах,
+ * раньше, чем нас позвали. Именно так вежливый клиент и превращается
+ * в источник лишних запросов при аварии.
+ */
 function readRetryAfter(headers: Record<string, string>): number {
-  const seconds = headerNumber(headers, 'retry-after')
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_MS
+  const raw = header(headers, 'retry-after').trim()
+  if (raw === '') return DEFAULT_RETRY_MS
+
+  // Вид «секунды». Number, а не parseInt: «120abc» — это не срок, а мусор,
+  // и принимать его за две минуты хуже, чем не понять вовсе.
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000
+
+  // Вид «дата»: срок считается от неё, а не от текущего мгновения.
+  const until = Date.parse(raw)
+  if (Number.isFinite(until)) {
+    const wait = until - Date.now()
+    // Названный срок уже прошёл: идти можно, но не в тот же миг — часы
+    // у нас и у сервера расходятся, а второй 429 обойдётся дороже паузы.
+    return wait > 0 ? wait : DEFAULT_RETRY_MS
+  }
+
+  return DEFAULT_RETRY_MS
 }
 
 /**
@@ -323,9 +347,18 @@ export async function anilistQuery<T = unknown>(
       throw new Error('AniList Rate Limit: повторы исчерпаны')
     }
 
+    // Назначенный срок длиннее порога — не высиживаем его внутри вызова.
+    // Пауза уже стоит: следующий заход подождёт её сам и уйдёт вовремя,
+    // а висящее полминуты обещание для человека выглядит зависанием.
+    if (waitTime > MAX_INLINE_WAIT_MS) {
+      const seconds = Math.ceil(waitTime / 1000)
+      Logger('ERROR', `AniList Rate Limit 429: сервер назвал ${seconds}с — ждём вне запроса`, res)
+      throw new Error(`AniList Rate Limit: повтор через ${seconds}с`)
+    }
+
     Logger(
       'ERROR',
-      `AniList Rate Limit 429! Ожидание ${waitTime}ms (попытка ${attempt + 1} из ${MAX_RATE_RETRIES})`,
+      `AniList Rate Limit 429! Ожидание ${waitTime}ms (повтор ${attempt + 1} из ${MAX_RATE_RETRIES})`,
       res,
     )
     await sleep(waitTime + 500 + Math.floor(Math.random() * 500))

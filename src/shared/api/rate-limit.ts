@@ -2,8 +2,16 @@
 // Один на источник, а не на домен: лимит считается по IP, зеркала делят бюджет.
 // Про HTTP и коды ответа модуль не знает: выдаёт разрешение отправить и хранит паузу.
 
-/** Потолок повторов запроса, упёршегося в 429: без него повтор был бесконечным. */
-export const MAX_RATE_RETRIES = 3
+/**
+ * Потолок повторов запроса, упёршегося в 429: без него повтор был бесконечным.
+ *
+ * Было три, стало один. Три повтора при паузе в пять секунд превращали один
+ * вопрос к серверу в четыре запроса и двадцать секунд ожидания — и делалось
+ * это ровно в тот момент, когда сервер уже сказал «слишком часто». Один
+ * повтор покрывает случайное совпадение с чужим всплеском; всё, что дольше,
+ * — это уже отступ, и держать его должна пауза, а не череда попыток.
+ */
+export const MAX_RATE_RETRIES = 1
 
 /**
  * Единый режим темпа: пять запросов в секунду и шестьдесят в минуту.
@@ -35,7 +43,9 @@ export const CEILING_RECOVERY_MS = 300000
  */
 export class RateLimitError extends Error {
   constructor(source: string, target: string) {
-    super(`${source}: лимит запросов не отпустил за ${MAX_RATE_RETRIES} попытки (${target})`)
+    // Число отдельно от слова: при MAX_RATE_RETRIES = 1 прежняя строка
+    // «не отпустил за 1 попытки» читалась бы как опечатка в журнале.
+    super(`${source}: лимит запросов не отпустил, повторов было ${MAX_RATE_RETRIES} (${target})`)
     this.name = 'RateLimitError'
   }
 }
@@ -55,6 +65,33 @@ export interface RateLimiterOptions {
   deriveInterval?: boolean
 }
 
+/**
+ * Снимок состояния одного источника. Полей больше, чем было: прежние четыре
+ * числа отвечали на вопрос «жив ли тормоз», а спрашивают у него другое —
+ * «сколько мы уже потратили и сколько осталось». Именно это показывает
+ * читатель бюджета на экране журнала.
+ */
+export interface RateLimiterStats {
+  /** Имя источника — то же, что в текстах ошибок. */
+  name: string
+  /** Запросов внутри окна учёта прямо сейчас. */
+  inWindow: number
+  /** Действующий потолок за окно: меняется по заголовкам и после 429. */
+  ceiling: number
+  /** Сколько ещё можно отправить до конца окна. */
+  remaining: number
+  /** Длина окна учёта: без неё остаток нечем истолковать. */
+  windowMs: number
+  /** Действующий промежуток между стартами двух запросов. */
+  intervalMs: number
+  /** Осталось до конца паузы; ноль — паузы нет. */
+  pauseRemaining: number
+  /** Слотов выдано с запуска программы. Это и есть счёт нашего расхода. */
+  sentTotal: number
+  /** Когда уходил последний запрос. Ноль — ни одного за сессию. */
+  lastSentAt: number
+}
+
 export interface RateLimiter {
   readonly name: string
   /** Ждёт своей очереди на отправку. Возврат = разрешение отправить один запрос. */
@@ -72,12 +109,27 @@ export interface RateLimiter {
   applyCeiling: (limit: number) => void
   /** Урезает потолок вдвое после 429 и закрывает его рост на время восстановления. */
   reduceCeiling: () => void
-  /** Снимок состояния, только чтение. Читателя нет: инспектор журнала удалён. */
-  stats: () => { inWindow: number; pauseRemaining: number; ceiling: number; intervalMs: number }
+  /** Снимок состояния, только чтение. Читатель — экран журнала (#/log). */
+  stats: () => RateLimiterStats
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Перечень созданных ограничителей в порядке появления.
+ *
+ * Нужен читателю бюджета: без перечня экран журнала пришлось бы держать
+ * в курсе каждого нового источника руками, а забытый источник — это ровно
+ * тот случай, когда сводка показывает ноль и выглядит правдой. Раз запись
+ * идёт из самой мастерской, забыть источник нельзя.
+ */
+const allLimiters: RateLimiter[] = []
+
+/** Снимок по всем источникам сразу. Порядок — как создавались. */
+export function collectRateStats(): RateLimiterStats[] {
+  return allLimiters.map((limiter) => limiter.stats())
 }
 
 /** Создаёт независимый ограничитель темпа для одного источника. */
@@ -95,6 +147,8 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   let pausedUntil = 0
   /** Время последней выдачи слота. */
   let lastSentAt = 0
+  /** Сколько слотов выдано за всю сессию. Только для сводки, в решениях не участвует. */
+  let sentTotal = 0
   /** Отметки выдач за последнее окно. */
   const recentSends: number[] = []
   /**
@@ -107,6 +161,22 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   function currentInterval(): number {
     if (!deriveInterval) return minIntervalMs
     return Math.max(minIntervalMs, Math.ceil(windowMs / Math.max(1, ceiling)))
+  }
+
+  /**
+   * Сколько отметок попадает в окно на данный момент.
+   *
+   * Считается заново, а не берётся длиной массива: чистка отметок идёт только
+   * внутри выдачи слота, и в тишине там остаётся вчерашний хвост. Выдача из-за
+   * этого не страдала — она чистит перед проверкой, — а вот сводка показывала
+   * израсходованным окно, в котором давно никого нет.
+   */
+  function countInWindow(now: number): number {
+    let count = 0
+    for (const at of recentSends) {
+      if (now - at < windowMs) count++
+    }
+    return count
   }
 
   async function acquireSlot(): Promise<void> {
@@ -138,6 +208,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         if (waits.length === 0) {
           lastSentAt = Date.now()
           recentSends.push(lastSentAt)
+          sentTotal++
           return
         }
 
@@ -148,7 +219,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     }
   }
 
-  return {
+  const limiter: RateLimiter = {
     name,
     acquireSlot,
     pause(ms: number): void {
@@ -175,15 +246,27 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       ceiling = Math.max(RATE_FLOOR_PER_WINDOW, Math.floor(ceiling / 2))
       ceilingLockedUntil = Date.now() + CEILING_RECOVERY_MS
     },
-    stats() {
+    stats(): RateLimiterStats {
+      const now = Date.now()
+      const inWindow = countInWindow(now)
+
       return {
-        inWindow: recentSends.length,
-        pauseRemaining: Math.max(0, pausedUntil - Date.now()),
+        name,
+        inWindow,
         ceiling,
+        remaining: Math.max(0, ceiling - inWindow),
+        windowMs,
         intervalMs: currentInterval(),
+        pauseRemaining: Math.max(0, pausedUntil - now),
+        sentTotal,
+        lastSentAt,
       }
     },
   }
+
+  allLimiters.push(limiter)
+
+  return limiter
 }
 
 /**
