@@ -139,6 +139,25 @@ export async function lookupDatasetName(mediaId: number): Promise<DatasetAnswer>
   return russian === '' ? { kind: 'none' } : { kind: 'name', name: russian }
 }
 
+/**
+ * Номер MAL по номеру AniList из установленного выпуска, без сети.
+ *
+ * Своя запись списка спрашивается первой по той же причине, что и у имени:
+ * там номер дал сам AniList, и он точнее любого слепка. Карта выпуска —
+ * вторая ступень: две трети всех пар лежат на диске и не меняются никогда.
+ *
+ * Синхронная сознательно: зовётся из сетевого слоя в цикле по пачке тайтлов,
+ * и обещание на каждый номер там ни к чему. Датасет к тому моменту уже поднят:
+ * вызывающая сторона дожидается initDatasetNames один раз на всю пачку.
+ * Пустота значит «в выпуске этой пары нет», а не «пары не существует».
+ */
+export function datasetMalId(mediaId: number): number | null {
+  const own = getEntry(mediaId)?.malId
+  if (typeof own === 'number' && own > 0) return own
+
+  return byAnilist?.get(mediaId) ?? null
+}
+
 /** Состояние датасета для карточки «О программе»: честный снимок без сети. */
 export interface DatasetStatus {
   loaded: boolean
