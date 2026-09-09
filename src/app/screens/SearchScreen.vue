@@ -9,6 +9,14 @@
 // разрыва между нажатиями, порога длины не было вовсе, а возврат к уже
 // спрошенному слову считался новым вопросом. Теперь запрос ждёт конца слова,
 // короткое слово ждёт Enter, а повтор того же слова не уходит никуда.
+//
+// МЕТКИ ДОСТУПНОСТИ СПРАШИВАЮТСЯ ПО ПОКАЗУ
+//
+// Выдача целиком уходила в очередь меток: два с лишним десятка вопросов чужим
+// службам на страницу, из которых человек видел первые полтора ряда. Теперь
+// склад поднимается по всей выдаче — он даром и разом, — а сеть спрашивает
+// только о плитках, попавших в окно. До хвоста не долистали — о нём и не
+// спросили; отметку о показе приносит директива v-seen.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
@@ -17,7 +25,7 @@ import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { isSearchable, MIN_WORD_LEN, searchCatalog, tidyWord } from '@/core/media-search'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
-import { onPlayableChange, peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
+import { onPlayableChange, peekPlayable, primePlayable, requestPlayable } from '@/core/playable'
 import { Logger } from '@/utils/logger'
 
 import MediaTile from '../components/MediaTile.vue'
@@ -40,6 +48,12 @@ const TITLE_CHUNK = 10
  * а каждая строка стоит отдельного похода к источнику через очередь темпа.
  */
 const TITLE_DEPTH = 20
+
+/**
+ * Пауза перед заказом меток показанным плиткам. Прокрутка приводит их десятками,
+ * и без придержки каждый ряд будил бы очередь ядра отдельно.
+ */
+const SEEN_PAUSE_MS = 200
 
 /** Сколько плиток-заглушек показать, пока идёт первый ответ. */
 const HOLD_COUNT = 12
@@ -90,6 +104,16 @@ let lastAsked = ''
 /** Найденные выписки этого показа: по ним плитки перерисовываются с названиями. */
 let briefs: MediaBrief[] = []
 
+/** Тайтлы, чьи плитки человек уже видел: только о них спрашиваются источники. */
+const seenIds = new Set<number>()
+let seenTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Идущий подъём меток со склада. Заказ в сеть ждёт его: спрашивать чужие службы
+ * о том, что вот-вот приедет с диска, — худший из возможных запросов.
+ */
+let priming: Promise<void> = Promise.resolve()
+
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -133,15 +157,11 @@ async function fillTitles(): Promise<void> {
 }
 
 /**
- * Добирает метки доступности. Сначала склад — он отвечает даром и разом по всей
- * выдаче, — и только потом сеть. Метка нужна здесь больше всего: половину
- * каталога наши источники не показывают, и без неё человек узнаёт об этом
- * только внутри плеера.
- *
- * Спрашивается вся выдача, а не верх списка: темп держит очередь ядра,
- * и решать за неё, скольким строкам повезло, экрану не нужно.
+ * Поднимает метки доступности со склада. Сети не касается вовсе, поэтому
+ * спрашивается вся выдача разом, включая хвост за прокруткой: однажды
+ * спрошенное показывается целиком и даром.
  */
-async function fillPlay(): Promise<void> {
+async function loadMarks(): Promise<void> {
   const mine = ++playRun
   if (briefs.length === 0) return
 
@@ -149,24 +169,46 @@ async function fillPlay(): Promise<void> {
     const primed = await primePlayable(briefs.map((brief) => brief.mediaId))
     if (mine !== playRun) return
     if (primed > 0) redraw()
-
-    const wanted = briefs
-      .filter((brief) => peekPlayable(brief.mediaId) === null)
-      .map((brief) => toPlayAsk(brief))
-
-    if (wanted.length === 0) return
-
-    // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
-    setupVideoSources()
-
-    await warmPlayable(wanted)
-    if (mine !== playRun) return
-
-    redraw()
   } catch (e) {
     // Без метки выдача живая: плитка про доступность просто молчит.
-    Logger('WARN', 'Поиск: метки доступности не доехали', e)
+    Logger('WARN', 'Поиск: метки со склада не поднялись', e)
   }
+}
+
+/**
+ * Заказывает метки показанным плиткам. Ответы приезжают подпиской, поэтому
+ * ждать здесь нечего: темп источников держит очередь ядра.
+ */
+async function askSeen(): Promise<void> {
+  await priming
+
+  const wanted = briefs.filter(
+    (brief) => seenIds.has(brief.mediaId) && peekPlayable(brief.mediaId) === null,
+  )
+  seenIds.clear()
+
+  if (wanted.length === 0) return
+
+  // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
+  setupVideoSources()
+
+  requestPlayable(wanted.map((brief) => toPlayAsk(brief)))
+}
+
+/**
+ * Плитка показалась человеку. Номера копятся пачкой: прокрутка приводит их
+ * десятками, и очередь ядра не должна просыпаться на каждый ряд отдельно.
+ */
+function onSeen(mediaId: number): void {
+  if (peekPlayable(mediaId) !== null) return
+
+  seenIds.add(mediaId)
+  if (seenTimer !== null) return
+
+  seenTimer = setTimeout(() => {
+    seenTimer = null
+    void askSeen()
+  }, SEEN_PAUSE_MS)
 }
 
 /**
@@ -183,6 +225,11 @@ function drop(): void {
   hasNext.value = false
   trouble.value = ''
   busy.value = false
+
+  // Отложенный заказ меток теперь про снятую выдачу: спрашивать о ней нечего.
+  if (seenTimer !== null) clearTimeout(seenTimer)
+  seenTimer = null
+  seenIds.clear()
 }
 
 /**
@@ -225,6 +272,7 @@ async function search(add = false, force = false): Promise<void> {
     page.value = 1
     hasNext.value = false
     total.value = null
+    seenIds.clear()
   }
 
   const wanted = add ? page.value + 1 : 1
@@ -259,7 +307,10 @@ async function search(add = false, force = false): Promise<void> {
   }
 
   void fillTitles()
-  void fillPlay()
+
+  // Сеть про доступность отсюда больше не спрашивается: подъём со склада
+  // бесплатный, а вопросы службам закажут сами плитки, когда покажутся.
+  priming = loadMarks()
 }
 
 /** Набор слова: запрос уходит после паузы, а не на каждую букву. */
@@ -317,6 +368,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (timer !== null) clearTimeout(timer)
   timer = null
+
+  if (seenTimer !== null) clearTimeout(seenTimer)
+  seenTimer = null
+
   run++
   titleRun++
   playRun++
@@ -371,10 +426,14 @@ onBeforeUnmount(() => {
       <span>Попробуйте другое слово.</span>
     </div>
 
+    <!-- v-seen сообщает о первом показе плитки: только о показанных
+         спрашиваются источники видео. Директива живёт в app/see-tile.ts
+         и зарегистрирована на всё приложение в main.ts. -->
     <ul v-else class="am-grid">
       <MediaTile
         v-for="row in rows"
         :key="row.mediaId"
+        v-seen="() => onSeen(row.mediaId)"
         :title="row.title"
         :facts="row.facts"
         :cover="row.cover"
