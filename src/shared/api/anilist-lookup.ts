@@ -5,10 +5,15 @@
 // Просьбы, пришедшие одновременно, уезжают одной пачкой: на главном экране
 // выписки спрашивают сразу несколько полок, и каждая раньше брала свой
 // запрос, хотя потолок страницы — пятьдесят тайтлов и три полки в него влезают.
+//
+// Запись списка здесь больше не спрашивается, и запрос идёт без ключа: правда
+// о списке живёт в памяти коллекции, и метки на плитках витрина ставит по ней.
+// Ответ от этого легче на три поля в каждой из пятидесяти записей пачки, а главное
+// — одинаков для всех, так что его можно будет держать на складе.
 
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
-import type { MediaBrief, ServerEntry } from './anilist-media'
+import type { MediaBrief } from './anilist-media'
 
 /** Потолок страницы у AniList — пятьдесят записей за запрос. */
 const LOOKUP_PAGE_SIZE = 50
@@ -25,7 +30,7 @@ const MERGE_WINDOW_MS = 50
 
 /**
  * Потолок копления: четыре полные страницы. Список на полтысячи тайтлов
- * ждать окна не должен: ему всё равно ехать многими пачками, и склеивать
+ * ждать окна не должен: ему всẳ равно ехать многими пачками, и склеивать
  * его с соседями уже незачем.
  */
 const MERGE_MAX_IDS = LOOKUP_PAGE_SIZE * 4
@@ -64,20 +69,9 @@ function lookupQuery(field: LookupField): string {
         medium
         color
       }
-      mediaListEntry {
-        status
-        score(format: POINT_10_DECIMAL)
-        progress
-      }
     }
   }
 }`
-}
-
-interface OwnReply {
-  status?: string | null
-  score?: number | null
-  progress?: number | null
 }
 
 /** Ближайшая серия: номер и срок выхода в секундах. */
@@ -98,7 +92,6 @@ interface MediaReply {
   nextAiringEpisode?: AiringReply | null
   title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
   coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
-  mediaListEntry?: OwnReply | null
 }
 
 interface LookupReply {
@@ -137,30 +130,6 @@ function textOrNull(value: string | null | undefined): string | null {
 }
 
 /**
- * Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет».
- *
- * Пересмотры, даты и комментарий у сервера здесь не спрашиваются и приезжают
- * пустыми: выписки идут пачками по пятьдесят тайтлов ради обложек и вида,
- * а правда по записи живёт в снимке и в карточке тайтла.
- *
- * Тома всегда ноль: у аниме их нет, и сервер о них больше не спрашивают.
- */
-function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
-  if (!own) return null
-
-  return {
-    status: textOrNull(own.status),
-    score10: typeof own.score === 'number' ? own.score : 0,
-    progress: typeof own.progress === 'number' ? own.progress : 0,
-    volumes: 0,
-    repeat: 0,
-    startedAt: null,
-    completedAt: null,
-    notes: null,
-  }
-}
-
-/**
  * Ответ сервера о одном тайтле в выписку показа. Без номера — не запись.
  * Вид всегда аниме: сервер спрошен только про него.
  */
@@ -185,7 +154,8 @@ function toBrief(item: MediaReply | null): MediaBrief | null {
     native: textOrNull(item.title?.native),
     cover: textOrNull(item.coverImage?.large) ?? textOrNull(item.coverImage?.medium),
     color: textOrNull(item.coverImage?.color),
-    ownEntry: ownOrNull(item.mediaListEntry),
+    // Состояние списка приходит не отсюда: его знает память коллекции.
+    ownEntry: null,
   }
 }
 
@@ -195,8 +165,9 @@ function cleanIds(ids: number[]): number[] {
 }
 
 /**
- * Обход пачками по выбранному полю отбора. Запрос идёт с ключом:
- * без него не видно, что тайтл уже в своём списке.
+ * Обход пачками по выбранному полю отбора. Запрос идёт без ключа: личного
+ * в ответе ничего нет, а подписанный запрос тратит личный темп и не работает
+ * без входа вовсе.
  */
 async function lookupBriefs(field: LookupField, wanted: number[]): Promise<MediaBrief[]> {
   const query = lookupQuery(field)
@@ -204,11 +175,10 @@ async function lookupBriefs(field: LookupField, wanted: number[]): Promise<Media
 
   for (let from = 0; from < wanted.length; from += LOOKUP_PAGE_SIZE) {
     const chunk = wanted.slice(from, from + LOOKUP_PAGE_SIZE)
-    const reply = await anilistQuery<LookupReply>(
-      query,
-      { ids: chunk, perPage: LOOKUP_PAGE_SIZE },
-      true,
-    )
+    const reply = await anilistQuery<LookupReply>(query, {
+      ids: chunk,
+      perPage: LOOKUP_PAGE_SIZE,
+    })
 
     const media = reply.data?.Page?.media
     if (!Array.isArray(media)) {
