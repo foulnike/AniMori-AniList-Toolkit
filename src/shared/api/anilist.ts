@@ -1,6 +1,14 @@
 // Клиент AniList GraphQL: держатель общей паузы по лимиту и разбора ответов.
 // Тормоз живёт здесь, а не в очереди: только клиент видит все запросы к AniList сразу.
 // Сам запрос собирает мост (пункт 2.3): в десктопе пропуск в разметку не попадает.
+//
+// ОТСТУП ПЕРЕЖИВАЕТ ПЕРЕЗАПУСК
+// Пауза и глубина отступа лежат в хранилище. Прежде они жили только в памяти,
+// и это было ровно то поведение, из-за которого вежливый клиент превращается
+// в назойливого: программа получала «API выключен», отступала на четверть
+// часа, человек закрывал окно, открывал снова — и первым же делом в закрытую
+// дверь уходил новый залп запросов. Теперь запуск сначала смотрит, не сам ли
+// он назначил себе тишину минуту назад.
 
 import { Bridge, BridgeHttpError, type HttpResponse } from '@/bridge'
 import { reportError, reportStatus } from '../core/net-health'
@@ -29,6 +37,15 @@ const MAX_INLINE_WAIT_MS = 10000
 
 /** Ключ хранилища для токена. Имя сохранено из монолита ради совместимости. */
 const TOKEN_KEY = 'AL_TOKEN'
+
+/**
+ * Ключи хранилища для отступа: до какого времени молчим и насколько глубоко
+ * уже отступили. Два числа, а не одна запись: они меняются по отдельности
+ * и читаются по отдельности, а разбирать половинчатую запись после сбоя
+ * записи — лишняя работа на ровном месте.
+ */
+const PAUSE_KEY = 'AL_PAUSE_UNTIL'
+const STREAK_KEY = 'AL_FAIL_STREAK'
 
 /** Unix-время, до которого запросы к AniList приостановлены. */
 let alRateLimitPause = 0
@@ -65,10 +82,85 @@ export function anilistPauseRemaining(): number {
   return Math.max(0, alRateLimitPause - Date.now())
 }
 
+/** Число из хранилища. Чужая запись могла оказаться строкой или мусором. */
+function numberFrom(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return 0
+}
+
+/**
+ * Пишет текущий отступ в хранилище. Никогда не отклоняется: запись — удобство
+ * следующего запуска, а не условие работы этого. Пишется всегда пара целиком,
+ * потому что порознь они бессмысленны: пауза без глубины начнёт следующую
+ * аварию с тридцати секунд, глубина без паузы отступит там, где идти можно.
+ */
+function rememberBackOff(): void {
+  void Bridge.storage.set(PAUSE_KEY, alRateLimitPause).catch((e: unknown) => {
+    Logger('ERROR', 'Ошибка записи AL_PAUSE_UNTIL', e)
+  })
+  void Bridge.storage.set(STREAK_KEY, serverFailStreak).catch((e: unknown) => {
+    Logger('ERROR', 'Ошибка записи AL_FAIL_STREAK', e)
+  })
+}
+
+/**
+ * Восстанавливает отступ после запуска программы.
+ *
+ * Если названное время ещё не прошло, пауза встаёт снова — вместе с глубиной
+ * отступа, чтобы следующий отказ удвоил уже накопленную паузу, а не начал
+ * с тридцати секунд. Если прошло — забываем и то и другое: дверь могла
+ * открыться, и проверить это стоит одним запросом, а не десятком.
+ *
+ * Восстановленная пауза обрезается потолком роста: часы в системе переводят,
+ * и запись «молчать до» из далёкого будущего заперла бы программу навсегда.
+ */
+export async function restoreAniListPause(): Promise<void> {
+  try {
+    const [storedPause, storedStreak] = await Promise.all([
+      Bridge.storage.get<unknown>(PAUSE_KEY, 0),
+      Bridge.storage.get<unknown>(STREAK_KEY, 0),
+    ])
+
+    const until = numberFrom(storedPause)
+    const remaining = until - Date.now()
+
+    if (remaining <= 0) {
+      // Запись есть, но срок вышел: чистим, чтобы следующий запуск не читал старьё.
+      if (until !== 0 || numberFrom(storedStreak) !== 0) {
+        alRateLimitPause = 0
+        serverFailStreak = 0
+        rememberBackOff()
+      }
+      return
+    }
+
+    const capped = Math.min(remaining, SERVER_FAIL_MAX_PAUSE_MS)
+    serverFailStreak = Math.max(0, Math.floor(numberFrom(storedStreak)))
+    alRateLimitPause = Date.now() + capped
+    anilistLimiter.pause(capped)
+
+    Logger(
+      'INFO',
+      `AniList: отступ восстановлен, молчим ещё ${Math.round(capped / 1000)}с ` +
+        `(отказов подряд до перезапуска: ${serverFailStreak})`,
+    )
+  } catch (e) {
+    // Без восстановления программа работает как прежде: просто менее вежливо.
+    Logger('ERROR', 'Ошибка чтения отступа AniList', e)
+  }
+}
+
 /** Ставит паузу вручную. Существующая более долгая пауза не укорачивается. */
 export function pauseAniList(ms: number): void {
   alRateLimitPause = Math.max(alRateLimitPause, Date.now() + ms)
   anilistLimiter.pause(ms)
+  rememberBackOff()
 }
 
 export interface GraphQLResponse<T = unknown> {
@@ -77,8 +169,10 @@ export interface GraphQLResponse<T = unknown> {
 }
 
 /**
- * Читает токен из хранилища в память. Вызывается один раз на старте, до первого запроса.
- * Ошибка чтения не роняет запуск: без токена работают все публичные запросы.
+ * Готовит клиент к работе: читает токен в память и восстанавливает отступ,
+ * если прошлый запуск его назначил. Вызывается один раз на старте, до первого
+ * запроса. Ошибка чтения не роняет запуск: без токена работают все публичные
+ * запросы, а без записи отступа клиент просто вежлив меньше обычного.
  */
 export async function loadAlToken(): Promise<void> {
   try {
@@ -88,6 +182,8 @@ export async function loadAlToken(): Promise<void> {
     Logger('ERROR', 'Ошибка чтения AL_TOKEN', e)
     alTokenCache = ''
   }
+
+  await restoreAniListPause()
 }
 
 /** Сохраняет токен: сначала в память, потом в хранилище. Никогда не отклоняется. */
@@ -186,19 +282,47 @@ function failureDetails(headers: Record<string, string>): Record<string, string>
 }
 
 /**
- * Учит ограничитель по заголовкам ответа: потолок и остаток окна.
+ * Когда сбрасывается окно лимита, в миллисекундах Unix-времени.
+ *
+ * Заголовок приходит в двух видах: Unix-время в секундах и «сколько секунд
+ * осталось». Прежде читался только первый, и второй превращался в срок
+ * пятидесятилетней давности — то есть в «ждать не нужно» ровно тогда,
+ * когда ждать и было нужно. Число меньше миллиарда Unix-временем быть
+ * не может (тот перевалил миллиард ещё в 2001 году), значит это остаток.
+ */
+function readResetAt(headers: Record<string, string>): number {
+  const reset = headerNumber(headers, 'x-ratelimit-reset')
+  if (!Number.isFinite(reset) || reset <= 0) return NaN
+
+  return reset > 1e9 ? reset * 1000 : Date.now() + reset * 1000
+}
+
+/**
+ * Учит ограничитель по заголовкам ответа: потолок, остаток окна и время сброса.
  * Так возврат штатных 90 после техработ не требует правки и выпуска сборок.
+ *
+ * Остаток важнее потолка. Потолок говорит, сколько запросов есть у окна
+ * вообще; остаток — сколько их есть у нас сейчас, с учётом уже потраченного
+ * этой же минутой или другим запуском программы с того же адреса. Темп
+ * по остатку растягивает оставшееся ровно до сброса вместо того, чтобы
+ * истратить всё залпом и упереться в 429 на середине работы.
  */
 function learnRateHeaders(headers: Record<string, string>): void {
   const limit = headerNumber(headers, 'x-ratelimit-limit')
   if (Number.isFinite(limit) && limit > 0) anilistLimiter.applyCeiling(limit)
 
   const remaining = headerNumber(headers, 'x-ratelimit-remaining')
-  if (!Number.isFinite(remaining) || remaining > 0) return
+  if (!Number.isFinite(remaining)) return
+
+  const resetAt = readResetAt(headers)
+
+  if (remaining > 0) {
+    if (Number.isFinite(resetAt)) anilistLimiter.applyRemaining(remaining, resetAt)
+    return
+  }
 
   // Окно выбрано до конца: ждём сброса, не дожидаясь 429.
-  const reset = headerNumber(headers, 'x-ratelimit-reset')
-  const untilReset = Number.isFinite(reset) ? reset * 1000 - Date.now() : NaN
+  const untilReset = Number.isFinite(resetAt) ? resetAt - Date.now() : NaN
   const wait = Number.isFinite(untilReset) && untilReset > 0 ? untilReset : DEFAULT_RETRY_MS
   anilistLimiter.pause(Math.min(wait + 500, 60000))
 }
@@ -330,13 +454,15 @@ export async function anilistQuery<T = unknown>(
   // Учёт состояния до разбора кодов: факт ответа важен сам по себе.
   reportStatus(NET_SOURCE_ANILIST, NET_LABEL_ANILIST, res.status, Date.now() - startedAt)
 
-  // Потолок и остаток окна читаются из любого ответа, включая ошибки.
+  // Потолок, остаток окна и время сброса читаются из любого ответа, включая ошибки.
   learnRateHeaders(res.headers)
 
   if (res.status === 429) {
     const waitTime = readRetryAfter(res.headers)
-    alRateLimitPause = Date.now() + waitTime + 500
-    anilistLimiter.pause(waitTime + 500)
+
+    // Пауза ставится через общий вход: он же кладёт её в хранилище, чтобы
+    // перезапуск во время лимита не начинал с чистого листа.
+    pauseAniList(waitTime + 500)
 
     // Потолок был завышен: урезаем его и не верим росту ближайшие минуты.
     anilistLimiter.reduceCeiling()
@@ -383,9 +509,12 @@ export async function anilistQuery<T = unknown>(
   }
 
   // Сервер ответил — серия отказов прервана, следующая авария начнёт с 30 секунд.
+  // Запись в хранилище обновляется тут же: иначе завтрашний запуск отступил бы
+  // от вчерашней аварии, о которой сегодня уже никто не помнит.
   if (serverFailStreak > 0) {
     Logger('INFO', `AniList снова отвечает (отказов подряд было: ${serverFailStreak})`)
     serverFailStreak = 0
+    rememberBackOff()
   }
 
   const timeTaken = Math.round(performance.now() - startTime)
