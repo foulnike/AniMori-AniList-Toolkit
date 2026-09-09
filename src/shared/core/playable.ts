@@ -34,6 +34,14 @@
 // «не знаю», а не «нет»: ошибиться отказом дороже, чем промолчать. Тайтл, о
 // котором так и не высказались, уходит в тишину на десять минут: без этого срока
 // работник крутился бы над ним, пока человек смотрит на экран.
+//
+// ОТЛОЖЕННЫЙ СТАРТ. Первая секунда запуска — самая занятая: витрина просит полки,
+// коллекция тянет свой список, службы отвечают вперемешку. Очередь меток в это
+// время не нужна никому — плитки ещё не нарисованы, — а слоты она отнимает у той
+// самой витрины, ради которой запущена. Поэтому дорожки просыпаются через секунду
+// после первой отрисовки (markFirstPaint), а если сигнала не было вовсе — через
+// четыре секунды после запуска: приложение, забывшее позвать метку отрисовки,
+// должно работать позже, а не молчать.
 
 import { Logger } from '../utils/logger'
 import { dbGet, dbSet } from './db'
@@ -98,6 +106,14 @@ const WARM_STEP_MS = 150
 /** Через сколько заглянуть в реестр, если к первой полке он ещё пуст. */
 const WAIT_SOURCES_MS = 1000
 
+/**
+ * Через сколько после первой отрисовки просыпаются дорожки — и через сколько
+ * после запуска, если об отрисовке никто не сообщил. Второй срок нужен ровно
+ * затем, чтобы забытый сигнал стоил задержки, а не всех меток сразу.
+ */
+const PAINT_REST_MS = 1000
+const BOOT_GRACE_MS = 4000
+
 /** Ответ источников: вход есть или входа нет. Третьего значения нет намеренно. */
 export type PlayState = 'yes' | 'no'
 
@@ -159,6 +175,12 @@ const lanes = new Map<string, Promise<void>>()
 /** Самочувствие служб. Ключ — id источника. */
 const health = new Map<string, Health>()
 
+/** Час запуска: от него считается придержка, пока об отрисовке не сообщили. */
+const bootedAt = Date.now()
+
+/** Час первой отрисовки. Ноль означает, что витрина ещё не показалась. */
+let paintedAt = 0
+
 /** Когда подписчиков звали в последний раз и отложенный зов, если он назначен. */
 let notifiedAt = 0
 let waiting: ReturnType<typeof setTimeout> | null = null
@@ -174,6 +196,27 @@ function sleep(ms: number): Promise<void> {
 /** Сколько живёт ответ: отказ перепроверяется куда чаще находки. */
 function lifeOf(state: PlayState): number {
   return state === 'yes' ? YES_TIME_MS : NO_TIME_MS
+}
+
+/**
+ * Сколько ещё держать дорожки. Считается от первой отрисовки, а без её сигнала —
+ * от запуска: молчание не должно превращаться в вечное ожидание.
+ */
+function startHold(now = Date.now()): number {
+  if (paintedAt > 0) return Math.max(0, paintedAt + PAINT_REST_MS - now)
+
+  return Math.max(0, bootedAt + BOOT_GRACE_MS - now)
+}
+
+/**
+ * Витрина показалась человеку. Зовётся один раз из корня приложения: до этого
+ * часа меток никто не видит, и очередь только отнимала бы слоты у самих полок.
+ */
+export function markFirstPaint(): void {
+  if (paintedAt > 0) return
+
+  paintedAt = Date.now()
+  wake(PAINT_REST_MS)
 }
 
 /** Ответ из памяти запуска. Протухший забывается на месте. */
@@ -574,6 +617,14 @@ function wake(ms: number): void {
 function pump(): void {
   if (queue.size === 0) return
 
+  // Стартовый разгон: пока витрина не показалась, слоты нужнее ей самой, а не
+  // меткам на плитках, которых человек ещё не видит.
+  const hold = startHold()
+  if (hold > 0) {
+    wake(hold)
+    return
+  }
+
   const sources = askableSources()
 
   // Реестр собирает слой api, и до первой полки он может быть пуст. Очередь при
@@ -735,7 +786,9 @@ export function requestPlayable(asks: readonly PlayAsk[]): number {
 export async function warmPlayable(asks: readonly PlayAsk[]): Promise<number> {
   requestPlayable(asks)
 
-  const until = Date.now() + WARM_WAIT_MS
+  // Придержка стартового разгона входит в срок ожидания: иначе признак работы
+  // снимался бы раньше, чем дорожки вообще проснулись.
+  const until = Date.now() + WARM_WAIT_MS + startHold()
 
   for (;;) {
     const left = asks.some((ask) => known(ask.mediaId) === null && queue.has(ask.mediaId))
