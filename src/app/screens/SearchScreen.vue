@@ -2,13 +2,20 @@
 // Пункт 3.5: поиск по чужому каталогу. Поиск по своему списку живёт
 // во вкладке списков: там он идёт по памяти и сети не требует вовсе.
 // Куда идти за русским словом, решает core/media-search: экран только показывает.
+//
+// ЭКРАН СПРАШИВАЕТ КАТАЛОГ, ТОЛЬКО КОГДА ЕСТЬ О ЧЁМ СПРАШИВАТЬ
+//
+// Раньше в сеть уходила едва ли не каждая буква: пауза была короче обычного
+// разрыва между нажатиями, порога длины не было вовсе, а возврат к уже
+// спрошенному слову считался новым вопросом. Теперь запрос ждёт конца слова,
+// короткое слово ждёт Enter, а повтор того же слова не уходит никуда.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { MediaBrief } from '@/api/anilist-media'
 import { setupVideoSources } from '@/api/video-sources'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
-import { searchCatalog } from '@/core/media-search'
+import { isSearchable, MIN_WORD_LEN, searchCatalog, tidyWord } from '@/core/media-search'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
 import { onPlayableChange, peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
 import { Logger } from '@/utils/logger'
@@ -17,8 +24,13 @@ import MediaTile from '../components/MediaTile.vue'
 import { navigate } from '../router'
 import { toPlayAsk, toTileRow, type TileRow } from '../tile-row'
 
-/** Пауза после последнего нажатия: каждая буква в сеть — сожжённый темп. */
-const TYPING_PAUSE_MS = 300
+/**
+ * Пауза после последнего нажатия. Треть секунды короче обычного разрыва между
+ * буквами: «наруто» уезжало тремя-четырьмя запросами, из которых человеку был
+ * нужен последний. Почти половина секунды ловит слово целиком, а ожиданием
+ * не ощущается — набор всё равно длиннее.
+ */
+const TYPING_PAUSE_MS = 450
 
 /** По скольку аниме просить русские названия за заход. */
 const TITLE_CHUNK = 10
@@ -40,7 +52,10 @@ const total = ref<number | null>(null)
 const hasNext = ref(false)
 const page = ref(1)
 
-const asked = computed(() => word.value.trim())
+const asked = computed(() => tidyWord(word.value))
+
+/** Набранного мало для похода в каталог: показываем подсказку вместо пустоты. */
+const short = computed(() => asked.value !== '' && !isSearchable(asked.value))
 
 /**
  * СЧЁТЧИК ГОВОРИТ О ПОКАЗАННОМ
@@ -68,6 +83,9 @@ let run = 0
 let titleRun = 0
 let playRun = 0
 let timer: ReturnType<typeof setTimeout> | null = null
+
+/** Слово, по которому выдача уже на экране: тот же вопрос второй раз не задаётся. */
+let lastAsked = ''
 
 /** Найденные выписки этого показа: по ним плитки перерисовываются с названиями. */
 let briefs: MediaBrief[] = []
@@ -152,26 +170,56 @@ async function fillPlay(): Promise<void> {
 }
 
 /**
+ * Снимает показанное вместе с идущим ответом. Нужно, когда спрашивать нечего:
+ * слово стёрли или в нём пока меньше знаков, чем стоит нести в каталог.
+ */
+function drop(): void {
+  run++
+  lastAsked = ''
+  briefs = []
+  rows.value = []
+  page.value = 1
+  total.value = null
+  hasNext.value = false
+  trouble.value = ''
+  busy.value = false
+}
+
+/**
  * Спрашивает каталог. С `add` добирает следующую страницу к уже показанному,
  * без него начинает с первой. Устаревшие ответы отбрасываются по номеру работы.
+ *
+ * `force` — человек нажал Enter: спрашиваем набранное как есть, не глядя ни
+ * на порог длины, ни на то, что это слово уже спрошено.
  */
-async function search(add = false): Promise<void> {
-  const mine = ++run
+async function search(add = false, force = false): Promise<void> {
   const wordNow = asked.value
 
   if (wordNow === '') {
-    briefs = []
-    rows.value = []
-    total.value = null
-    hasNext.value = false
-    trouble.value = ''
+    drop()
     return
   }
+
+  if (!add && !force) {
+    // Слово не изменилось: выдача по нему уже на экране. Сюда приходят возвраты
+    // каретки, смена раскладки и правка, вернувшая слово к прежнему виду.
+    if (wordNow === lastAsked) return
+
+    // Одну-две буквы каталог понимает как «отдай что угодно»: такую страницу
+    // не читают, а стоит она полного запроса. Ждём остальных знаков или Enter.
+    if (!isSearchable(wordNow)) {
+      drop()
+      return
+    }
+  }
+
+  const mine = ++run
 
   busy.value = true
   trouble.value = ''
 
   if (!add) {
+    lastAsked = wordNow
     briefs = []
     rows.value = []
     page.value = 1
@@ -186,6 +234,9 @@ async function search(add = false): Promise<void> {
     if (mine !== run) return
 
     if (found === null) {
+      // Отказ не считается заданным вопросом: иначе повтор того же слова после
+      // «попробуйте ещё раз» упирался бы в защиту от повтора и не делал ничего.
+      lastAsked = ''
       trouble.value = 'Каталог не ответил. Попробуйте ещё раз через минуту.'
       return
     }
@@ -200,6 +251,8 @@ async function search(add = false): Promise<void> {
     redraw()
   } catch (e) {
     if (mine !== run) return
+
+    lastAsked = ''
     trouble.value = describe(e)
   } finally {
     if (mine === run) busy.value = false
@@ -213,10 +266,29 @@ async function search(add = false): Promise<void> {
 function onType(): void {
   if (timer !== null) clearTimeout(timer)
 
+  // Пустому полю ждать нечего: выдачу надо снять сразу, заодно снимается
+  // и ответ по стёртому слову, который иначе доехал бы в пустой экран.
+  if (asked.value === '') {
+    timer = null
+    drop()
+    return
+  }
+
   timer = setTimeout(() => {
     timer = null
     void search()
   }, TYPING_PAUSE_MS)
+}
+
+/**
+ * Enter: спросить набранное немедленно и как есть. Так ищут короткие имена
+ * вроде «K» и так повторяют вопрос после отказа сервера.
+ */
+function onEnter(): void {
+  if (timer !== null) clearTimeout(timer)
+  timer = null
+
+  void search(false, true)
 }
 
 /** Добор следующей страницы. */
@@ -265,6 +337,7 @@ onBeforeUnmount(() => {
         type="search"
         placeholder="Название на любом языке"
         @input="onType"
+        @keyup.enter="onEnter"
       />
       <span v-if="rows.length > 0" v-tip="countTip" class="am-hunt__num">
         {{ countText }}
@@ -284,6 +357,12 @@ onBeforeUnmount(() => {
       <span class="am-empty__mark" aria-hidden="true">⌕</span>
       <span>Начните вводить название.</span>
       <span>Можно по-русски, по-английски или на латинице.</span>
+    </div>
+
+    <div v-else-if="short" class="am-empty">
+      <span class="am-empty__mark" aria-hidden="true">⌨</span>
+      <span>Слишком короткое слово.</span>
+      <span>Наберите {{ MIN_WORD_LEN }} знака — или нажмите Enter, чтобы искать как есть.</span>
     </div>
 
     <div v-else-if="rows.length === 0 && !busy" class="am-empty">
