@@ -1,6 +1,19 @@
 // Учёт доступности источников: исходы запросов от api/* — интерфейсу и тосту.
 // Здесь НЕТ имён хостов и суждений о блокировках: такой список устаревает за неделю.
 // Модуль ядра: не знает ни про Vue, ни про DOM, подписка — обычные коллбэки.
+//
+// ЕДИНОЕ СУЖДЕНИЕ И ОБЩИЕ ПРОБЫ
+// Прежде каждый экран решал сам: главный смотрел на свой источник, настройки
+// звонили в Диск, проверка сети дёргала всех подряд по кнопке. Получалось, что
+// один и тот же вопрос «а сеть вообще жива?» задавался разными местами разными
+// словами и в разное время — и каждое место платило за ответ своим запросом.
+//
+// Теперь суждение одно (getOutage) и проба одна (runProbes). Источник
+// регистрирует свой короткий запрос через registerProbe и больше ни о чём не
+// думает; экраны не зондируют никого, а только читают итог и, если человек
+// нажал «Проверить сейчас», просят прогнать пробы. Прогон не запускается
+// повторно, пока идёт предыдущий, и не чаще PROBE_COOLDOWN_MS: кнопка не должна
+// превращаться в пулемёт, особенно когда сервис и так лежит.
 
 import { BridgeHttpError } from '@/bridge'
 import { Logger } from '../utils/logger'
@@ -44,6 +57,13 @@ export const OUTAGE_WINDOW_MS = 60000
 
 /** Сколько разных недоступных источников в окне считается общей бедой. */
 export const OUTAGE_SOURCE_THRESHOLD = 2
+
+/**
+ * Не чаще этого срока пускаем ручную проверку. Человек, увидевший «не отвечает»,
+ * жмёт кнопку несколько раз подряд — это естественно и это ровно тот случай,
+ * когда лежачему сервису достаётся ещё и от нас.
+ */
+export const PROBE_COOLDOWN_MS = 10000
 
 const sources = new Map<string, NetSourceHealth>()
 
@@ -235,6 +255,156 @@ export function troubledLabels(now = Date.now()): string[] {
     labels.push(record.label)
   })
   return labels
+}
+
+/**
+ * Причина беды. Разделение нужно ради совета человеку, а не ради полноты:
+ * при `network` уместно предложить проверить связь или туннель, при `blocked`
+ * туннель скорее навредит, при `service` ждать надо не нам, а сервису.
+ */
+export type NetOutageReason = 'none' | 'network' | 'blocked' | 'service'
+
+/** Единое суждение об аварии: один ответ на вопрос, который задают все экраны. */
+export interface NetOutage {
+  /** Есть ли о чём говорить с человеком прямо сейчас. */
+  active: boolean
+  /** Почему так решено. */
+  reason: NetOutageReason
+  /** Метки пострадавших источников — готовый текст для тоста. */
+  labels: string[]
+  /** Когда началось: самая ранняя смена состояния среди пострадавших. */
+  since: number
+}
+
+/**
+ * Считает суждение по текущим записям.
+ *
+ * Правило простое и намеренно не умное: массовая недоступность — это сеть,
+ * отказ впустить — это блокировка, чужая пятисотка — это поломка сервиса.
+ * Когда в окне есть и то и другое, побеждает сеть: с неё начинают проверку.
+ */
+export function getOutage(now = Date.now()): NetOutage {
+  const labels: string[] = []
+  let since = 0
+  let unreachable = 0
+  let forbidden = 0
+  let serverError = 0
+
+  sources.forEach((record) => {
+    if (record.state === 'ok' || record.state === 'unknown') return
+    if (record.failStreak < FAIL_STREAK_THRESHOLD) return
+    if (now - record.lastSeenAt > OUTAGE_WINDOW_MS) return
+
+    labels.push(record.label)
+    since = since === 0 ? record.since : Math.min(since, record.since)
+
+    if (record.state === 'unreachable') unreachable += 1
+    else if (record.state === 'forbidden') forbidden += 1
+    else serverError += 1
+  })
+
+  if (labels.length === 0) return { active: false, reason: 'none', labels: [], since: 0 }
+
+  let reason: NetOutageReason = 'service'
+  if (unreachable >= OUTAGE_SOURCE_THRESHOLD) reason = 'network'
+  else if (unreachable > 0) reason = 'network'
+  else if (forbidden > 0 && serverError === 0) reason = 'blocked'
+
+  return { active: true, reason, labels, since }
+}
+
+/**
+ * Проба источника: короткий запрос, который сам отчитывается через reportStatus
+ * или reportError. Возвращать ничего не нужно — итог читается из учёта.
+ */
+export type NetProbe = () => Promise<void>
+
+interface ProbeEntry {
+  label: string
+  run: NetProbe
+}
+
+const probes = new Map<string, ProbeEntry>()
+
+/** Текущий прогон, если он идёт. Второй запрос получает тот же промис. */
+let probeRun: Promise<NetSourceHealth[]> | null = null
+
+/** Когда закончился прошлый прогон: от него считается пауза между проверками. */
+let lastProbeAt = 0
+
+/**
+ * Регистрирует пробу источника. Зовёт сам модуль api/*, а не экран: только он
+ * знает, какой запрос у него самый дешёвый и как правильно отчитаться.
+ *
+ * Возвращает функцию отказа. Модули верхнего уровня живут всю сессию и обычно
+ * её не зовут, но проба, зарегистрированная временно, обязана убрать себя сама.
+ */
+export function registerProbe(id: string, label: string, run: NetProbe): () => void {
+  probes.set(id, { label, run })
+  // Источник должен появиться в таблице до первой проверки: строка «не проверялся»
+  // честнее, чем пустое место, из которого не видно, кого мы вообще опрашиваем.
+  ensure(id, label)
+  notify()
+
+  return () => {
+    if (probes.get(id)?.run === run) probes.delete(id)
+  }
+}
+
+/** Идёт ли сейчас прогон проб. Кнопка «Проверить сейчас» смотрит сюда. */
+export function isProbing(): boolean {
+  return probeRun !== null
+}
+
+/** Сколько осталось до следующей разрешённой проверки. Ноль — можно проверять. */
+export function probeCooldownRemaining(now = Date.now()): number {
+  return Math.max(0, PROBE_COOLDOWN_MS - (now - lastProbeAt))
+}
+
+/**
+ * Прогоняет пробы и возвращает состояние источников после них.
+ *
+ * Повторный вызов во время прогона получает тот же промис, а не второй заход.
+ * Слишком частый вызов возвращает текущее состояние без запросов: пауза между
+ * проверками важнее свежести — сервис, который не отвечал секунду назад, за эту
+ * секунду не выздоровел.
+ *
+ * @param ids Ограничить прогон конкретными источниками. Без него — все.
+ */
+export function runProbes(ids?: readonly string[]): Promise<NetSourceHealth[]> {
+  if (probeRun) return probeRun
+
+  const now = Date.now()
+  if (lastProbeAt !== 0 && now - lastProbeAt < PROBE_COOLDOWN_MS) {
+    return Promise.resolve(listHealth())
+  }
+
+  const chosen = Array.from(probes.entries()).filter(([id]) => !ids || ids.includes(id))
+  if (chosen.length === 0) return Promise.resolve(listHealth())
+
+  Logger('INFO', `Сеть: проверка источников (${chosen.length})`)
+  // Сообщаем подписчикам о начале: интерфейсу нужно показать, что идёт проверка.
+  notify()
+
+  probeRun = Promise.all(
+    chosen.map(async ([, entry]) => {
+      try {
+        await entry.run()
+      } catch (e) {
+        // Отказ пробы — это её отчёт, а не наша ошибка: состояние уже записано
+        // самим клиентом. Здесь остаётся только не уронить остальные пробы.
+        Logger('WARN', `Сеть: проба «${entry.label}» не удалась`, e)
+      }
+    }),
+  )
+    .then(() => listHealth())
+    .finally(() => {
+      probeRun = null
+      lastProbeAt = Date.now()
+      notify()
+    })
+
+  return probeRun
 }
 
 /**
