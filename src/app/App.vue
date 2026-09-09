@@ -6,6 +6,8 @@
 // из любого описания, так что привязывать его к одному экрану нельзя.
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, type Component } from 'vue'
 
+import { markFirstPaint } from '@/core/playable'
+
 import { refreshAuth, watchAuth } from './auth/session'
 import AppShell from './components/AppShell.vue'
 import { closePerson, shownPerson } from './person-layer'
@@ -54,6 +56,16 @@ onMounted(() => {
     .catch((e: unknown) => {
       console.error('AniMori: подписка на вход не удалась', e)
     })
+
+  // Очередь меток доступности ждёт этого сигнала: до первой отрисовки её
+  // запросы отнимали бы слоты у самих полок, ради которых запущено окно.
+  // Два кадра, а не один: первый лишь сообщает, что разметка собрана, и
+  // рисование первого экрана происходит уже после него.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      markFirstPaint()
+    })
+  })
 })
 
 onBeforeUnmount(() => {
