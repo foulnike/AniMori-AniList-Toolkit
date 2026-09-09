@@ -14,6 +14,29 @@
 // и записывала в разных тиках, так что два одновременных вызова успевали
 // увидеть пустоту оба и уходили в сеть вдвоём — именно та ошибка, от которой
 // склейка и должна была защищать.
+//
+// ТЕМП ПО ОСТАТКУ ОКНА
+// Сервер называет в заголовках не только потолок, но и остаток вместе со
+// временем сброса. Вести темп по потолку — значит идти вслепую: окно могло
+// быть уже наполовину истрачено прошлой минутой нашей же работы или другим
+// запуском программы с того же адреса. applyRemaining() считает проще и
+// честнее: интервал = (сброс − сейчас) / остаток. Оставшиеся запросы
+// растягиваются ровно до конца окна вместо того, чтобы уйти залпом и
+// упереться в 429 на середине.
+//
+// ОБЩИЙ ЗАЛП НА ВСЕ ИСТОЧНИКИ
+// По отдельности каждый источник ведёт себя вежливо. Но на старте программы
+// разом просыпаются главный экран, список, метки доступности и датасет
+// названий, и наружу уходит десяток запросов в одно мгновение — по разным
+// адресам, зато из одной квартиры. Глобальный шлюз разводит старты во
+// времени: в первые секунды после запуска не больше BURST_START_LIMIT
+// в секунду на всё приложение, дальше — BURST_LIMIT.
+//
+// Настоящую одновременность модуль не измеряет сознательно: он не знает,
+// когда запрос ЗАВЕРШИЛСЯ, — acquireSlot() выдаёт разрешение и забывает
+// о запросе. Требовать отчёт об окончании значит завести полтора десятка
+// мест, где забытый отчёт запирает бюджет до перезапуска. Число стартов
+// в секунду видно точно, и для чужого сервера важно именно оно.
 
 /**
  * Потолок повторов запроса, упёршегося в 429: без него повтор был бесконечным.
@@ -49,6 +72,24 @@ export const RATE_FLOOR_PER_WINDOW = 6
  * Ответ во время техработ может назвать прежний потолок и тут же ответить 429.
  */
 export const CEILING_RECOVERY_MS = 300000
+
+/** Окно учёта общего залпа. Секунда — то, чем мерят частоту чужие лимиты. */
+export const BURST_WINDOW_MS = 1000
+
+/**
+ * Сколько запросов ко всем источникам вместе допускается в секунду:
+ * в первые мгновения после запуска и потом, в обычной работе.
+ *
+ * Три на старте — это не догадка, а замер: холодный запуск отправлял
+ * одиннадцать запросов в первую секунду (полки главной, список, датасет
+ * названий, метки доступности), и первым же отказом ловил тот, кто был
+ * нужен человеку сейчас, а не тот, кто был лишним.
+ */
+export const BURST_START_LIMIT = 3
+export const BURST_LIMIT = 8
+
+/** Сколько держится строгий стартовый режим. Считается от загрузки модуля. */
+export const STARTUP_WINDOW_MS = 10000
 
 /**
  * Отказ по исчерпанию повторов на 429.
@@ -112,6 +153,62 @@ export function inFlightCount(): number {
   return inFlight.size
 }
 
+/**
+ * Когда загрузился модуль — то есть когда началась работа программы.
+ * Стартовый режим залпа считается отсюда: своего события «программа
+ * проснулась» у модуля ядра нет, а импортируют его на самом старте.
+ */
+const bootedAt = Date.now()
+
+/** Отметки стартов по всем источникам вместе за последнюю секунду. */
+const burstSends: number[] = []
+
+/** Действующий потолок залпа: стартовый режим строже обычного. */
+function burstLimit(now: number): number {
+  return now - bootedAt < STARTUP_WINDOW_MS ? BURST_START_LIMIT : BURST_LIMIT
+}
+
+/** Убирает отметки, вышедшие за окно учёта залпа. */
+function trimBurst(now: number): void {
+  while (burstSends.length > 0 && now - (burstSends[0] ?? 0) >= BURST_WINDOW_MS) {
+    burstSends.shift()
+  }
+}
+
+/**
+ * Сколько ждать, чтобы не превысить общий залп. Ноль — можно идти.
+ * Прибавка в десять миллисекунд нужна от дребезга: без неё вызов просыпается
+ * ровно на границе окна и иногда снова видит отметку внутри него.
+ */
+function burstWait(now: number): number {
+  trimBurst(now)
+
+  if (burstSends.length < burstLimit(now)) return 0
+
+  const oldest = burstSends[0] ?? now
+  return Math.max(1, BURST_WINDOW_MS - (now - oldest) + 10)
+}
+
+/** Отмечает состоявшийся старт в общем учёте залпа. */
+function noteBurst(at: number): void {
+  burstSends.push(at)
+}
+
+/**
+ * Сколько запросов ушло за последнюю секунду по всем источникам вместе.
+ * Только для сводки на экране журнала: в решениях не участвует.
+ */
+export function globalBurstCount(): number {
+  const now = Date.now()
+  trimBurst(now)
+  return burstSends.length
+}
+
+/** Действует ли ещё строгий стартовый режим залпа. Для той же сводки. */
+export function inStartupWindow(): boolean {
+  return Date.now() - bootedAt < STARTUP_WINDOW_MS
+}
+
 export interface RateLimiterOptions {
   /** Имя источника — попадает в текст ошибок. */
   name: string
@@ -152,6 +249,13 @@ export interface RateLimiterStats {
   sentTotal: number
   /** Когда уходил последний запрос. Ноль — ни одного за сессию. */
   lastSentAt: number
+  /**
+   * Промежуток, назначенный по остатку окна из заголовков ответа; ноль —
+   * сервер про остаток не говорил или его окно уже сброшено. Отдельное поле
+   * нужно, чтобы в журнале было видно разницу между нашим расчётом и чужим
+   * требованием: одинаковый intervalMs получается по обеим причинам.
+   */
+  pacedIntervalMs: number
 }
 
 export interface RateLimiter {
@@ -169,6 +273,11 @@ export interface RateLimiter {
    * Выше предохранителя обрезается, а во время восстановления рост игнорируется.
    */
   applyCeiling: (limit: number) => void
+  /**
+   * Принимает остаток окна и время его сброса (Unix-время в миллисекундах).
+   * Растягивает оставшиеся запросы до конца окна: интервал = (сброс − сейчас) / остаток.
+   */
+  applyRemaining: (remaining: number, resetAt: number) => void
   /** Урезает потолок вдвое после 429 и закрывает его рост на время восстановления. */
   reduceCeiling: () => void
   /** Снимок состояния, только чтение. Читатель — экран журнала (#/log). */
@@ -211,6 +320,10 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   let lastSentAt = 0
   /** Сколько слотов выдано за всю сессию. Только для сводки, в решениях не участвует. */
   let sentTotal = 0
+  /** Промежуток, посчитанный по остатку окна. Ноль — сервер про остаток молчал. */
+  let pacedIntervalMs = 0
+  /** До какого времени действует промежуток по остатку: дальше окно сбрасывается. */
+  let pacedUntil = 0
   /** Отметки выдач за последнее окно. */
   const recentSends: number[] = []
   /**
@@ -219,10 +332,22 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
    */
   let gate: Promise<void> = Promise.resolve()
 
-  /** Действующий промежуток: при deriveInterval он размазывает потолок по окну. */
-  function currentInterval(): number {
+  /** Промежуток от потолка: размазывает разрешённое число запросов по окну. */
+  function derivedInterval(): number {
     if (!deriveInterval) return minIntervalMs
     return Math.max(minIntervalMs, Math.ceil(windowMs / Math.max(1, ceiling)))
+  }
+
+  /**
+   * Действующий промежуток. Из двух расчётов берётся более осторожный:
+   * наш собственный от потолка и назначенный по остатку окна. Брать
+   * последний названный было бы ошибкой — ответ с большим остатком
+   * (первый запрос в свежем окне) разрешил бы идти почти без промежутка.
+   */
+  function currentInterval(): number {
+    const base = derivedInterval()
+    if (pacedIntervalMs > 0 && Date.now() < pacedUntil) return Math.max(base, pacedIntervalMs)
+    return base
   }
 
   /**
@@ -267,9 +392,14 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
           waits.push(windowMs - (now - (recentSends[0] ?? now)) + 50)
         }
 
+        // Общий залп: свой бюджет может быть свободен, а квартира — уже шумной.
+        const burst = burstWait(now)
+        if (burst > 0) waits.push(burst)
+
         if (waits.length === 0) {
           lastSentAt = Date.now()
           recentSends.push(lastSentAt)
+          noteBurst(lastSentAt)
           sentTotal++
           return
         }
@@ -304,6 +434,33 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
       ceiling = Math.max(RATE_FLOOR_PER_WINDOW, next)
     },
+    applyRemaining(remaining: number, resetAt: number): void {
+      if (!Number.isFinite(remaining) || !Number.isFinite(resetAt)) return
+
+      const now = Date.now()
+      const span = resetAt - now
+
+      // Сброс назван в прошлом: окно уже новое, и старый расчёт про него врёт.
+      if (span <= 0) {
+        pacedIntervalMs = 0
+        pacedUntil = 0
+        return
+      }
+
+      // Остаток исчерпан — это не темп, а пауза, и ставит её тот, кто увидел
+      // ноль в заголовке. Здесь важно не мешать: делить на нуль нельзя,
+      // а делить на единицу — значит разрешить ещё один запрос, которого нет.
+      if (remaining <= 0) return
+
+      // Слишком далёкий сброс — признак разошедшихся часов: у нас и у сервера
+      // они расходятся на минуты, и растягивать темп на полчаса из-за этого
+      // не стоит. Горизонт ограничен двумя окнами учёта.
+      const horizon = Math.min(span, windowMs * 2)
+      const paced = Math.ceil(horizon / remaining)
+
+      pacedIntervalMs = Math.min(paced, windowMs)
+      pacedUntil = now + horizon
+    },
     reduceCeiling(): void {
       ceiling = Math.max(RATE_FLOOR_PER_WINDOW, Math.floor(ceiling / 2))
       ceilingLockedUntil = Date.now() + CEILING_RECOVERY_MS
@@ -311,6 +468,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     stats(): RateLimiterStats {
       const now = Date.now()
       const inWindow = countInWindow(now)
+      const paced = pacedIntervalMs > 0 && now < pacedUntil ? pacedIntervalMs : 0
 
       return {
         name,
@@ -322,6 +480,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         pauseRemaining: Math.max(0, pausedUntil - now),
         sentTotal,
         lastSentAt,
+        pacedIntervalMs: paced,
       }
     },
   }
@@ -367,6 +526,8 @@ export const animeThemesLimiter = createRateLimiter({
 /**
  * Единственный ограничитель с плавающим потолком: только AniList их присылает.
  * Интервал считается от потолка: всплеск в одну секунду ловит 429 даже в лимите.
+ * Он же единственный, кому приходит остаток окна, — значит, и темп по остатку
+ * работает пока только здесь.
  */
 export const anilistLimiter = createRateLimiter({
   name: 'AniList',
