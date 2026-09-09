@@ -4,6 +4,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import { startAppearance } from './appearance'
+import { seen } from './see-tile'
 import { tip } from './tip'
 import { initCollection } from '@/core/collection'
 import { initDatasetNames, updateDatasetNamesInBackground } from '@/core/dataset-names'
@@ -54,8 +55,13 @@ async function start(): Promise<void> {
 
   // Подпись v-tip регистрируется на всё приложение: её просят метки плиток,
   // кнопки шапок и полки карточек — импорт в каждый файл был бы шумом.
+  //
+  // Рядом с ней v-seen: отметка о показе плитки, по которой экраны решают,
+  // о чём вообще спрашивать источники видео. У неё, как и у подписи, один
+  // наблюдатель на всё окно, и место ему тоже здесь.
   createApp(App)
     .directive('tip', tip)
+    .directive('seen', seen)
     .mount(root as HTMLElement)
 
   // Ошибка подъёма окно не роняет — список просто останется пустым до
