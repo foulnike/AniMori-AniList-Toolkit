@@ -6,12 +6,35 @@
 // потом своя запись списка и карта выпуска animori-data на диске, потом склад
 // IndexedDB. Пара номеров у тайтла не меняется никогда, а спрашивалась она
 // пачками по пятьдесят при каждом запуске заново.
+//
+// СКЛАД ДЛЯ КАРТОЧКИ И ПАМЯТЬ ДЛЯ ВЫДАЧИ
+//
+// Карточка и поиск больше не спрашивают запись списка (mediaListEntry).
+// Правда о списке живёт в памяти коллекции: список односторонний, правки
+// никуда не уезжают, и показ давно берёт состояние оттуда, а ответ сервера
+// служил ему запасом. Запас этот был хуже отсутствия: он показывал закладку
+// тому, кто вошёл, но список не перенёс, — а первая же правка заводила поверх
+// пустую запись, и показанный статус пропадал на глазах.
+//
+// Без личной записи ответ одинаков для всех, и его можно класть на склад.
+// Карточка завершённого лежит неделю, идущего — сутки, но не дольше объявленного
+// выхода следующей серии: счёт вышедшего иначе отстал бы ровно там, где он нужен.
+// Выдача поиска помнится четверть часа в памяти запуска, а на диск ей нельзя:
+// слов бесконечно много, а вчерашняя выдача сегодня уже не та.
 
+import {
+  isFresh,
+  isFreshAt,
+  LIFE_CARD_AIRING,
+  LIFE_CARD_FINISHED,
+  LIFE_SEARCH,
+} from '../core/cache-life'
 import { datasetMalId, initDatasetNames } from '../core/dataset-names'
 import { dbGet, dbSet } from '../core/db'
-import type { MalCacheRecord, MediaType } from '../core/types'
+import type { MalCacheRecord, MediaCacheRecord, MediaType } from '../core/types'
 import { Logger } from '../utils/logger'
 import { anilistQuery } from './anilist'
+import { once } from './rate-limit'
 
 /** Сколько тайтлов просим одним запросом. Потолок страницы у AniList — пятьдесят. */
 const PAGE_SIZE = 50
@@ -41,6 +64,16 @@ const SEARCH_TOTAL_CAP = 5000
  */
 export const STUDIO_PAGE_SIZE = 27
 
+/** Ключ карточки на складе. Цифра в префиксе — версия вида записи. */
+const CARD_PREFIX = 'MED3_'
+
+/**
+ * Сколько страниц выдачи держим в памяти запуска. Шестьдесят — это десяток
+ * слов с их страницами: набирать больше за четверть часа человек не успевает,
+ * а потолок нужен, чтобы долгий сеанс поиска не рос в памяти без края.
+ */
+const SEARCH_MEMORY_MAX = 60
+
 /** Дедупликация работ студии: сервер может повторить title при выпуске страницы. */
 function dedupeBriefs(items: MediaBrief[]): MediaBrief[] {
   const seen = new Set<number>()
@@ -55,6 +88,15 @@ function dedupeBriefs(items: MediaBrief[]): MediaBrief[] {
 
 /** MAL-соответствия живут весь запуск: один тайтл нужен нескольким виджетам. */
 const malMemory = new Map<number, number | null>()
+
+/** Страница выдачи и час, когда она пришла. */
+interface SearchMemo {
+  at: number
+  page: SearchPage
+}
+
+/** Выдача поиска на четверть часа. Только память: на диск ей нельзя. */
+const searchMemory = new Map<string, SearchMemo>()
 
 /**
  * Очередь сетевых обходов за соответствиями: один обход за раз на всё приложение.
@@ -77,13 +119,11 @@ const MAL_QUERY = `query ($ids: [Int], $perPage: Int) {
   }
 }`
 
-// Подробности карточки. Запись списка спрашиваем вместе с тайтлом: один
-// запрос вместо двух, а сверка с памятью покажет неушедшие правки.
+// Подробности карточки. Записи списка здесь больше нет: её знает память
+// коллекции, а без неё ответ одинаков для всех и годится на склад.
 // Баннер и цвет обложки — для крупного вида: без них карточка серая.
-// Ближайшая серия — для счёта вышедшего у идущего сезона.
-// Пересмотры, даты и комментарий нужны окну правки: оно открывается из карточки
-// и своих запросов не делает.
-// Глав, томов и прочитанных томов здесь больше нет: аниме их не имеет.
+// Ближайшая серия — для счёта вышедшего у идущего сезона и для срока хранения.
+// Глав, томов и прочитанных томов здесь нет: аниме их не имеет.
 const CARD_QUERY = `query ($id: Int!) {
   Media(id: $id) {
     id
@@ -123,31 +163,13 @@ const CARD_QUERY = `query ($id: Int!) {
         }
       }
     }
-    mediaListEntry {
-      status
-      score(format: POINT_10_DECIMAL)
-      progress
-      repeat
-      notes
-      startedAt {
-        year
-        month
-        day
-      }
-      completedAt {
-        year
-        month
-        day
-      }
-    }
   }
 }`
 
-// Поиск по слову. Закладка хозяина идёт тем же запросом: в выдаче
-// надо сразу видеть, что из найденного уже в своём списке.
+// Поиск по слову. Закладка хозяина не просится: свои метки выдача ставит
+// по памяти коллекции, а ответ с mediaListEntry тяжелеет зазря и запирает
+// выдачу на одного человека — такую страницу не положишь в общую память.
 // Обложка просится large: в сетке постеров medium заметно мылится.
-// Пересмотры, даты и комментарий здесь не спрашиваются: в плитке их не видно,
-// а ответ на две дюжины находок тяжелеет зазря.
 const SEARCH_QUERY = `query ($word: String!, $page: Int!, $perPage: Int!) {
   Page(page: $page, perPage: $perPage) {
     pageInfo {
@@ -178,17 +200,12 @@ const SEARCH_QUERY = `query ($word: String!, $page: Int!, $perPage: Int!) {
         medium
         color
       }
-      mediaListEntry {
-        status
-        score(format: POINT_10_DECIMAL)
-        progress
-      }
     }
   }
 }`
 
-// Работы студии для её экрана. Запись хозяина не просится: свои метки
-// плитка ставит по памяти, а ответ с mediaListEntry тяжелеет зазря.
+// Работы студии для её экрана. Запись хозяина не просится по той же причине,
+// что и в поиске: свои метки плитка ставит по памяти.
 const STUDIO_QUERY = `query ($id: Int!, $page: Int!, $perPage: Int!) {
   Studio(id: $id) {
     id
@@ -233,27 +250,10 @@ interface MalReply {
   } | null
 }
 
-/** Нечёткая дата сервера: тройка чисел, любое из которых может быть пустым. */
-interface FuzzyReply {
-  year?: number | null
-  month?: number | null
-  day?: number | null
-}
-
 /** Ближайшая серия: номер и срок выхода в секундах. */
 interface AiringReply {
   episode?: number | null
   airingAt?: number | null
-}
-
-interface OwnReply {
-  status?: string | null
-  score?: number | null
-  progress?: number | null
-  repeat?: number | null
-  notes?: string | null
-  startedAt?: FuzzyReply | null
-  completedAt?: FuzzyReply | null
 }
 
 /** Край связи со студией: основная отмечена у самого края. */
@@ -276,7 +276,6 @@ interface BriefReply {
   nextAiringEpisode?: AiringReply | null
   title?: { romaji?: string | null; english?: string | null; native?: string | null } | null
   coverImage?: { large?: string | null; medium?: string | null; color?: string | null } | null
-  mediaListEntry?: OwnReply | null
 }
 
 interface CardReply {
@@ -303,7 +302,6 @@ interface CardReply {
       color?: string | null
     } | null
     studios?: { edges?: Array<StudioEdgeReply | null> | null } | null
-    mediaListEntry?: OwnReply | null
   } | null
 }
 
@@ -326,13 +324,10 @@ interface StudioReply {
 }
 
 /**
- * Запись списка глазами сервера. Нужна для сверки с нашей памятью.
- *
- * В выдаче поиска новые поля не спрашиваются и приезжают пустыми: это не ошибка,
- * а осознанная экономия веса ответа; правка таких полей идёт только из карточки.
- *
- * Поле томов — остаток от времён манги: сервер о нём больше не спрашивают,
- * и оно всегда ноль. Уйдёт вместе с его читателями в слое показа.
+ * Запись списка глазами сервера. Вид сохранён ради слоя показа, который ещё
+ * читает поле ownEntry, но сервер о записи больше не спрашивается: правда
+ * о списке одна и живёт в памяти коллекции. Поле и этот вид уйдут вместе,
+ * одним проходом по экранам.
  */
 export interface ServerEntry {
   status: string | null
@@ -358,7 +353,7 @@ export interface StudioRef {
  * Подробности тайтла для карточки. В снимке этого нет и не будет:
  * снимок держит состояние списка, а описания и обложки — складское дело.
  *
- * Главы и тома осталисы в описании пустыми полями: их ещё читает слой
+ * Главы и тома остались в описании пустыми полями: их ещё читает слой
  * показа, а убирать их надо вместе с ним, одним шагом.
  */
 export interface MediaCard {
@@ -393,7 +388,7 @@ export interface MediaCard {
   airingAt: number | null
   /** Студии тайтла, основная первой. */
   studios: StudioRef[]
-  /** Запись в списке хозяина или `null`, если тайтл в списке не числится. */
+  /** Всегда null: состояние списка показ берёт из памяти коллекции. */
   ownEntry: ServerEntry | null
 }
 
@@ -423,6 +418,7 @@ export interface MediaBrief {
   airingEpisode: number | null
   /** Срок выхода той серии в секундах: по нему видно, что облик отстал. */
   airingAt: number | null
+  /** Всегда null: свои метки плитка ставит по памяти коллекции. */
   ownEntry: ServerEntry | null
 }
 
@@ -592,6 +588,67 @@ async function rememberOnDisk(mediaId: number, malId: number): Promise<void> {
   await dbSet('malCache', record)
 }
 
+/** Ключ карточки на складе. */
+function cardKey(mediaId: number): string {
+  return `${CARD_PREFIX}${mediaId}`
+}
+
+/**
+ * Срок хранения карточки по её же статусу. У завершённого и закрытого меняться
+ * нечему — неделя; у идущего и у анонса прибавляются серии и даты — сутки.
+ */
+function cardLife(status: string | null): number {
+  return status === 'FINISHED' || status === 'CANCELLED' ? LIFE_CARD_FINISHED : LIFE_CARD_AIRING
+}
+
+/**
+ * Годна ли запись склада.
+ *
+ * Кроме срока смотрим на объявленный выход серии: если он уже наступил, на
+ * складе лежит вчерашний счёт вышедшего. Именно этот счёт человек и открывает
+ * карточку проверять, так что здесь суточный срок ошибается ровно в тот день,
+ * когда ошибаться нельзя.
+ */
+function cardUsable(key: string, record: MediaCacheRecord<MediaCard>): boolean {
+  const card = record.data
+  if (!card || typeof card.mediaId !== 'number' || card.mediaId <= 0) return false
+
+  const airingAt = card.airingAt
+  if (typeof airingAt === 'number' && airingAt > 0 && Date.now() >= airingAt * 1000) return false
+
+  return isFresh(key, record.ts, cardLife(card.status))
+}
+
+/** Карточка со склада или null. Отказ склада — промах, а не поломка показа. */
+async function readCard(mediaId: number): Promise<MediaCard | null> {
+  const key = cardKey(mediaId)
+
+  try {
+    const record = await dbGet<MediaCacheRecord<MediaCard>>('mediaCache', key)
+    if (!record || !cardUsable(key, record)) return null
+
+    return record.data
+  } catch (e) {
+    Logger('WARN', `Карточка ${mediaId}: склад не прочитался`, e)
+    return null
+  }
+}
+
+/** Кладёт карточку на склад. Промах записи показу не мешает. */
+async function writeCard(card: MediaCard): Promise<void> {
+  try {
+    const record: MediaCacheRecord<MediaCard> = {
+      key: cardKey(card.mediaId),
+      data: card,
+      ts: Date.now(),
+    }
+
+    await dbSet('mediaCache', record)
+  } catch (e) {
+    Logger('WARN', `Карточка ${card.mediaId}: на склад не легла`, e)
+  }
+}
+
 /** Целое неотрицательное или `null`: чужие пустоты в числа превращать нельзя. */
 function countOrNull(value: number | null | undefined): number | null {
   return typeof value === 'number' && value > 0 ? value : null
@@ -620,44 +677,6 @@ function searchTotal(
 /** Строка или `null`. Пустая строка равносильна отсутствию значения. */
 function textOrNull(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null
-}
-
-/** Две цифры для даты. Свой помощник дешевле втягивания библиотеки дат. */
-function pad(value: number): string {
-  return value < 10 ? `0${value}` : String(value)
-}
-
-/**
- * Нечёткая дата сервера в вид ГГГГ-ММ-ДД. Неполная дата считается отсутствующей:
- * поле даты в окне правки ждёт ровно такой вид, а «только год» показать негде.
- */
-function readFuzzy(date: FuzzyReply | null | undefined): string | null {
-  if (!date) return null
-
-  const { year, month, day } = date
-  if (typeof year !== 'number' || typeof month !== 'number' || typeof day !== 'number') return null
-  if (year <= 0 || month <= 0 || day <= 0) return null
-
-  return `${year}-${pad(month)}-${pad(day)}`
-}
-
-/**
- * Запись хозяина из ответа сервера. Пустота значит «тайтла в списке нет».
- * Тома всегда ноль: у аниме их нет, и сервер о них больше не спрашивают.
- */
-function ownOrNull(own: OwnReply | null | undefined): ServerEntry | null {
-  if (!own) return null
-
-  return {
-    status: textOrNull(own.status),
-    score10: typeof own.score === 'number' ? own.score : 0,
-    progress: typeof own.progress === 'number' ? own.progress : 0,
-    volumes: 0,
-    repeat: typeof own.repeat === 'number' ? own.repeat : 0,
-    startedAt: readFuzzy(own.startedAt),
-    completedAt: readFuzzy(own.completedAt),
-    notes: textOrNull(own.notes),
-  }
 }
 
 /** Студии из ответа: безымянные и битые отброшены, основная едет первой. */
@@ -699,16 +718,37 @@ function briefOrNull(item: BriefReply | null | undefined): MediaBrief | null {
     color: textOrNull(item.coverImage?.color),
     airingEpisode: countOrNull(item.nextAiringEpisode?.episode),
     airingAt: countOrNull(item.nextAiringEpisode?.airingAt),
-    ownEntry: ownOrNull(item.mediaListEntry),
+    // Состояние списка приходит не отсюда: его знает память коллекции.
+    ownEntry: null,
   }
 }
 
 /**
- * Подробности одного тайтла и запись хозяина в нём. Запрос идёт с ключом:
- * без входа сервер отдаст тайтл, но про запись ответит пустотой.
+ * Подробности одного тайтла: склад, затем сеть. Запрос идёт без ключа —
+ * личного в ответе больше ничего нет, а значит и ключ ни к чему.
+ *
+ * «Главная → тайтл → назад → тот же тайтл» стоило двух запросов, теперь ноль:
+ * возврат к уже открытому тайтлу сети не касается.
  */
 export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null> {
-  const reply = await anilistQuery<CardReply>(CARD_QUERY, { id: mediaId }, true)
+  if (!Number.isFinite(mediaId) || mediaId <= 0) return null
+
+  const stored = await readCard(mediaId)
+  if (stored !== null) {
+    // Пара номеров со склада тоже годится: она не меняется никогда.
+    rememberMalId(stored.mediaId, stored.malId)
+    Logger('DB', `Карточка ${mediaId}: со склада, без запроса`)
+    return stored
+  }
+
+  // Два экрана открывают один тайтл разом на возврате назад и по ссылке
+  // франшизы: второй ждёт первого, а не шлёт свой запрос.
+  return once(cardKey(mediaId), () => loadCard(mediaId))
+}
+
+/** Сетевая часть карточки: ответ, разбор и запись на склад. */
+async function loadCard(mediaId: number): Promise<MediaCard | null> {
+  const reply = await anilistQuery<CardReply>(CARD_QUERY, { id: mediaId })
 
   const media = reply.data?.Media
   if (!media || typeof media.id !== 'number') {
@@ -720,7 +760,7 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
   // запуск и снимет с сети один вопрос из пачки в следующий раз.
   rememberMalId(media.id, countOrNull(media.idMal))
 
-  return {
+  const card: MediaCard = {
     mediaId: media.id,
     malId: countOrNull(media.idMal),
     // Вид всегда аниме: другие разделы приложение больше не открывает.
@@ -749,23 +789,70 @@ export async function fetchMediaCard(mediaId: number): Promise<MediaCard | null>
     airingEpisode: countOrNull(media.nextAiringEpisode?.episode),
     airingAt: countOrNull(media.nextAiringEpisode?.airingAt),
     studios: readStudios(media.studios?.edges),
-    ownEntry: ownOrNull(media.mediaListEntry),
+    // Состояние списка приходит не отсюда: его знает память коллекции.
+    ownEntry: null,
   }
+
+  // Показ карточку не ждёт: запись на склад идёт своим ходом.
+  void writeCard(card)
+
+  return card
+}
+
+/** Ключ страницы выдачи. Регистр слова не различается: «Наруто» и «наруто» — одно. */
+function searchKey(word: string, page: number): string {
+  return `${word.toLowerCase()}|${page}`
+}
+
+/** Страница выдачи из памяти запуска или null. */
+function readSearch(key: string): SearchPage | null {
+  const memo = searchMemory.get(key)
+  if (!memo || !isFreshAt(memo.at, LIFE_SEARCH)) return null
+
+  return memo.page
 }
 
 /**
- * Поиск тайтлов по слову. Запрос с ключом, иначе в выдаче не будет видно,
- * что тайтл уже в списке. Пустое слово сеть не тревожит.
+ * Помнит страницу выдачи. Пустая выдача помнится наравне с полной: «ничего
+ * не нашлось» — такой же ответ, и переспрашивать его тем же словом незачем.
+ */
+function writeSearch(key: string, page: SearchPage): void {
+  searchMemory.set(key, { at: Date.now(), page })
+  if (searchMemory.size <= SEARCH_MEMORY_MAX) return
+
+  // Map хранит порядок вставки, так что первый ключ — самый давний.
+  const oldest = searchMemory.keys().next().value
+  if (oldest !== undefined) searchMemory.delete(oldest)
+}
+
+/**
+ * Поиск тайтлов по слову. Сначала память запуска, потом сеть. Пустое слово
+ * сеть не тревожит.
+ *
+ * Память здесь важнее, чем кажется: набрать слово, открыть находку и вернуться
+ * назад — обычный ход, и он стоил повторной страницы выдачи каждый раз.
  */
 export async function searchMedia(word: string, page = 1): Promise<SearchPage | null> {
   const asked = word.trim()
   if (asked === '') return { items: [], hasNext: false, total: 0 }
 
-  const reply = await anilistQuery<SearchReply>(
-    SEARCH_QUERY,
-    { word: asked, page, perPage: SEARCH_PAGE_SIZE },
-    true,
-  )
+  const key = searchKey(asked, page)
+  const remembered = readSearch(key)
+  if (remembered !== null) {
+    Logger('DB', `Поиск «${asked}»: страница ${page} из памяти, без запроса`)
+    return remembered
+  }
+
+  return once(`search-${key}`, () => loadSearch(asked, page, key))
+}
+
+/** Сетевая часть поиска: ответ, разбор и память страницы. */
+async function loadSearch(asked: string, page: number, key: string): Promise<SearchPage | null> {
+  const reply = await anilistQuery<SearchReply>(SEARCH_QUERY, {
+    word: asked,
+    page,
+    perPage: SEARCH_PAGE_SIZE,
+  })
 
   const found = reply.data?.Page
   if (!found || !Array.isArray(found.media)) {
@@ -783,18 +870,39 @@ export async function searchMedia(word: string, page = 1): Promise<SearchPage | 
 
   Logger('API', `Поиск «${asked}»: страница ${page}, нашлось ${items.length}`)
 
-  return {
+  const result: SearchPage = {
     items,
     hasNext,
     total: searchTotal(found.pageInfo?.total, page, items.length, hasNext),
   }
+
+  writeSearch(key, result)
+
+  return result
 }
 
-/** Работы студии по популярности, страницами. Подпись не нужна: всё публичное. */
+/**
+ * Работы студии по популярности, страницами. Подпись не нужна: всё публичное.
+ *
+ * Склейка одинаковых заходов идёт по номеру студии, странице и числу уже
+ * показанных работ: при равных трёх ответ будет тем же, а разные наборы
+ * показанного дают разный подсчёт известного и склеиваться не должны.
+ */
 export async function fetchStudioWorks(
   studioId: number,
   page = 1,
   previous: ReadonlyArray<MediaBrief> = [],
+): Promise<StudioPage | null> {
+  return once(`studio-${studioId}|${page}|${previous.length}`, () =>
+    loadStudioWorks(studioId, page, previous),
+  )
+}
+
+/** Сетевая часть работ студии. */
+async function loadStudioWorks(
+  studioId: number,
+  page: number,
+  previous: ReadonlyArray<MediaBrief>,
 ): Promise<StudioPage | null> {
   const reply = await anilistQuery<StudioReply>(STUDIO_QUERY, {
     id: studioId,
@@ -833,4 +941,14 @@ export async function fetchStudioWorks(
     total,
     known,
   }
+}
+
+/**
+ * Забывает память запуска: пары номеров и страницы выдачи. Нужна ручной
+ * очистке склада — иначе очищенный склад тут же перекрывался бы памятью,
+ * и человек не увидел бы никакой разницы.
+ */
+export function forgetMediaMemory(): void {
+  malMemory.clear()
+  searchMemory.clear()
 }
