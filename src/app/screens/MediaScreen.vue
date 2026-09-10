@@ -61,6 +61,7 @@ const {
   franchiseStatus,
   franchiseHint,
   franchisePlay,
+  onPartSeen,
   openFranchiseWork,
   openStudio,
   onOpen,
@@ -266,8 +267,17 @@ watch(mediaId, () => {
           <div v-if="franchiseRows.length > 0" class="am-panel am-fran">
             <h3 class="am-h3">Франшиза</h3>
 
+            <!-- v-seen сообщает о первом показе плитки: источники видео
+                 спрашиваются только о показанных частях дерева. Склад при этом
+                 поднимается по всей полке: он даром. Директива живёт
+                 в app/see-tile.ts и зарегистрирована на всё приложение в main.ts. -->
             <div ref="franList" class="am-rail">
-              <article v-for="work in franchiseRows" :key="work.malId ?? work.name" class="am-part">
+              <article
+                v-for="work in franchiseRows"
+                :key="work.malId ?? work.name"
+                v-seen="() => onPartSeen(work)"
+                class="am-part"
+              >
                 <button
                   v-if="work.mediaId !== null && work.mediaId !== mediaId"
                   v-tip="franchiseHint(work)"
