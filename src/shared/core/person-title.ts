@@ -7,12 +7,21 @@
 // core/rich-text.ts на слое показа. Прежде теги вырезались здесь, и ссылки
 // со спойлерами терялись ещё до кэша — восстанавливать было нечего.
 //
+// ОТКАЗ ТОЖЕ ХРАНИТСЯ
+// «У этого человека русского имени нет» — такой же добытый ответ, как и само
+// имя, и стоил он того же запроса. Прежде отказ жил только в памяти запуска,
+// поэтому каждое открытие программы заново спрашивало Шикимори про одних и тех
+// же безымянных: на карточке с большим составом это десятки запросов на ровном
+// месте. Теперь отказ ложится на склад ключом NOPERSON1_<вид>:<номер> и живёт
+// неделю (см. core/cache-life.ts): к вечеру русское имя там не появится, а вот
+// к следующему выпуску датасета — вполне.
+//
 // Заодно здесь живёт обратный указатель: номер человека у Шикимори -> кто это
 // в наших карточках. Сопоставление всё равно его узнаёт, а ссылкам из описаний
 // нужно ровно обратное направление: человек открытого тайтла разрешается
 // без единого запроса в сеть.
 
-import { CACHE_TIME } from './constants'
+import { LIFE_PEOPLE, LIFE_PERSON_MISS, isFresh } from './cache-life'
 import { dbGet, dbSet } from './db'
 import type { PersonRef } from '../api/anilist-people'
 import {
@@ -34,6 +43,13 @@ export type PersonKind = 'character' | 'staff'
  * версий теги уже вырезаны, а срок хранения у нас бессрочный.
  */
 const KEY_PREFIX: Record<PersonKind, string> = { character: 'CHR3_', staff: 'STF4_' }
+
+/**
+ * Префикс отказов. Отдельным ключом, а не пометкой внутри карточки: карточки
+ * читаются на каждый показ плитки, и мешать в них записи без имени значило бы
+ * проверять «а настоящая ли это карточка» в пяти местах.
+ */
+const MISS_PREFIX = 'NOPERSON1_'
 
 /** Готовая русская карточка человека. */
 export interface RussianPerson {
@@ -61,9 +77,6 @@ const memory = new Map<string, RussianPerson | null>()
  */
 const byShiki = new Map<number, KnownPerson>()
 
-/** Чьи ключи уже искали на складе. */
-const asked = new Set<string>()
-
 /** Незавершённые добычи: плитка и окошко часто просят одного человека в один миг. */
 const pending = new Map<string, Promise<RussianPerson | null>>()
 
@@ -73,6 +86,10 @@ function memoryKey(kind: PersonKind, personId: number): string {
 
 function cacheKey(kind: PersonKind, personId: number): string {
   return `${KEY_PREFIX[kind]}${personId}`
+}
+
+function missKey(kind: PersonKind, personId: number): string {
+  return `${MISS_PREFIX}${memoryKey(kind, personId)}`
 }
 
 /**
@@ -89,23 +106,49 @@ function remember(kind: PersonKind, person: PersonRef, card: RussianPerson): voi
 
 /** Читает карточку со склада. Протухшая запись считается отсутствующей. */
 async function readCache(kind: PersonKind, personId: number): Promise<RussianPerson | null> {
-  const key = memoryKey(kind, personId)
-  asked.add(key)
+  const key = cacheKey(kind, personId)
 
-  const record = await dbGet<MediaCacheRecord<RussianPerson>>(
-    'mediaCache',
-    cacheKey(kind, personId),
-  )
+  const record = await dbGet<MediaCacheRecord<RussianPerson>>('mediaCache', key)
   if (!record || typeof record.ts !== 'number') return null
-  if (Date.now() - record.ts > CACHE_TIME) return null
+  if (!isFresh(key, record.ts, LIFE_PEOPLE)) return null
 
   const data = record.data
   return data && typeof data.russian === 'string' && data.russian ? data : null
 }
 
-/** Кладёт карточку на склад. Отсутствие перевода на склад не пишется. */
+/** Кладёт карточку на склад. */
 async function writeCache(kind: PersonKind, personId: number, data: RussianPerson): Promise<void> {
   await dbSet('mediaCache', { key: cacheKey(kind, personId), data, ts: Date.now() })
+}
+
+/**
+ * Свежий ли отказ на складе. Сбой чтения — не отказ: лучше лишний запрос,
+ * чем латиница на карточке из-за неисправного склада.
+ */
+async function readMiss(kind: PersonKind, personId: number): Promise<boolean> {
+  const key = missKey(kind, personId)
+
+  try {
+    const record = await dbGet<MediaCacheRecord<{ miss: true }>>('mediaCache', key)
+    if (!record || typeof record.ts !== 'number') return false
+
+    return isFresh(key, record.ts, LIFE_PERSON_MISS)
+  } catch (e) {
+    Logger('WARN', `Русское имя: склад не отдал отказ (${memoryKey(kind, personId)})`, e)
+    return false
+  }
+}
+
+/**
+ * Кладёт отказ на склад. Не ждём и не роняем добычу из-за него: имя мы уже
+ * спросили, и неудачная запись стоит лишь одного лишнего запроса завтра.
+ */
+async function writeMiss(kind: PersonKind, personId: number): Promise<void> {
+  try {
+    await dbSet('mediaCache', { key: missKey(kind, personId), data: { miss: true }, ts: Date.now() })
+  } catch (e) {
+    Logger('WARN', `Русское имя: склад не принял отказ (${memoryKey(kind, personId)})`, e)
+  }
 }
 
 /**
@@ -133,6 +176,12 @@ async function loadOne(
     return cached
   }
 
+  // Отказ читается вторым: карточка старше отказа всегда важнее.
+  if (await readMiss(kind, person.personId)) {
+    memory.set(key, null)
+    return null
+  }
+
   const found = await fetchShikiPersonREST(
     kind === 'character' ? 'characters' : 'people',
     person.name,
@@ -144,7 +193,9 @@ async function loadOne(
   if (found.status === 0 || found.status === 429) return null
 
   if (found.status !== 200 || !found.data?.russian) {
+    // Источник ответил и русского имени не знает: это добытый ответ, и он хранится.
     memory.set(key, null)
+    await writeMiss(kind, person.personId)
     return null
   }
 
@@ -212,6 +263,12 @@ export async function prefetchRussianPeople(
     const cached = await readCache(entry.kind, entry.person.personId)
     if (cached) {
       remember(entry.kind, entry.person, cached)
+      continue
+    }
+
+    // Свежий отказ — такой же ответ склада, как карточка: в добор он не идёт.
+    if (await readMiss(entry.kind, entry.person.personId)) {
+      memory.set(key, null)
       continue
     }
 
@@ -340,6 +397,5 @@ export async function rememberRussianPerson(
 export function forgetRussianPeople(): void {
   memory.clear()
   byShiki.clear()
-  asked.clear()
   pending.clear()
 }
