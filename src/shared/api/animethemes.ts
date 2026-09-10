@@ -1,6 +1,12 @@
 // Клиент AnimeThemes.moe: опенинги и эндинги по MAL ID.
 // Единственный API без ключа и без зеркал, зато с обязательным кэшем mediaCache.
 // Пустой результат тоже кэшируется: иначе тайтлы без тем дёргали бы API каждый раз.
+//
+// Повторов после 429 здесь нет намеренно: ими распоряжается ограничитель темпа,
+// а темы второстепенны — карточка без них откроется. Прежде тут жила рекурсия
+// по attempt, но при MAX_RATE_RETRIES = 1 она была недостижима: условие выхода
+// срабатывало на первом же проходе. Мёртвый код хуже отсутствующего: он обещает
+// поведение, которого нет.
 
 import { Bridge, type HttpResponse } from '@/bridge'
 import { CACHE_TIME } from '../core/constants'
@@ -8,7 +14,7 @@ import { dbGet, dbSet } from '../core/db'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
 import type { MediaCacheRecord } from '../core/types'
-import { MAX_RATE_RETRIES, animeThemesLimiter } from './rate-limit'
+import { animeThemesLimiter } from './rate-limit'
 
 /** Базовый адрес собран конкатенацией: литерал схемы в шаблонной строке ломался при отправке. */
 const API_BASE = 'https://api.animethemes.moe/anime'
@@ -20,8 +26,8 @@ const API_BASE = 'https://api.animethemes.moe/anime'
 export const NET_SOURCE_ANIMETHEMES = 'animethemes'
 export const NET_LABEL_ANIMETHEMES = 'AnimeThemes'
 
-/** Пауза перед повтором после 429. Джиттер разводит одновременные повторы. */
-const RETRY_DELAY_MS = 1500
+/** Пауза ограничителю после 429. Джиттер разводит одновременные карточки. */
+const RATE_PAUSE_MS = 1500
 const REQUEST_TIMEOUT_MS = 10000
 
 const pendingThemes = new Map<number, Promise<MalThemes | null>>()
@@ -78,7 +84,6 @@ function formatThemes(themes: AnimeThemesEntry[]): MalThemes {
  * Грузит темы по MAL ID; кэш — mediaCache, ключ THEMES2_<malId>.
  * Никогда не отклоняется: любая неудача — null, иначе сбой всплывёт в mount() виджета.
  * @param malId Идентификатор MyAnimeList или null, если его не удалось разрешить.
- * @param attempt Номер попытки после 429, считая с нуля. Служебный параметр рекурсии.
  */
 export async function fetchMalThemes(malId: number | null): Promise<MalThemes | null> {
   if (!malId) return null
@@ -95,7 +100,7 @@ export async function fetchMalThemes(malId: number | null): Promise<MalThemes | 
   }
 }
 
-async function fetchMalThemesAttempt(malId: number, attempt = 0): Promise<MalThemes | null> {
+async function fetchMalThemesAttempt(malId: number): Promise<MalThemes | null> {
   const cacheKey = `THEMES2_${malId}`
   const cached = await dbGet<MediaCacheRecord<MalThemes>>('mediaCache', cacheKey)
   if (cached && Date.now() - cached.ts < CACHE_TIME) return cached.data
@@ -106,7 +111,7 @@ async function fetchMalThemesAttempt(malId: number, attempt = 0): Promise<MalThe
   // Замер идёт вместе с ожиданием слота: важно, сколько ждал виджет, а не сервер.
   const startedAt = Date.now()
   try {
-    // Слот берём перед каждой отправкой: для счётчика окна повтор — такой же запрос.
+    // Слот берём перед отправкой: для счётчика окна это такой же запрос, как все.
     await animeThemesLimiter.acquireSlot()
 
     res = await Bridge.http.request({
@@ -130,23 +135,12 @@ async function fetchMalThemesAttempt(malId: number, attempt = 0): Promise<MalThe
   // Код вне 2xx мост исключением не считает, поэтому статусы разбираем сами.
   if (res.status === 429) {
     // Пауза на ограничителе, а не sleep: она притормозит и соседние карточки в очереди.
-    const waitMs = RETRY_DELAY_MS + Math.floor(Math.random() * 500)
+    const waitMs = RATE_PAUSE_MS + Math.floor(Math.random() * 500)
     animeThemesLimiter.pause(waitMs)
 
-    if (attempt + 1 >= MAX_RATE_RETRIES) {
-      Logger('ERROR', `AnimeThemes: лимит 429 не отпустил, темы не загружены (MAL ${malId})`, {
-        attempts: attempt + 1,
-      })
-      // Не кэшируем: это временный отказ, а не отсутствие тем.
-      return null
-    }
-
-    Logger(
-      'WARN',
-      `AnimeThemes 429: пауза ${waitMs}мс, повтор ${attempt + 2}/${MAX_RATE_RETRIES} — MAL ${malId}`,
-    )
-    // Повтор пойдёт через шлюз и сам дождётся конца паузы.
-    return fetchMalThemesAttempt(malId, attempt + 1)
+    Logger('ERROR', `AnimeThemes: лимит 429, пауза ${waitMs}мс, темы не загружены (MAL ${malId})`)
+    // Не кэшируем: это временный отказ, а не отсутствие тем.
+    return null
   }
 
   if (res.status !== 200) {
