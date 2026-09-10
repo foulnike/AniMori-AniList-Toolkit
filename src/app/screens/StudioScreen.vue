@@ -1,6 +1,12 @@
 <script setup lang="ts">
 // Пункт 3.10: экран студии — её работы сеткой постеров внутри приложения.
 // Плитка и её сборка общие с поиском (tile-row.ts): вид тайтла везде один.
+//
+// МЕТКИ ДОСТУПНОСТИ СПРАШИВАЮТСЯ ПО ПОКАЗУ
+// Заход даёт три полных ряда постеров, а в окно узкого окна попадает один.
+// Склад поднимается по всей сетке разом — он отвечает даром, — а чужие службы
+// спрашиваются только о тех плитках, что человек впрямь увидел: отметку
+// приносит директива v-seen из app/see-tile.ts.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { fetchStudioWorks, STUDIO_PAGE_SIZE, type MediaBrief } from '@/api/anilist-media'
@@ -9,7 +15,13 @@ import { hiddenCount, keepAllowed } from '@/core/adult'
 import { initCollection } from '@/core/collection'
 import { rememberBrief } from '@/core/media-looks'
 import { peekRussianName, prefetchRussianNames } from '@/core/media-title'
-import { onPlayableChange, peekPlayable, primePlayable, warmPlayable } from '@/core/playable'
+import {
+  onPlayableChange,
+  peekPlayable,
+  primePlayable,
+  requestPlayable,
+  type PlayAsk,
+} from '@/core/playable'
 import { studioLogos } from '@/core/studio-logos'
 import { Logger } from '@/utils/logger'
 
@@ -23,6 +35,13 @@ const HOLD_COUNT = 18
 
 /** По скольку тайтлов просить русские названия за заход. */
 const TITLE_CHUNK = 20
+
+/**
+ * Пауза перед заказом меток показанным плиткам. Прокрутка сетки приводит
+ * их целым рядом разом, и без придержки каждый постер будил бы очередь ядра
+ * отдельным заказом.
+ */
+const SEEN_PAUSE_MS = 200
 
 /** Сколько видимых постеров обязан дать один заход: три полных ряда. */
 const WANT = STUDIO_PAGE_SIZE
@@ -73,6 +92,17 @@ let sourceMore = true
 let run = 0
 let titleRun = 0
 let playRun = 0
+
+/** Плитки, попавшие в окно и ещё без метки: о них уйдёт ближайший заказ. */
+const seenTiles = new Set<number>()
+
+let seenTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Подъём меток со склада. Заказ в сеть ждёт этого обещания: спрашивать
+ * чужие службы о том, что вот-вот приедет с диска, — худший из запросов.
+ */
+let priming: Promise<void> = Promise.resolve()
 
 const studioId = computed<number>(() => {
   const raw = Number(currentRoute.value.params.id ?? '')
@@ -159,41 +189,81 @@ async function fillTitles(targetIds: readonly number[]): Promise<void> {
   }
 }
 
+/** Снимает отложенный заказ: показанное относилось к другой студии. */
+function dropSeen(): void {
+  if (seenTimer !== null) clearTimeout(seenTimer)
+  seenTimer = null
+  seenTiles.clear()
+}
+
 /**
- * Добирает метки доступности. Сначала склад — он отвечает даром и разом по всей
- * сетке, — и только потом сеть. У старой студии половина работ нашим
- * источникам неизвестна, и метка отвечает на это до плеера.
- *
- * Спрашивается вся сетка, а не верх её: очередь ядра одна на приложение
- * и сама держит темп, а заход здесь даёт три полных ряда постеров разом:
- * десять верхних работ не набирали даже первого ряда.
+ * Поднимает метки доступности со склада по всей сетке разом. Сети не касается
+ * вовсе, поэтому спрашивать можно всё: однажды спрошенное показывается
+ * целиком и даром, включая третий ряд за прокруткой.
  */
-async function fillPlay(): Promise<void> {
+async function loadMarks(): Promise<void> {
   const mine = ++playRun
   if (briefs.length === 0) return
 
-  try {
-    const primed = await primePlayable(briefs.map((brief) => brief.mediaId))
-    if (mine !== playRun) return
-    if (primed > 0) redraw()
+  priming = (async () => {
+    try {
+      const primed = await primePlayable(briefs.map((brief) => brief.mediaId))
+      if (mine !== playRun) return
+      if (primed > 0) redraw()
+    } catch (e) {
+      // Без метки сетка живая: плитка про доступность просто молчит.
+      Logger('WARN', 'Студия: метки доступности со склада не поднялись', e)
+    }
+  })()
 
-    const wanted = briefs
-      .filter((brief) => peekPlayable(brief.mediaId) === null)
-      .map((brief) => toPlayAsk(brief))
+  await priming
+}
 
-    if (wanted.length === 0) return
+/**
+ * Заказывает метки у источников для показанных плиток. Ответы приезжают
+ * подпиской, поэтому ждать здесь нечего: порядок и темп держит очередь ядра.
+ */
+async function askSeen(): Promise<void> {
+  const mine = playRun
 
-    // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
-    setupVideoSources()
+  // Склад мог ещё не договорить: иначе в сеть ушли бы вопросы о том,
+  // что уже лежит на диске.
+  await priming
+  if (mine !== playRun) return
 
-    await warmPlayable(wanted)
-    if (mine !== playRun) return
+  const wanted: PlayAsk[] = []
 
-    redraw()
-  } catch (e) {
-    // Без метки сетка живая: плитка про доступность просто молчит.
-    Logger('WARN', 'Студия: метки доступности не доехали', e)
+  for (const brief of briefs) {
+    if (!seenTiles.has(brief.mediaId)) continue
+    if (peekPlayable(brief.mediaId) !== null) continue
+
+    wanted.push(toPlayAsk(brief))
   }
+
+  seenTiles.clear()
+
+  if (wanted.length === 0) return
+
+  // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
+  setupVideoSources()
+
+  requestPlayable(wanted)
+}
+
+/**
+ * Плитка показалась человеку. Номера копятся пачкой: прокрутка приводит
+ * целый ряд разом, а уже известная метка не стоит ни одного вопроса.
+ */
+function onTileSeen(mediaId: number): void {
+  if (peekPlayable(mediaId) !== null) return
+
+  seenTiles.add(mediaId)
+  if (seenTimer !== null) return
+
+  seenTimer = setTimeout(() => {
+    seenTimer = null
+    void askSeen()
+  }, SEEN_PAUSE_MS)
 }
 
 /**
@@ -219,6 +289,9 @@ async function load(add = false): Promise<void> {
     logo.value = null
     hidden.value = 0
     hasNext.value = false
+
+    // Показанное относилось к прошлой сетке: спрашивать о нём больше некого.
+    dropSeen()
   }
 
   if (id === 0) {
@@ -274,7 +347,7 @@ async function load(add = false): Promise<void> {
     briefs = keepAllowed(raw, (brief) => brief.isAdult)
     hasNext.value = sourceMore || spare.length > 0
     redraw()
-    void fillPlay()
+    void loadMarks()
     await fillTitles([...new Set(take.map((item) => item.mediaId))])
   } catch (e) {
     if (mine !== run) return
@@ -312,6 +385,9 @@ onBeforeUnmount(() => {
   run++
   titleRun++
   playRun++
+
+  // Отложенный заказ пережил бы экран и будил очередь ради снятой сетки.
+  dropSeen()
 
   // Очередь живёт дольше экрана: неснятая подписка держала бы снятый показ
   // и рисовала в никуда на каждый ответ источника.
@@ -367,10 +443,13 @@ watch(studioId, () => {
         <span>У студии пока ничего не числится.</span>
       </div>
 
+      <!-- Отметка показа на каждой плитке: только о попавших в окно
+           спрашиваются источники видео. -->
       <ul v-else class="am-grid am-studio-grid">
         <MediaTile
           v-for="row in rows"
           :key="row.mediaId"
+          v-seen="() => onTileSeen(row.mediaId)"
           :title="row.title"
           :facts="row.facts"
           :cover="row.cover"
