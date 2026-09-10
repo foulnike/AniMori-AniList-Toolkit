@@ -13,7 +13,7 @@ import { githubLimiter } from './rate-limit'
  */
 const RELEASE_BASE = 'https://github.com/foulnike/animori-data/releases/latest/download'
 
-/** Таймауты: опись крошечная, файлы — до полутора мегабайт в сжатом виде. */
+/** Таймауты: опись крошечная, файлы — до полутора мегабайтов в сжатом виде. */
 const INDEX_TIMEOUT_MS = 15000
 const FILE_TIMEOUT_MS = 60000
 
@@ -33,6 +33,21 @@ export interface DatasetIndex {
   license: string
   files: DatasetFileRef[]
 }
+
+/**
+ * Чем кончился вопрос об описи.
+ *
+ * Три исхода вместо прежнего `DatasetIndex | null` нужны ради одного
+ * различения: «сервер сказал, что тот же выпуск» и «спросить не удалось» —
+ * разные события, и второе не вправе сдвигать час следующей проверки.
+ */
+export type DatasetIndexAnswer =
+  /** Опись приехала и разобрана. `etag` пуст, если сервер его не дал. */
+  | { kind: 'index'; index: DatasetIndex; etag: string }
+  /** 304: тот же файл, что и в прошлую проверку. Тела в ответе нет вовсе. */
+  | { kind: 'same' }
+  /** Не достучались, ответ не тот или опись не разобрана. */
+  | { kind: 'fail' }
 
 /** Запись имени в файле titles. Поле id — номер Шикимори, он же номер MAL. */
 export interface DatasetTitleRow {
@@ -106,7 +121,7 @@ function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   return bytes
 }
 
-/** Шестнадцатеричный отпечаток тела: сверка с описью до распаковки. */
+/** Шестнадцатиричный отпечаток тела: сверка с описью до распаковки. */
 async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
   let hex = ''
@@ -121,28 +136,50 @@ async function gunzipText(packed: Uint8Array<ArrayBuffer>): Promise<string> {
 }
 
 /**
- * Опись последнего выпуска или null при любой неудаче: отсутствие описи
- * равно отсутствию обновления, а не ошибке. Куки не нужны вовсе.
+ * Опись последнего выпуска. Куки не нужны вовсе.
+ *
+ * Когда передан `knownEtag` с прошлой проверки, запрос идёт с If-None-Match:
+ * выпуск публикуется раз в неделю, и почти все проверки должны заканчиваться
+ * ответом без тела. Код 304 проверяется ДО `res.ok`: у него `ok` ложно,
+ * и без отдельной ветки удачный исход читался бы как отказ.
+ *
+ * Собственного хранения отпечатка здесь нет и не будет: модуль сетевой,
+ * а память между запусками живёт в core/dataset-names.ts вместе с датой сборки.
  */
-export async function fetchDatasetIndex(): Promise<DatasetIndex | null> {
+export async function fetchDatasetIndex(knownEtag?: string | null): Promise<DatasetIndexAnswer> {
   const url = `${RELEASE_BASE}/index.json`
+  const headers = knownEtag ? { 'If-None-Match': knownEtag } : undefined
 
   try {
     await githubLimiter.acquireSlot()
-    const res = await Bridge.http.request({ url, timeoutMs: INDEX_TIMEOUT_MS, credentials: 'omit' })
+    const res = await Bridge.http.request({
+      url,
+      headers,
+      timeoutMs: INDEX_TIMEOUT_MS,
+      credentials: 'omit',
+    })
+
+    if (res.status === 304) {
+      Logger('DB', 'Датасет: опись не менялась (304)')
+      return { kind: 'same' }
+    }
+
     if (!res.ok) {
       Logger('WARN', `Датасет: опись ответила ${res.status}`)
-      return null
+      return { kind: 'fail' }
     }
 
     const index = parseIndex(JSON.parse(res.text))
     if (!index) {
       Logger('WARN', 'Датасет: опись не разобрана', res.text.slice(0, 200))
+      return { kind: 'fail' }
     }
-    return index
+
+    // Ключи заголовков приведены к нижнему регистру самим мостом (IBridge.ts).
+    return { kind: 'index', index, etag: res.headers['etag'] ?? '' }
   } catch (e) {
     Logger('WARN', 'Датасет: опись не загрузилась', e)
-    return null
+    return { kind: 'fail' }
   }
 }
 
