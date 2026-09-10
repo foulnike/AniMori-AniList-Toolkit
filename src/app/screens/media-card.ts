@@ -541,7 +541,9 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     await primeFranchisePlay(mine, ids)
 
     try {
-      await prefetchRussianNames(ids)
+      // Копией: добор имён принимает изменяемый массив, а дерево сюда приходит
+      // только для чтения. Отдавать свой массив наружу незачем и без того.
+      await prefetchRussianNames([...ids])
       if (mine !== run) return
 
       franchiseStamp.value += 1
