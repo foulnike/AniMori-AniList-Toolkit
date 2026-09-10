@@ -11,8 +11,15 @@
 // запуска и всегда пробуется первым.
 //
 // Сами ссылки не кэшируются нигде: они живут считанные часы, и протухшая
-// вместо отказа даёт чёрный экран. Кэшируется только выборка озвучек:
-// адреса страниц серий постоянные.
+// вместо отказа даёт чёрный экран. На склад ложится только выборка озвучек
+// (KODIK1_<номер Шикимори>): адреса страниц серий у службы постоянны, поэтому
+// повторное открытие тайтла обходится страницей серии и /ftor — двумя
+// запросами вместо трёх.
+//
+// Срок этой записи считается от самого тайтла: идущему сутки, завершённому
+// неделя (сроки живут в core/cache-life.ts). Признак берётся из material_data
+// того же ответа: вышло меньше, чем заявлено, — тайтл ещё идёт. Не сказали
+// ни того, ни другого — считаем идущим: короткий срок ошибается дешевле.
 //
 // ПРО material_data. Первый шаг заодно просит сводку по тайтлу: русское имя,
 // описание и число вышедших серий. Стоит это ноль запросов — поле приезжает
@@ -21,9 +28,9 @@
 // перечислением каталога Шикимори, и у части тайтлов русского имени в нём
 // нет вовсе. Постер и кадры сознательно не берутся: они лежат на i.kodik.biz,
 // а новый хост потребовал бы правки прав оболочки ради картинки, которая
-// экрану не нужна. И главное: ничего из этой сводки не попадает в файлы
-// выпуска датасета и попасть не должно — это подсказка на один запуск,
-// а не источник данных.
+// экрану не нужна. И главное: ничего из этой сводки не попадает ни на склад,
+// ни в файлы выпуска датасета и попасть не должно — это подсказка на один
+// запуск, а не источник данных.
 //
 // ПРО ОПТОВЫЙ ВОПРОС. Метке доступности нужен один бит: есть ли вход к тайтлу.
 // Поштучно это запрос на плитку, то есть минута на полсотни плиток при нашем
@@ -33,8 +40,11 @@
 // на живом ответе (см. kodikPresence).
 
 import { Bridge, type HttpResponse } from '@/bridge'
+import { LIFE_VOICES_AIRING, LIFE_VOICES_FINISHED, isFresh } from '../core/cache-life'
+import { dbGet, dbSet } from '../core/db'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
+import type { MediaCacheRecord } from '../core/types'
 import type {
   PresenceMap,
   VideoEpisode,
@@ -44,7 +54,7 @@ import type {
   VideoTrack,
   VideoVoice,
 } from '../core/video'
-import { MAX_RATE_RETRIES, kodikLimiter } from './rate-limit'
+import { kodikLimiter } from './rate-limit'
 
 /** Ключ поиска: он же лежит в открытых плеерах на сайтах-партнёрах. */
 const TOKEN = '16f20d024a6fa20700b389c44d9ab159'
@@ -63,10 +73,22 @@ const UA =
 const REFERER = PLAYER_BASE + '/'
 
 const REQUEST_TIMEOUT_MS = 12000
-const RETRY_DELAY_MS = 1500
+
+/** Пауза ограничителю после 429. Джиттер разводит одновременные попытки. */
+const RATE_PAUSE_MS = 1500
 
 /** Сколько выборка озвучек живёт в памяти: за одно открытие её спросят трижды. */
 const VOICES_MEMORY_MS = 600000
+
+/** Ключ склада озвучек. Версия в имени: смена формы записи делает прежние негодными. */
+const CACHE_PREFIX = 'KODIK1_'
+
+/**
+ * Потолок записи склада в строках серий. У долгоиграющих тайтлов бывает тысяча
+ * серий в пяти озвучках, и такая запись весит больше, чем экономит: пусть
+ * лучше поиск повторится, чем склад распухнет на один тайтл.
+ */
+const CACHE_ROWS_MAX = 2000
 
 /** По скольку номеров уходит в один оптовый вопрос. */
 const PRESENCE_IDS = 20
@@ -178,29 +200,33 @@ export interface KodikMaterial {
 interface KodikFound {
   voices: KodikVoiceRow[]
   material: KodikMaterial | null
+  /**
+   * Служба ответила разборчиво. Ложь означает молчание сети или мусор в теле:
+   * пустой список озвучек в таком ответе не значит «озвучек нет» и на склад
+   * не ложится.
+   */
+  ok: boolean
 }
 
-/** Что дал один оптовый вопрос: какие номера нашлись и дочитан ли ответ. */
-interface KodikSeen {
-  found: Set<number>
-  /** Ответ дочитан до последней страницы. Нет — «нет» из него не следует. */
-  complete: boolean
+/** Что лежит на складе: только озвучки с адресами серий, без сводки и описания. */
+interface KodikVoicesRecord {
+  voices: KodikVoiceRow[]
+  /** Тайтл ещё выходит: состав серий прирастает, и срок записи короче. */
+  airing: boolean
 }
 
-/** Подписи и признаки со страницы серии — всё, что нужно для /ftor. */
-interface PageFields {
-  d: string
-  dSign: string
-  pd: string
-  pdSign: string
-  ref: string
-  refSign: string
-  type: string
-  hash: string
-  id: string
+/** Ответ поиска в памяти запуска. */
+interface FoundHeld {
+  at: number
+  found: KodikFound
+  /**
+   * Запись пришла живым поиском, а не со склада. Только у такой сводка
+   * означает ответ службы: складская её не хранит вовсе.
+   */
+  full: boolean
 }
 
-const foundMemory = new Map<number, { at: number; found: KodikFound }>()
+const foundMemory = new Map<number, FoundHeld>()
 const pendingFound = new Map<number, Promise<KodikFound>>()
 
 /** Удачный сдвиг прошлого разбора. Ноль — ещё ни разу не встречался. */
@@ -223,7 +249,6 @@ function describe(e: unknown): string {
 async function send(
   options: { method: 'GET' | 'POST'; url: string; headers?: Record<string, string>; body?: string },
   note: string,
-  attempt = 0,
 ): Promise<HttpResponse | null> {
   let res: HttpResponse
   // Замер идёт вместе с ожиданием слота: важно, сколько ждал экран.
@@ -249,16 +274,14 @@ async function send(
   reportStatus(NET_SOURCE_KODIK, NET_LABEL_KODIK, res.status, Date.now() - startedAt)
 
   if (res.status === 429) {
-    const waitMs = RETRY_DELAY_MS + Math.floor(Math.random() * 500)
+    // Пауза ставится ограничителю, а не нам: она притормозит и соседние запросы
+    // в очереди. Своего повтора здесь нет намеренно — повторами распоряжается
+    // ограничитель темпа, и цепочка серии всё равно начинается заново.
+    const waitMs = RATE_PAUSE_MS + Math.floor(Math.random() * 500)
     kodikLimiter.pause(waitMs)
 
-    if (attempt + 1 >= MAX_RATE_RETRIES) {
-      Logger('ERROR', `Kodik: лимит 429 не отпустил (${note})`, { attempts: attempt + 1 })
-      return null
-    }
-
-    Logger('WARN', `Kodik 429: пауза ${waitMs}мс, повтор ${attempt + 2}/${MAX_RATE_RETRIES}`)
-    return send(options, note, attempt + 1)
+    Logger('ERROR', `Kodik: лимит 429, пауза ${waitMs}мс (${note})`)
+    return null
   }
 
   if (res.status !== 200) {
@@ -343,6 +366,71 @@ function toMaterial(results: KodikResult[]): KodikMaterial | null {
 }
 
 /**
+ * Идёт ли тайтл ещё. Вышло меньше заявленного — идёт; сошлось или служба
+ * промолчала — считаем идущим только в первом случае неизвестности: короткий
+ * срок склада ошибается лишним запросом, длинный — забытыми сериями.
+ */
+function looksAiring(material: KodikMaterial | null): boolean {
+  const aired = material?.episodesAired ?? null
+  const total = material?.episodesTotal ?? null
+  if (aired === null || total === null) return true
+
+  return aired < total
+}
+
+/** Ключ склада озвучек по номеру Шикимори. */
+function voicesKey(shikimoriId: number): string {
+  return CACHE_PREFIX + String(shikimoriId)
+}
+
+/**
+ * Озвучки со склада. Пустая запись считается отсутствием: пустоту мы туда не
+ * пишем, а значит она пришла из чужой версии формата.
+ */
+async function readVoices(shikimoriId: number): Promise<KodikVoiceRow[] | null> {
+  const key = voicesKey(shikimoriId)
+
+  try {
+    const found = await dbGet<MediaCacheRecord<KodikVoicesRecord>>('mediaCache', key)
+    if (!found) return null
+
+    const rows = found.data.voices
+    if (!Array.isArray(rows) || rows.length === 0) return null
+
+    const life = found.data.airing === false ? LIFE_VOICES_FINISHED : LIFE_VOICES_AIRING
+    if (!isFresh(key, found.ts, life)) return null
+
+    return rows
+  } catch (e) {
+    // Склад — удобство, а не условие работы: без него просто спросим службу.
+    Logger('WARN', `Kodik: склад не отдал озвучки ${shikimoriId}`, e)
+    return null
+  }
+}
+
+/**
+ * Кладёт озвучки на склад. Ни описание, ни сводка туда не идут: они верны
+ * на один запуск, а склад живёт неделями.
+ */
+function writeVoices(shikimoriId: number, found: KodikFound): void {
+  if (!found.ok || found.voices.length === 0) return
+
+  const rows = found.voices.reduce((sum, voice) => sum + voice.episodes.length, 0)
+  if (rows > CACHE_ROWS_MAX) {
+    Logger('WARN', `Kodik: озвучки ${shikimoriId} не легли на склад, строк ${rows}`)
+    return
+  }
+
+  void dbSet('mediaCache', {
+    key: voicesKey(shikimoriId),
+    data: { voices: found.voices, airing: looksAiring(found.material) },
+    ts: Date.now(),
+  }).catch((e: unknown) => {
+    Logger('WARN', `Kodik: склад не принял озвучки ${shikimoriId}`, e)
+  })
+}
+
+/**
  * Значение var со страницы. Пустая строка — законное значение, а не отсутствие:
  * страница, открытая без ссылающейся стороны, кладёт var ref = "" и подпись
  * ставит ровно на пустой строке. Поэтому [^"']* : с плюсом «пусто» неотличимо
@@ -392,6 +480,26 @@ function readPage(html: string, pageUrl: string): PageFields | null {
   }
 
   return fields
+}
+
+/** Подписи и признаки со страницы серии — всё, что нужно для /ftor. */
+interface PageFields {
+  d: string
+  dSign: string
+  pd: string
+  pdSign: string
+  ref: string
+  refSign: string
+  type: string
+  hash: string
+  id: string
+}
+
+/** Что дал один оптовый вопрос: какие номера нашлись и дочитан ли ответ. */
+interface KodikSeen {
+  found: Set<number>
+  /** Ответ дочитан до последней страницы. Нет — «нет» из него не следует. */
+  complete: boolean
 }
 
 /** Сдвиг латинских букв по кругу внутри своего регистра. */
@@ -570,10 +678,14 @@ function toVoices(results: KodikResult[]): KodikVoiceRow[] {
  * Ответ поиска по номеру Шикимори. Десять минут живёт в памяти целиком:
  * озвучки и сводка приезжают одним ответом, и разделять их значило бы
  * спрашивать службу дважды об одном.
+ *
+ * Складская запись здесь не читается намеренно: сводки в ней нет, а этот путь
+ * нужен ровно тем, кому сводка и нужна. Озвучки берёт loadVoices — он
+ * заглядывает на склад первым.
  */
 async function loadFound(shikimoriId: number): Promise<KodikFound> {
   const known = foundMemory.get(shikimoriId)
-  if (known && Date.now() - known.at < VOICES_MEMORY_MS) return known.found
+  if (known?.full && Date.now() - known.at < VOICES_MEMORY_MS) return known.found
 
   const pending = pendingFound.get(shikimoriId)
   if (pending) return pending
@@ -583,7 +695,8 @@ async function loadFound(shikimoriId: number): Promise<KodikFound> {
 
   try {
     const found = await task
-    foundMemory.set(shikimoriId, { at: Date.now(), found })
+    foundMemory.set(shikimoriId, { at: Date.now(), found, full: true })
+    writeVoices(shikimoriId, found)
     return found
   } finally {
     pendingFound.delete(shikimoriId)
@@ -603,16 +716,37 @@ async function loadFoundUncached(shikimoriId: number): Promise<KodikFound> {
   ].join('&')
 
   const res = await send({ method: 'GET', url: `${SEARCH_BASE}/search?${query}` }, 'поиск')
-  if (res === null) return { voices: [], material: null }
+  if (res === null) return { voices: [], material: null, ok: false }
 
   const found = parseJson<KodikSearchResponse>(res.text, 'поиск')
-  const results = found?.results ?? []
+  if (found === null) return { voices: [], material: null, ok: false }
 
-  return { voices: toVoices(results), material: toMaterial(results) }
+  const results = found.results ?? []
+
+  return { voices: toVoices(results), material: toMaterial(results), ok: true }
 }
 
-/** Озвучки по номеру Шикимори: та же память, что и у сводки. */
+/**
+ * Озвучки по номеру Шикимори: память запуска, затем склад, затем служба.
+ * Складская запись и есть та самая экономия: адреса страниц серий постоянны,
+ * и повторное открытие тайтла обходится без поиска.
+ */
 async function loadVoices(shikimoriId: number): Promise<KodikVoiceRow[]> {
+  const known = foundMemory.get(shikimoriId)
+  if (known && Date.now() - known.at < VOICES_MEMORY_MS) return known.found.voices
+
+  const stored = await readVoices(shikimoriId)
+  if (stored !== null) {
+    // В память складская запись ложится с пометкой «сводки нет»: иначе
+    // kodikMaterial счёл бы её ответом службы и вернул бы пустое имя.
+    foundMemory.set(shikimoriId, {
+      at: Date.now(),
+      found: { voices: stored, material: null, ok: true },
+      full: false,
+    })
+    return stored
+  }
+
   const found = await loadFound(shikimoriId)
   return found.voices
 }
@@ -732,6 +866,9 @@ export async function kodikPresence(ids: readonly number[]): Promise<Map<number,
  * Сводка по тайтлу. Своих запросов не делает: либо отдаёт уже полученное,
  * либо тянет тот же поиск, что нужен для озвучек. Null — служба тайтл
  * не знает или material_data не заполнила; это не сбой.
+ *
+ * Складская запись сводки не хранит: там ей не место, а протухшее описание
+ * хуже отсутствующего.
  */
 export async function kodikMaterial(shikimoriId: number): Promise<KodikMaterial | null> {
   if (!Number.isFinite(shikimoriId) || shikimoriId <= 0) return null
@@ -893,7 +1030,10 @@ export const kodikSource: VideoSource = {
   },
 }
 
-/** Только для проверок и кнопки очистки кэша: память сама себя не чистит. */
+/**
+ * Только для проверок и кнопки очистки кэша: память сама себя не чистит.
+ * Склад здесь не трогается — его сносит кнопка очистки кэша целиком.
+ */
 export function forgetKodikVoices(): void {
   foundMemory.clear()
   pendingFound.clear()
