@@ -7,17 +7,25 @@
 // совпадение требуется точное после нормализации, а год служит разводящим
 // признаком. Найденный номер релиза кладётся в mediaCache и больше не ищется.
 //
-// Метке доступности нужен только один бит, и ради него релиз целиком не читается:
-// askPresence останавливается на совпадении в поиске — это на запрос меньше на тайтл.
-// Совпадение и промах ложатся на тот же склад ALIB1_, что читает плеер, поэтому
-// вопрос метки потом экономит запрос самому плееру.
+// ПОЧЕМУ ЗДЕСЬ НЕТ ВОПРОСА О НАЛИЧИИ
+// askPresence здесь был и убран намеренно. Метка доступности спрашивает дорогие
+// источники по правилу «дорогое вторым»: тайтл достаётся поштучной службе только
+// после того, как оптовая о нём высказалась, а высказавшись «да», снимает тайтл
+// с очереди совсем. Значит Aniliberty спрашивали ровно про то, чего нет у Kodik,
+// — а у Kodik есть почти всё, что есть у Aniliberty, и наоборот неверно. Вопрос
+// задавался там, где ответ заведомо отрицательный: вся цена, нулевая отдача.
 //
-// СКОЛЬКО НАЗВАНИЙ ПРОБУЕМ
-// У метки и у плеера цена ошибки разная, поэтому и число попыток разное.
-// Плеер открывает один тайтл по просьбе человека: второе название там стоит
-// одного запроса и спасает от «ничего не нашлось». Метка же спрашивается сразу
-// на целую полку, и второе название там удваивает весь расход ради серого значка,
-// который всё равно уточнится при открытии карточки.
+// Вреда было больше, чем расхода. Метка «нет» ставится только когда высказались
+// все адресуемые источники, поэтому каждый отказ Kodik ждал ещё и поиска по имени
+// здесь, а молчание службы уводило тайтл в тишину на десять минут вовсе без метки.
+//
+// Источником для плеера служба остаётся полностью: другая озвучка, другой путь
+// на случай, когда Kodik недоступен, и спрашивают её один раз — по прямому
+// действию человека, а не сеткой на полторы сотни постеров. Редкий тайтл, который
+// есть здесь и которого нет у Kodik, останется без метки, но откроется в плеере:
+// это молчание, а не ложь, и такой размен здесь предпочтителен.
+//
+// Склад ALIB1_ остаётся при плеере: совпадение бессрочно, промах на сутки.
 
 import { Bridge, type HttpResponse } from '@/bridge'
 import { LIFE_ALIB_MATCH, LIFE_ALIB_MISS, isFresh } from '../core/cache-life'
@@ -26,7 +34,6 @@ import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
 import type { MediaCacheRecord } from '../core/types'
 import type {
-  PresenceMap,
   VideoEpisode,
   VideoRequest,
   VideoSource,
@@ -48,7 +55,7 @@ export const NET_LABEL_ANILIBERTY = 'AniLiberty'
  * Пауза ограничителю после 429. Джиттер разводит одновременные карточки.
  * Повтора после паузы здесь нет: при MAX_RATE_RETRIES = 1 рекурсия была недостижима,
  * а мёртвый код обещает поведение, которого нет. Повторами распоряжается вызывающий:
- * плеер переспросит следующим названием, метка — при следующем показе полки.
+ * плеер переспросит следующим названием.
  */
 const RATE_PAUSE_MS = 1500
 const REQUEST_TIMEOUT_MS = 10000
@@ -56,15 +63,12 @@ const REQUEST_TIMEOUT_MS = 10000
 /** Сколько релиз живёт в памяти: за одно открытие экран спросит его трижды. */
 const RELEASE_MEMORY_MS = 600000
 
-/** Сколько названий пробуем в поиске для плеера: романдзи и ещё одно запасное. */
-const SEARCH_TRIES = 2
-
 /**
- * Сколько названий пробуем ради метки доступности. Одно: метка спрашивается
- * сразу на всю полку, и второе название удваивает расход ради значка,
- * который всё равно уточнится при открытии карточки.
+ * Сколько названий пробуем в поиске: романдзи и ещё одно запасное. Второе имя
+ * стоит одного запроса и спасает от «ничего не нашлось» — а платит за него
+ * человек, который сам открыл плеер, а не полка из полутора сотен плиток.
  */
-const PRESENCE_SEARCH_TRIES = 1
+const SEARCH_TRIES = 2
 
 interface AniName {
   main?: string | null
@@ -109,7 +113,7 @@ const releaseMemory = new Map<string, { at: number; release: AniRelease }>()
 const pendingRelease = new Map<string, Promise<AniRelease | null>>()
 const pendingMatch = new Map<number, Promise<AniRelease | null>>()
 
-/** Ключ склада соответствия. Один на плеер и на метку доступности. */
+/** Ключ склада соответствия. */
 function matchKey(anilistId: number): string {
   return `ALIB1_${anilistId}`
 }
@@ -276,55 +280,6 @@ async function findReleaseUncached(req: VideoRequest): Promise<AniRelease | null
   return loadRelease(key)
 }
 
-/**
- * Есть ли у службы этот тайтл. От findRelease отличается тем, что не читает релиз
- * целиком и пробует меньше названий: метке хватает совпадения в поиске,
- * а список серий ей ни к чему.
- *
- * null — служба не ответила ни на одно название. Молчание не «нет»: 404
- * и оборванная сеть приходят сюда одинаково, и ошибиться отказом дороже,
- * чем промолчать.
- */
-async function presenceOf(req: VideoRequest): Promise<boolean | null> {
-  const cacheKey = matchKey(req.anilistId)
-  const cached = await dbGet<MediaCacheRecord<AniMatchRecord>>('mediaCache', cacheKey)
-
-  // Склад отвечает даром: тайтл, уже открывавшийся в плеере, не стоит запроса.
-  if (cached && matchFresh(cacheKey, cached)) return cached.data.release !== null
-
-  const wanted = req.titles.map(plain).filter(Boolean)
-  if (wanted.length === 0) return null
-
-  let answered = false
-
-  for (const title of req.titles.slice(0, PRESENCE_SEARCH_TRIES)) {
-    const found = await apiGet<AniSearchResponse>(
-      '/app/search/releases?query=' + encodeURIComponent(title),
-      'наличие ' + title,
-    )
-    if (found === null) continue
-
-    answered = true
-
-    const list = Array.isArray(found) ? found : (found?.data ?? [])
-    const hit = list.find((r) => r && matches(r, wanted, req.year))
-    if (!hit) continue
-
-    void dbSet('mediaCache', {
-      key: cacheKey,
-      data: { release: releaseKey(hit) || null },
-      ts: Date.now(),
-    })
-    return true
-  }
-
-  if (!answered) return null
-
-  // Промах ложится на склад тем же порядком, что и у плеера: переспросим через сутки.
-  void dbSet('mediaCache', { key: cacheKey, data: { release: null }, ts: Date.now() })
-  return false
-}
-
 /** Часть ссылок приходит путём без хоста — доставляем его сами. */
 function absolute(link: string | null | undefined): string | null {
   if (!link) return null
@@ -363,7 +318,12 @@ function playableEpisodes(release: AniRelease | null): AniEpisode[] {
   )
 }
 
-/** Источник целиком. В реестр он попадает из api/video-sources.ts, а не отсюда. */
+/**
+ * Источник целиком. В реестр он попадает из api/video-sources.ts, а не отсюда.
+ *
+ * askPresence не объявлен намеренно — см. шапку файла. Метка доступности
+ * такой источник не спрашивает вовсе и в решении «нет видео» его не учитывает.
+ */
 export const anilibertySource: VideoSource = {
   id: 'aniliberty',
   label: NET_LABEL_ANILIBERTY,
@@ -375,22 +335,6 @@ export const anilibertySource: VideoSource = {
 
     // Озвучка у службы всегда одна — своя собственная.
     return [{ id: releaseKey(release), label: NET_LABEL_ANILIBERTY, episodes: episodes.length }]
-  },
-
-  /** Вход только по названию, поэтому вопрос стоит запроса на тайтл. */
-  presenceCost: 'each',
-
-  async askPresence(reqs: readonly VideoRequest[]): Promise<PresenceMap> {
-    const out: PresenceMap = new Map()
-
-    // Подряд, а не разом: ограничитель темпа всё равно выстроит запросы
-    // в очередь, а последовательный проход не плодит висящих обещаний.
-    for (const req of reqs) {
-      const state = await presenceOf(req)
-      if (state !== null) out.set(req.anilistId, state)
-    }
-
-    return out
   },
 
   async listEpisodes(_req: VideoRequest, voiceId: string): Promise<VideoEpisode[]> {
