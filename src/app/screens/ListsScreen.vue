@@ -17,6 +17,14 @@
 // в строке лежит уже одетое значение вроде «★ 8.5», а окну нужно само число.
 // Название же запоминается при открытии: правка закладки выкидывает запись
 // из нынешней закладки, и шапка открытого окна иначе опустела бы на месте.
+//
+// МЕТКИ ДОСТУПНОСТИ СПРАШИВАЮТСЯ ПО ПОКАЗУ
+//
+// Склад поднимается по всей закладке разом — он отвечает даром, — а чужие
+// службы спрашиваются только о плитках, попавших в окно: отметку приносит
+// директива v-seen. В видах строками вопросов нет вовсе: строка метку
+// доступности не показывает, и спрашивать чужие службы ради невидимого
+// знака незачем.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { editEntry, getEntry, initCollection } from '@/core/collection'
@@ -205,17 +213,15 @@ function redraw(): void {
 
 // Доборы обложек, названий и меток доступности живут рядом со сборкой строки:
 // экран отдаёт свои строки и перерисовку. Флажки нужны подвалу и кнопок не держат.
-const { looksBusy, titlesBusy, playBusy, fillLooks, fillTitles, fillPlay } = useRowWarm(
-  rows,
-  redraw,
-)
+const { looksBusy, titlesBusy, playBusy, fillLooks, fillTitles, loadMarks, onRowSeen } =
+  useRowWarm(rows, redraw)
 
 /** Отрисовка и три добора вслед. Сами доборы зовут только redraw — круга нет. */
 function refill(): void {
   redraw()
   void fillLooks()
   void fillTitles()
-  void fillPlay()
+  void loadMarks()
 }
 
 /** Возврат к первой сотне: любая смена отбора начинает показ сначала. */
@@ -311,6 +317,9 @@ function pickSort(key: string): void {
 /**
  * Смена вида показа. Потолок показа не сбрасывается: записи те же самые,
  * меняется только их одежда, и терять досмотренный хвост незачем.
+ *
+ * Метки доступности здесь не заказываются: переход на постеры покажет
+ * плитки, а показ плитки и есть вопрос — его задаст сама директива показа.
  */
 function pickView(key: ViewName): void {
   if (view.value === key) return
@@ -528,10 +537,13 @@ onBeforeUnmount(() => {
       <span>В этой закладке записей нет.</span>
     </div>
 
+    <!-- Отметка показа висит только на плитках: только они показывают метку
+         доступности, а спрашивать источники ради невидимого знака незачем. -->
     <ul v-else-if="view === 'tiles'" class="am-grid">
       <MediaTile
         v-for="row in rows"
         :key="row.mediaId"
+        v-seen="() => onRowSeen(row.mediaId)"
         :title="row.title"
         :facts="row.facts"
         :cover="row.cover"
