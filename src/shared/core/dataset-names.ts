@@ -4,6 +4,14 @@
 //
 // Обновление повторяет схему updater.rs: опись, сверка даты сборки, загрузка
 // фоном, проверка отпечатков, замена целиком, применение со следующего запуска.
+//
+// ПОРОГ ПРОВЕРКИ
+// Выпуск публикуется раз в неделю, а опись спрашивалась каждый запуск: тридцать
+// пять запросов на одну публикацию у того, кто открывает программу пять раз
+// в день. Теперь между проверками держится LIFE_DATASET_CHECK с разбросом по
+// ключу, а сама проверка идёт с If-None-Match — почти всегда ответ без тела.
+// Час проверки и отпечаток лежат в хранилище окна, а не в памяти запуска:
+// весь смысл порога в том, чтобы переживать перезапуск.
 
 import { Bridge } from '@/bridge'
 import {
@@ -15,6 +23,7 @@ import {
   type DatasetTitlesPayload,
 } from '../api/dataset'
 import { Logger } from '../utils/logger'
+import { isFresh, LIFE_DATASET_CHECK } from './cache-life'
 import { getEntry } from './collection'
 
 /** Имя файла в приватном каталоге. Разрешённые имена живут в src-tauri/src/files.rs. */
@@ -23,6 +32,13 @@ const DATASET_FILE = 'animori-dataset.json'
 /** Имена файлов выпуска выбираются точно: под маску подходят соседние. */
 const FILE_TITLES = 'titles-anime.json.gz'
 const FILE_MAP = 'map-mal-anilist.json.gz'
+
+/**
+ * Ключи в хранилище окна. Не в core/settings.ts сознательно: это не выбор
+ * человека, а служебная память модуля, и в панели настроек ей нечего делать.
+ */
+const CHECKED_AT_KEY = 'am_dataset_checked_at'
+const ETAG_KEY = 'am_dataset_etag'
 
 /** Слепок одного выпуска на диске: имена и карта, записанные одной операцией. */
 interface DatasetFile {
@@ -203,12 +219,6 @@ function payloadOk(
   )
 }
 
-/**
- * Фоновая сверка с последним выпуском. Новее — оба файла качаются, сверяются
- * по отпечаткам и заменяют слепок целиком. В память этого запуска обновление
- * не попадает: менять имена под рукой у человека нехорошо, новый выпуск
- * работает со следующего запуска.
- */
 /** Сброс состояния для изолированных тестов запуска. На проде не используется. */
 export function resetDatasetNames(): void {
   titlesByMal = null
@@ -218,15 +228,55 @@ export function resetDatasetNames(): void {
   updating = null
 }
 
-export function updateDatasetNamesInBackground(): Promise<void> | undefined {
+/**
+ * Пора ли спрашивать опись. Разброс считается от даты установленной сборки:
+ * берём её в ключ, чтобы у разных установок проверки не сошлись в один час
+ * после общей публикации. Пустой час проверки — первый запуск: спрашиваем.
+ */
+function dueForCheck(checkedAt: number): boolean {
+  return !isFresh(`dataset:${installedBuiltAt}`, checkedAt, LIFE_DATASET_CHECK)
+}
+
+/**
+ * Фоновая сверка с последним выпуском. Новее — оба файла качаются, сверяются
+ * по отпечаткам и заменяют слепок целиком. В память этого запуска обновление
+ * не попадает: менять имена под рукой у человека нехорошо, новый выпуск
+ * работает со следующего запуска.
+ *
+ * @param force Проверить несмотря на порог. Ставится только там, где проверку
+ * затеял сам человек кнопкой: ему отказывать порогом нельзя, иначе кнопка
+ * молчит без объяснений.
+ */
+export function updateDatasetNamesInBackground(force = false): Promise<void> | undefined {
   if (!Bridge.files.available || updating) return undefined
 
   updating = (async () => {
     // Сначала диск: сравнивать даты есть с чем только после подъёма.
     await initDatasetNames()
 
-    const index = await fetchDatasetIndex()
-    if (!index) return
+    const [checkedAt, knownEtag] = await Promise.all([
+      Bridge.storage.get<number>(CHECKED_AT_KEY, 0),
+      Bridge.storage.get<string>(ETAG_KEY, ''),
+    ])
+
+    if (!force && !dueForCheck(checkedAt)) {
+      Logger('DB', 'Датасет: проверка выпуска ещё не к сроку')
+      return
+    }
+
+    const answer = await fetchDatasetIndex(knownEtag || null)
+
+    // Неудача час проверки не сдвигает: иначе один отказ сети на старте
+    // отодвинул бы следующую попытку на полсуток на ровном месте.
+    if (answer.kind === 'fail') return
+
+    await Bridge.storage.set(CHECKED_AT_KEY, Date.now())
+
+    // 304: сервер сам сказал, что опись та же. Тела нет, и сравнивать нечего.
+    if (answer.kind === 'same') return
+
+    const { index, etag } = answer
+    if (etag !== '') await Bridge.storage.set(ETAG_KEY, etag)
 
     if (installedBuiltAt !== '' && index.builtAt <= installedBuiltAt) {
       Logger('DB', `Датасет актуален: сборка ${installedBuiltAt}`)
