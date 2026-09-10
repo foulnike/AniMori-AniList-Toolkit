@@ -35,6 +35,18 @@
 // котором так и не высказались, уходит в тишину на десять минут: без этого срока
 // работник крутился бы над ним, пока человек смотрит на экран.
 //
+// СРОК ОТКАЗА — ОТ СОСТОЯНИЯ ТАЙТЛА. «Да» живёт неделю: вход пропадает разве что
+// вместе со службой. А вот «нет» у идущего и у завершённого тайтла стоит разного
+// доверия. У идущего озвучка появляется на неделе — его переспрашиваем через
+// сутки. У завершённого десять лет назад её нет и через сутки не будет, поэтому
+// такому хватает двух недель: прежние сутки для всех означали, что полка старых
+// тайтлов заново платит за ответ, который не менялся годами. Состояние берётся из
+// самого вопроса (PlayAsk.airing), а если экран его не сказал — по году выпуска.
+// Год старше двух лет считается завершённым; неизвестный год считается идущим,
+// потому что ошибка в эту сторону стоит одного лишнего вопроса, а в обратную —
+// двух недель вранья на плитке. Сроки живут в core/cache-life.ts вместе с
+// остальными и получают там разброс по ключу: иначе полка протухает разом.
+//
 // ОТЛОЖЕННЫЙ СТАРТ. Первая секунда запуска — самая занятая: витрина просит полки,
 // коллекция тянет свой список, службы отвечают вперемешку. Очередь меток в это
 // время не нужна никому — плитки ещё не нарисованы, — а слоты она отнимает у той
@@ -44,19 +56,25 @@
 // должно работать позже, а не молчать.
 
 import { Logger } from '../utils/logger'
+import { LIFE_PLAY_NO_AIRING, LIFE_PLAY_NO_FINISHED, LIFE_PLAY_YES, isFresh } from './cache-life'
 import { dbGet, dbSet } from './db'
 import type { MediaCacheRecord } from './types'
 import { listVideoSources } from './video'
 import type { PresenceMap, VideoRequest, VideoSource } from './video'
 
-/** Ключ склада. Версия в имени: смена правил решения делает прежние ответы негодными. */
+/**
+ * Ключ склада. Версия в имени: смена правил решения делает прежние ответы негодными.
+ * Признак завершённости в записи необязателен — прежние записи без него считаются
+ * идущими и потому переспрашиваются сутками, как и раньше. Поднимать версию ради
+ * этого незачем: старый ответ остаётся верным, просто живёт по короткому сроку.
+ */
 const CACHE_PREFIX = 'PLAY1_'
 
-/** Сколько живёт «да»: вход к тайтлу пропадает разве что вместе со службой. */
-const YES_TIME_MS = 604800000
-
-/** Сколько живёт «нет»: сегодня озвучки нет, а завтра она есть. */
-const NO_TIME_MS = 86400000
+/**
+ * С какого возраста тайтл без явного признака считается завершённым. Два года —
+ * с запасом: самый долгий сезонный показ вместе с переносами укладывается в год.
+ */
+const FINISHED_YEARS = 2
 
 /**
  * С чего начинается оптовый заход и до чего он ужимается после срывов. Единица
@@ -120,23 +138,41 @@ export type PlayState = 'yes' | 'no'
 /**
  * Чем спрашивать источники об одном тайтле. Собирает вопрос экран: имена и
  * чужие номера живут у него, а ядру их взять негде.
+ *
+ * airing — идёт ли показ прямо сейчас. Поле необязательное: экран, у которого
+ * статус под рукой, говорит его прямо, остальные молчат, и тогда состояние
+ * считается по году. От этого зависит только срок хранения отказа.
  */
 export interface PlayAsk {
   mediaId: number
   malId: number | null
   titles: string[]
   year?: number
+  airing?: boolean
 }
 
-/** Ответ в памяти запуска: состояние и час получения. */
+/** Ответ в памяти запуска: состояние, час получения и признак завершённости тайтла. */
 interface Held {
   at: number
   state: PlayState
+  finished: boolean
 }
 
-/** Запись склада. Поле одно: срок годности лежит в самой записи хранилища. */
+/**
+ * Запись склада. Признак завершённости хранится вместе с ответом, а не берётся
+ * из нового вопроса: срок отказа должен считаться от того, чем тайтл был в час
+ * ответа, а вопрос при чтении склада вообще не всегда есть (primePlayable
+ * поднимает метки по одним номерам).
+ */
 interface PlayRecord {
   state: PlayState
+  finished?: boolean
+}
+
+/** Что склад знает о тайтле: ответ и состояние тайтла на час ответа. */
+interface Answer {
+  state: PlayState
+  finished: boolean
 }
 
 /** Самочувствие службы: срывы подряд, отдых до срока и нынешний размер захода. */
@@ -193,9 +229,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Сколько живёт ответ: отказ перепроверяется куда чаще находки. */
-function lifeOf(state: PlayState): number {
-  return state === 'yes' ? YES_TIME_MS : NO_TIME_MS
+function cacheKey(mediaId: number): string {
+  return CACHE_PREFIX + String(mediaId)
+}
+
+/**
+ * Сколько живёт ответ. Находка — неделю: вход к тайтлу пропадает разве что вместе
+ * со службой. Отказ — по состоянию тайтла: идущего переспрашиваем сутками, у
+ * завершённого ответ не менялся годами и держится две недели.
+ */
+function lifeOf(state: PlayState, finished: boolean): number {
+  if (state === 'yes') return LIFE_PLAY_YES
+
+  return finished ? LIFE_PLAY_NO_FINISHED : LIFE_PLAY_NO_AIRING
+}
+
+/**
+ * Завершён ли показ. Экран вправе сказать это прямо; если не сказал — считаем по
+ * году выпуска. Неизвестный год — «идёт»: лишний вопрос дешевле двух недель
+ * неверной метки.
+ */
+function finishedOf(ask: PlayAsk): boolean {
+  if (ask.airing !== undefined) return !ask.airing
+
+  const year = ask.year
+  if (year === undefined || !Number.isFinite(year)) return false
+
+  return year <= new Date().getFullYear() - FINISHED_YEARS
 }
 
 /**
@@ -224,24 +284,28 @@ function known(mediaId: number): PlayState | null {
   const held = memory.get(mediaId)
   if (held === undefined) return null
 
-  if (Date.now() - held.at < lifeOf(held.state)) return held.state
+  if (isFresh(cacheKey(mediaId), held.at, lifeOf(held.state, held.finished))) return held.state
 
   memory.delete(mediaId)
   return null
 }
 
-async function readCache(mediaId: number): Promise<PlayState | null> {
+async function readCache(mediaId: number): Promise<Answer | null> {
+  const key = cacheKey(mediaId)
+
   try {
-    const found = await dbGet<MediaCacheRecord<PlayRecord>>(
-      'mediaCache',
-      CACHE_PREFIX + String(mediaId),
-    )
+    const found = await dbGet<MediaCacheRecord<PlayRecord>>('mediaCache', key)
     if (!found) return null
 
     const state = found.data.state
     if (state !== 'yes' && state !== 'no') return null
 
-    return Date.now() - found.ts < lifeOf(state) ? state : null
+    // Запись без признака завершённости — из прежней версии: считаем идущим и
+    // потому переспрашиваем через сутки, как и раньше.
+    const finished = found.data.finished === true
+    if (!isFresh(key, found.ts, lifeOf(state, finished))) return null
+
+    return { state, finished }
   } catch (e) {
     // Склад — удобство, а не условие работы: без него просто спросим сеть.
     Logger('WARN', `Метка доступности: склад не отдал ${mediaId}`, e)
@@ -249,10 +313,10 @@ async function readCache(mediaId: number): Promise<PlayState | null> {
   }
 }
 
-function writeCache(mediaId: number, state: PlayState): void {
+function writeCache(mediaId: number, state: PlayState, finished: boolean): void {
   void dbSet('mediaCache', {
-    key: CACHE_PREFIX + String(mediaId),
-    data: { state },
+    key: cacheKey(mediaId),
+    data: { state, finished },
     ts: Date.now(),
   }).catch((e: unknown) => {
     Logger('WARN', `Метка доступности: склад не принял ${mediaId}`, e)
@@ -319,10 +383,10 @@ function flush(): void {
 }
 
 /** Кладёт решение: в память, на склад и в глаза человеку. */
-function remember(mediaId: number, state: PlayState): void {
-  memory.set(mediaId, { at: Date.now(), state })
+function remember(mediaId: number, state: PlayState, finished: boolean): void {
+  memory.set(mediaId, { at: Date.now(), state, finished })
   looked.add(mediaId)
-  writeCache(mediaId, state)
+  writeCache(mediaId, state, finished)
 
   queue.delete(mediaId)
   heard.delete(mediaId)
@@ -418,7 +482,7 @@ function settle(ask: PlayAsk, sources: readonly VideoSource[]): void {
   if (row !== undefined) {
     for (const state of row.values()) {
       if (state) {
-        remember(ask.mediaId, 'yes')
+        remember(ask.mediaId, 'yes', finishedOf(ask))
         return
       }
     }
@@ -433,7 +497,7 @@ function settle(ask: PlayAsk, sources: readonly VideoSource[]): void {
   if (able.some((source) => !wasTried(ask.mediaId, source.id))) return
 
   if (row !== undefined && able.every((source) => row.has(source.id))) {
-    remember(ask.mediaId, 'no')
+    remember(ask.mediaId, 'no', finishedOf(ask))
     return
   }
 
@@ -739,7 +803,7 @@ export async function primePlayable(mediaIds: readonly number[]): Promise<number
   )
   if (wanted.length === 0) return 0
 
-  const states = await Promise.all(wanted.map((id) => readCache(id)))
+  const answers = await Promise.all(wanted.map((id) => readCache(id)))
 
   let found = 0
 
@@ -751,10 +815,10 @@ export async function primePlayable(mediaIds: readonly number[]): Promise<number
     // соседний заход счёл бы тайтл проверенным и метку бы не показал.
     looked.add(id)
 
-    const state = states[index] ?? null
-    if (state === null) continue
+    const answer = answers[index] ?? null
+    if (answer === null) continue
 
-    memory.set(id, { at: Date.now(), state })
+    memory.set(id, { at: Date.now(), state: answer.state, finished: answer.finished })
     found += 1
   }
 
