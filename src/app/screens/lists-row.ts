@@ -2,6 +2,14 @@
 // а здесь лежит всё, что превращает запись памяти в готовую плитку:
 // сборка, порядок показа и доборы обложек с названиями.
 // Модуль один сознательно: веер мелких файлов труднее держать в согласии.
+//
+// МЕТКИ ДОСТУПНОСТИ: СКЛАД ЦЕЛИКОМ, СЕТЬ ПО ПОКАЗУ
+// Склад отвечает даром, поэтому он спрашивается по всем отобранным строкам
+// разом, вместе с хвостом за прокруткой. В сеть уходят только те строки,
+// чьи плитки человек впрямь видел: отметку о показе приносит директива
+// v-seen из app/see-tile.ts. Закладка на полторы сотни записей стоила столько
+// же вопросов к чужим службам сразу после открытия, а видно из них было
+// полтора ряда.
 import { onScopeDispose, ref, type Ref } from 'vue'
 
 import { setupVideoSources } from '@/api/video-sources'
@@ -11,7 +19,7 @@ import {
   onPlayableChange,
   peekPlayable,
   primePlayable,
-  warmPlayable,
+  requestPlayable,
   type PlayAsk,
   type PlayState,
 } from '@/core/playable'
@@ -24,6 +32,13 @@ import type { SortName } from './lists-keep'
 
 /** По скольку аниме просить названия за заход: источники отвечают по одному. */
 const TITLE_CHUNK = 10
+
+/**
+ * Пауза перед заказом меток показанным строкам. Прокрутка приводит их
+ * десятками разом, и без придержки каждая плитка будила бы очередь ядра
+ * отдельным заказом.
+ */
+const SEEN_PAUSE_MS = 200
 
 /** Строка списка в виде, готовом к отрисовке: разметка ничего не считает. */
 export interface Row {
@@ -51,14 +66,15 @@ export interface Row {
   adult: boolean
 }
 
-/** Доборы, отданные экрану: флажки для подвала и пуски. */
+/** Доборы, отданные экрану: флажки для подвала, пуски и отметка о показе. */
 export interface RowWarm {
   looksBusy: Ref<boolean>
   titlesBusy: Ref<boolean>
   playBusy: Ref<boolean>
   fillLooks: () => Promise<void>
   fillTitles: () => Promise<void>
-  fillPlay: () => Promise<void>
+  loadMarks: () => Promise<void>
+  onRowSeen: (mediaId: number) => void
 }
 
 /** Короткая подпись под названием: вид и год. Больше в две строки не влезает. */
@@ -196,11 +212,57 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
   let titleRun = 0
   let playRun = 0
 
-  // Метки доступности приходят по одной и долго: список на полторы сотни
-  // строк ядро обходит минутами. Подписка рисует каждый ответ по мере
-  // готовности, и полка заполняется на глазах, а не одним рывком в конце.
-  const unwatch = onPlayableChange(redraw)
+  /** Номера, о которых вопрос уже задан: по ним горит флажок в подвале. */
+  const askedRows = new Set<number>()
+
+  /** Плитки, попавшие в окно и ещё без метки: о них уйдёт ближайший заказ. */
+  const seenRows = new Set<number>()
+
+  let seenTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Подъём меток со склада. Заказ в сеть ждёт этого обещания: спрашивать
+   * чужие службы о том, что вот-вот приедет с диска, — худший из запросов.
+   */
+  let priming: Promise<void> = Promise.resolve()
+
+  /**
+   * Гасит флажок подвала, когда на все заданные вопросы пришли ответы.
+   * Счёт идёт по своим вопросам, а не по очереди ядра: в ней лежат и чужие
+   * вопросы с других экранов, а подвал отвечает только за свои строки.
+   */
+  function keepFlag(): void {
+    for (const id of askedRows) {
+      if (peekPlayable(id) !== null) askedRows.delete(id)
+    }
+
+    playBusy.value = askedRows.size > 0
+  }
+
+  // Метки доступности приходят по одной и долго: источники держат темп,
+  // и ждать целый заход бессмысленно. Подписка рисует каждый ответ
+  // по мере готовности, и метки проступают на глазах, а не рывком в конце.
+  const unwatch = onPlayableChange(() => {
+    keepFlag()
+    redraw()
+  })
   onScopeDispose(unwatch)
+
+  // Отложенный заказ пережил бы сам экран и будил очередь ради списка,
+  // которого больше нет.
+  onScopeDispose(() => {
+    if (seenTimer !== null) clearTimeout(seenTimer)
+    seenTimer = null
+  })
+
+  /** Снимает отложенный заказ: показанное относилось к прошлому отбору. */
+  function dropSeen(): void {
+    if (seenTimer !== null) clearTimeout(seenTimer)
+    seenTimer = null
+    seenRows.clear()
+    askedRows.clear()
+    playBusy.value = false
+  }
 
   /**
    * Добирает обложки для показанных плиток. Сотня строк стоит двух
@@ -262,49 +324,85 @@ export function useRowWarm(rows: Ref<Row[]>, redraw: () => void): RowWarm {
   }
 
   /**
-   * Добирает метки доступности. Сначала склад — он отвечает даром и разом
-   * по всем показанным строкам, — и только потом сеть.
+   * Поднимает метки со склада по всем показанным строкам разом. Сети
+   * не касается вовсе, поэтому спрашивать можно всё: однажды спрошенное
+   * показывается целиком и даром, включая хвост за прокруткой.
    *
-   * В сеть уходят все неизвестные строки, а не верх списка: очередь одна на
-   * приложение, она сама держит порядок и сама придерживает темп. Прежний
-   * потолок именно тем и вредил: хвост списка не спрашивался никогда, и метки
-   * обрывались на первом десятке постеров.
-   *
-   * Без метки список живой: плитка про доступность просто молчит.
+   * Зовётся на каждую смену отбора и заодно снимает отложенный заказ
+   * прошлого показа: плитки тем временем сменились.
    */
-  async function fillPlay(): Promise<void> {
+  async function loadMarks(): Promise<void> {
     const mine = ++playRun
-    const unknown = rows.value.filter((row) => row.play === null)
+    dropSeen()
+
+    const unknown = rows.value.filter((row) => row.play === null).map((row) => row.mediaId)
     if (unknown.length === 0) return
 
-    playBusy.value = true
+    priming = (async () => {
+      try {
+        const primed = await primePlayable(unknown)
+        if (mine !== playRun) return
+        if (primed > 0) redraw()
+      } catch (e) {
+        // Без метки список живой: плитка про доступность просто молчит.
+        Logger('WARN', 'Списки: метки доступности со склада не поднялись', e)
+      }
+    })()
 
-    try {
-      const primed = await primePlayable(unknown.map((row) => row.mediaId))
-      if (mine !== playRun) return
-      if (primed > 0) redraw()
-
-      const wanted = rows.value
-        .filter((row) => peekPlayable(row.mediaId) === null)
-        .map((row) => row.ask)
-
-      if (wanted.length === 0) return
-
-      // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
-      setupVideoSources()
-
-      // Ответы рисует подписка; здесь ждётся конец захода ради флажка
-      // в подвале: пока он горит, человек видит, что метки ещё едут.
-      await warmPlayable(wanted)
-      if (mine !== playRun) return
-
-      redraw()
-    } catch (e) {
-      Logger('WARN', 'Списки: метки доступности не доехали', e)
-    } finally {
-      if (mine === playRun) playBusy.value = false
-    }
+    await priming
   }
 
-  return { looksBusy, titlesBusy, playBusy, fillLooks, fillTitles, fillPlay }
+  /**
+   * Заказывает метки у источников для показанных строк. Ответы приезжают
+   * подпиской, поэтому ждать здесь нечего: порядок и темп держит очередь ядра.
+   */
+  async function askSeen(): Promise<void> {
+    const mine = playRun
+
+    // Склад мог ещё не договорить: иначе в сеть ушли бы вопросы о том,
+    // что уже лежит на диске.
+    await priming
+    if (mine !== playRun) return
+
+    const wanted: PlayAsk[] = []
+
+    for (const row of rows.value) {
+      if (!seenRows.has(row.mediaId)) continue
+      if (peekPlayable(row.mediaId) !== null) continue
+
+      wanted.push(row.ask)
+      askedRows.add(row.mediaId)
+    }
+
+    seenRows.clear()
+
+    if (wanted.length === 0) return
+
+    // Реестр источников собирает экран: ядро своих поставщиков не зовёт.
+    setupVideoSources()
+
+    playBusy.value = true
+    requestPlayable(wanted)
+  }
+
+  /**
+   * Плитка строки показалась человеку. Номера копятся пачкой: прокрутка
+   * сотни строк иначе будила бы очередь на каждый постер порознь.
+   *
+   * Метка уже известна — вопрос не задаётся вовсе: возврат к уже
+   * показанному куску списка не стоит ни одного запроса.
+   */
+  function onRowSeen(mediaId: number): void {
+    if (peekPlayable(mediaId) !== null) return
+
+    seenRows.add(mediaId)
+    if (seenTimer !== null) return
+
+    seenTimer = setTimeout(() => {
+      seenTimer = null
+      void askSeen()
+    }, SEEN_PAUSE_MS)
+  }
+
+  return { looksBusy, titlesBusy, playBusy, fillLooks, fillTitles, loadMarks, onRowSeen }
 }
