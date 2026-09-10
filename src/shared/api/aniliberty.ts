@@ -11,9 +11,16 @@
 // askPresence останавливается на совпадении в поиске — это на запрос меньше на тайтл.
 // Совпадение и промах ложатся на тот же склад ALIB1_, что читает плеер, поэтому
 // вопрос метки потом экономит запрос самому плееру.
+//
+// СКОЛЬКО НАЗВАНИЙ ПРОБУЕМ
+// У метки и у плеера цена ошибки разная, поэтому и число попыток разное.
+// Плеер открывает один тайтл по просьбе человека: второе название там стоит
+// одного запроса и спасает от «ничего не нашлось». Метка же спрашивается сразу
+// на целую полку, и второе название там удваивает весь расход ради серого значка,
+// который всё равно уточнится при открытии карточки.
 
 import { Bridge, type HttpResponse } from '@/bridge'
-import { CACHE_TIME } from '../core/constants'
+import { LIFE_ALIB_MATCH, LIFE_ALIB_MISS, isFresh } from '../core/cache-life'
 import { dbGet, dbSet } from '../core/db'
 import { reportError, reportStatus } from '../core/net-health'
 import { Logger } from '../utils/logger'
@@ -27,7 +34,7 @@ import type {
   VideoTrack,
   VideoVoice,
 } from '../core/video'
-import { MAX_RATE_RETRIES, anilibertyLimiter } from './rate-limit'
+import { anilibertyLimiter } from './rate-limit'
 
 /** Адреса собраны конкатенацией: литерал схемы в шаблонной строке ломался. */
 const API_BASE = 'https://anilibria.top/api/v1'
@@ -37,18 +44,27 @@ const SITE_BASE = 'https://anilibria.top'
 export const NET_SOURCE_ANILIBERTY = 'aniliberty'
 export const NET_LABEL_ANILIBERTY = 'AniLiberty'
 
-/** Пауза перед повтором после 429. Джиттер разводит одновременные повторы. */
-const RETRY_DELAY_MS = 1500
+/**
+ * Пауза ограничителю после 429. Джиттер разводит одновременные карточки.
+ * Повтора после паузы здесь нет: при MAX_RATE_RETRIES = 1 рекурсия была недостижима,
+ * а мёртвый код обещает поведение, которого нет. Повторами распоряжается вызывающий:
+ * плеер переспросит следующим названием, метка — при следующем показе полки.
+ */
+const RATE_PAUSE_MS = 1500
 const REQUEST_TIMEOUT_MS = 10000
 
 /** Сколько релиз живёт в памяти: за одно открытие экран спросит его трижды. */
 const RELEASE_MEMORY_MS = 600000
 
-/** Промах поиска перепроверяется через сутки: сегодня озвучки нет, завтра есть. */
-const MISS_RETRY_MS = 86400000
-
-/** Сколько названий пробуем в поиске: романдзи и ещё одно запасное. */
+/** Сколько названий пробуем в поиске для плеера: романдзи и ещё одно запасное. */
 const SEARCH_TRIES = 2
+
+/**
+ * Сколько названий пробуем ради метки доступности. Одно: метка спрашивается
+ * сразу на всю полку, и второе название удваивает расход ради значка,
+ * который всё равно уточнится при открытии карточки.
+ */
+const PRESENCE_SEARCH_TRIES = 1
 
 interface AniName {
   main?: string | null
@@ -98,8 +114,18 @@ function matchKey(anilistId: number): string {
   return `ALIB1_${anilistId}`
 }
 
+/**
+ * Годна ли запись соответствия. Найденный релиз бессрочен, промах — на сутки:
+ * сегодня озвучки нет, завтра есть. Сроки живут в core/cache-life.ts, потому что
+ * там же разброс по ключу: иначе вся полка протухла бы одновременно.
+ */
+function matchFresh(key: string, record: MediaCacheRecord<AniMatchRecord>): boolean {
+  const life = record.data.release ? LIFE_ALIB_MATCH : LIFE_ALIB_MISS
+  return isFresh(key, record.ts, life)
+}
+
 /** Общий запрос к API. Никогда не отклоняется: любая неудача — null и запись в журнал. */
-async function apiGet<T>(path: string, note: string, attempt = 0): Promise<T | null> {
+async function apiGet<T>(path: string, note: string): Promise<T | null> {
   let res: HttpResponse
   // Замер идёт вместе с ожиданием слота: важно, сколько ждал экран, а не сервер.
   const startedAt = Date.now()
@@ -122,16 +148,11 @@ async function apiGet<T>(path: string, note: string, attempt = 0): Promise<T | n
 
   // Код вне 2xx мост исключением не считает, поэтому статусы разбираем сами.
   if (res.status === 429) {
-    const waitMs = RETRY_DELAY_MS + Math.floor(Math.random() * 500)
+    const waitMs = RATE_PAUSE_MS + Math.floor(Math.random() * 500)
     anilibertyLimiter.pause(waitMs)
 
-    if (attempt + 1 >= MAX_RATE_RETRIES) {
-      Logger('ERROR', `Aniliberty: лимит 429 не отпустил (${note})`, { attempts: attempt + 1 })
-      return null
-    }
-
-    Logger('WARN', `Aniliberty 429: пауза ${waitMs}мс, повтор ${attempt + 2}/${MAX_RATE_RETRIES}`)
-    return apiGet<T>(path, note, attempt + 1)
+    Logger('ERROR', `Aniliberty: лимит 429, пауза ${waitMs}мс (${note})`)
+    return null
   }
 
   // 404 у поиска и релиза значит «такого нет» — это ответ, а не ошибка.
@@ -238,13 +259,9 @@ async function findReleaseUncached(req: VideoRequest): Promise<AniRelease | null
   const cacheKey = matchKey(req.anilistId)
   const cached = await dbGet<MediaCacheRecord<AniMatchRecord>>('mediaCache', cacheKey)
 
-  if (cached) {
+  if (cached && matchFresh(cacheKey, cached)) {
     const found = cached.data.release
-    // Найденное соответствие вечное, промах — на сутки.
-    const fresh = found
-      ? Date.now() - cached.ts < CACHE_TIME
-      : Date.now() - cached.ts < MISS_RETRY_MS
-    if (fresh) return found ? loadRelease(found) : null
+    return found ? loadRelease(found) : null
   }
 
   Logger('API', `Запрос Aniliberty для AniList ID: ${req.anilistId}`)
@@ -261,7 +278,8 @@ async function findReleaseUncached(req: VideoRequest): Promise<AniRelease | null
 
 /**
  * Есть ли у службы этот тайтл. От findRelease отличается тем, что не читает релиз
- * целиком: метке хватает совпадения в поиске, а список серий ей ни к чему.
+ * целиком и пробует меньше названий: метке хватает совпадения в поиске,
+ * а список серий ей ни к чему.
  *
  * null — служба не ответила ни на одно название. Молчание не «нет»: 404
  * и оборванная сеть приходят сюда одинаково, и ошибиться отказом дороже,
@@ -271,21 +289,15 @@ async function presenceOf(req: VideoRequest): Promise<boolean | null> {
   const cacheKey = matchKey(req.anilistId)
   const cached = await dbGet<MediaCacheRecord<AniMatchRecord>>('mediaCache', cacheKey)
 
-  if (cached) {
-    const found = cached.data.release
-    const fresh = found
-      ? Date.now() - cached.ts < CACHE_TIME
-      : Date.now() - cached.ts < MISS_RETRY_MS
-    // Склад отвечает даром: тайтл, уже открывавшийся в плеере, не стоит запроса.
-    if (fresh) return found !== null
-  }
+  // Склад отвечает даром: тайтл, уже открывавшийся в плеере, не стоит запроса.
+  if (cached && matchFresh(cacheKey, cached)) return cached.data.release !== null
 
   const wanted = req.titles.map(plain).filter(Boolean)
   if (wanted.length === 0) return null
 
   let answered = false
 
-  for (const title of req.titles.slice(0, SEARCH_TRIES)) {
+  for (const title of req.titles.slice(0, PRESENCE_SEARCH_TRIES)) {
     const found = await apiGet<AniSearchResponse>(
       '/app/search/releases?query=' + encodeURIComponent(title),
       'наличие ' + title,
