@@ -122,6 +122,11 @@ function titleOf(entry: SnapshotEntry): string {
  * Чем спрашивать источники: номер MAL и названия по убыванию пригодности.
  * Номер снимка не выдумывается — записи, сделанные до его появления, идут
  * с null, и спрашивать о них будет только тот источник, что ищет словами.
+ *
+ * Признак идущего сезона едет вместе с вопросом ради срока ответа «нет»:
+ * у идущего аниме озвучка появляется через день-два, у завершённого — почти
+ * никогда, и держать отказ две недели там дешевле. Без этого признака
+ * core/playable.ts считал идущим всё, что вышло за последние два года.
  */
 function playAskOf(entry: SnapshotEntry, look: MediaLook | null): PlayAsk {
   const names = [
@@ -136,6 +141,9 @@ function playAskOf(entry: SnapshotEntry, look: MediaLook | null): PlayAsk {
     malId: entry.malId ?? null,
     titles: [...new Set(names.filter((name): name is string => name !== null && name !== ''))],
     year: look?.seasonYear ?? undefined,
+    // Облик ещё не добран — признака нет вовсе: выдуманное «завершёно»
+    // заперло бы отказ на две недели по догадке.
+    airing: look === null ? undefined : (look.airingEpisode ?? null) !== null,
   }
 }
 
