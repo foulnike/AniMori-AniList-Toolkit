@@ -1,4 +1,4 @@
-// Поиск персонажей и авторов Shikimori: три REST-запроса, фоллбэк на GraphQL и гард тёзок.
+// Поиск персонажей и авторов Shikimori: до трёх REST-запросов, фоллбэк на GraphQL и гард тёзок.
 // Отдельно от shikimori.ts: там транспорт, здесь стратегия, но бюджет темпа у них общий.
 // Сложность оттого, что Shikimori ищет по точному порядку слов, а AniList даёт западный.
 //
@@ -11,6 +11,14 @@
 // Про мангу здесь речь идёт не о наших данных, а об опознании человека: у мангак
 // главные работы лежат в манге, и именно они доказывают, что найденный тёзка —
 // тот самый автор. Стирать эти ветки вместе с мангой в приложении нельзя.
+//
+// СКОЛЬКО ЗАПРОСОВ УХОДИТ НА ОДНОГО ЧЕЛОВЕКА
+// Вариантов поиска три, но нужны они редко все сразу. Поиск прекращается на балле
+// SURE_SCORE: выше него гард тёзок и так не срабатывает, значит следующий вариант
+// ничего не изменит, а стоит запроса. Третий вариант — запасной эндпоинт — уходит
+// только тогда, когда первые два никого не назвали: он и заведён на случай, когда
+// /search молчит. Прежде оба правила были строже (выход только на точном кандзи,
+// запасной эндпоинт всегда), и состав одного тайтла стоил втрое дороже нужного.
 
 import { Bridge } from '@/bridge'
 import { SHIKI_DOMAINS } from '../core/constants'
@@ -27,6 +35,14 @@ export type PersonEndpoint = 'characters' | 'people'
 /** Штрафная пауза, когда 429 пришёл именно на поиске персон. */
 const PERSON_RATE_PAUSE_MS = 6000
 const PERSON_TIMEOUT_MS = 7000
+
+/**
+ * Балл, на котором поиск прекращается. Девяносто — та же граница, за которой
+ * отключается гард тёзок: раз мы уверены в человеке настолько, что не требуем
+ * общего тайтла, спрашивать дальше нечего. Сто требовало точного совпадения
+ * кандзи и почти никогда не набиралось, так что перебирались все варианты.
+ */
+const SURE_SCORE = 90
 
 export interface ShikiPerson {
   id: number
@@ -208,7 +224,8 @@ export async function fetchShikiPersonREST(
       let itemScore = 0
       let rateLimited = false
 
-      // Шаг 1: три варианта REST-поиска. Прямой порядок, обратный, другой эндпоинт.
+      // Шаг 1: варианты REST-поиска. Прямой порядок, обратный, другой эндпоинт.
+      // Последний в списке — запасной: он спрашивается только при промахе первых.
       const searchUrls = [
         mirrorUrl(domain, `/api/${endpointStr}/search?search=${encodeURIComponent(cleanStr)}`),
         ...(nameParts.length > 1
@@ -222,7 +239,11 @@ export async function fetchShikiPersonREST(
         mirrorUrl(domain, `/api/${endpointStr}?search=${encodeURIComponent(cleanStr)}`),
       ]
 
-      for (const url of searchUrls) {
+      for (const [index, url] of searchUrls.entries()) {
+        // Запасной эндпоинт нужен ровно тогда, когда обычный поиск никого не назвал:
+        // при найденном кандидате он отдаёт тех же людей за лишний запрос.
+        if (index === searchUrls.length - 1 && item) break
+
         const r = await request({ method: 'GET', url, domain })
         if (r.status === 429) {
           rateLimited = true
@@ -244,7 +265,7 @@ export async function fetchShikiPersonREST(
             Logger('WARN', `Shikimori: неразборчивый ответ поиска персоны (${domain})`, e)
           }
         }
-        if (itemScore >= 100) break // точный кандзи, дальше искать нечего
+        if (itemScore >= SURE_SCORE) break // уверенное совпадение, дальше искать нечего
       }
 
       if (rateLimited) return { status: 429, data: null }
@@ -300,7 +321,7 @@ export async function fetchShikiPersonREST(
         }
 
         // Гард тёзок: неточное совпадение требует общего тайтла, иначе подменялись однофамильцы.
-        if (targetMalIds.length && itemScore < 90 && detailsRes) {
+        if (targetMalIds.length && itemScore < SURE_SCORE && detailsRes) {
           const candMal = collectCandidateMalIds(detailsRes)
           if (candMal.length && !candMal.some((id) => targetMalIds.includes(id))) {
             Logger(
@@ -468,6 +489,9 @@ function loadRoles(kind: string, id: number): Promise<ShikiRoleEntry[] | null> {
  * Резолвит персонажа/автора через роли в общих тайтлах, когда поиск по имени не сработал.
  * Кандидаты уже ограничены составом тайтла, поэтому порог мягче (55), но не ниже.
  *
+ * Обход прекращается на том же SURE_SCORE, что и поиск по имени: каждый лишний
+ * тайтл в переборе — это запрос состава, а уверенного совпадения он не улучшит.
+ *
  * Раздел берётся по виду тайтла у AniList, и манга тут остаётся сознательно.
  * Это не контент приложения, а доказательство личности: у мангаки главные
  * работы лежат в манге, и без этого раздела мы потеряли бы часть совпадений
@@ -504,10 +528,10 @@ export async function resolveShikiPersonByMedia(
           bestScore = sc
           best = c
         }
-        if (bestScore >= 100) break
+        if (bestScore >= SURE_SCORE) break
       }
     }
-    if (bestScore >= 100) break
+    if (bestScore >= SURE_SCORE) break
   }
 
   return bestScore >= 55 ? best : null
