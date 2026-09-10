@@ -4,6 +4,17 @@
 //
 // Состояние списка берётся из памяти коллекции, а не из ответа: список
 // односторонний, правки живут только здесь, и правда тоже здесь.
+//
+// ВОЗВРАТ НАЗАД НИЧЕГО НЕ ДОБИРАЕТ
+// Открытые за заход карточки остаются в памяти показа. Прежде переход на часть
+// франшизы и назад гасил всё разом — подробности, дерево, оценки — и добирал
+// их заново: экран мигал пустотой, а источники получали те же вопросы дважды.
+//
+// МЕТКИ ПОЛКИ СПРАШИВАЮТСЯ ПО ПОКАЗУ
+// Дерево франшизы бывает на три десятка частей, а видно из них две-три. Склад
+// поднимается по всей полке разом — он отвечает даром, — а чужие службы
+// спрашивают только о плитках, попавших в окно: отметку о показе приносит
+// директива v-seen из app/see-tile.ts.
 import { computed, nextTick, onScopeDispose, ref, type ComputedRef, type Ref } from 'vue'
 
 import { fetchMediaCard, type MediaCard } from '@/api/anilist-media'
@@ -23,7 +34,7 @@ import {
   onPlayableChange,
   peekPlayable,
   primePlayable,
-  warmPlayable,
+  requestPlayable,
   type PlayAsk,
   type PlayState,
 } from '@/core/playable'
@@ -34,6 +45,20 @@ import { Logger } from '@/utils/logger'
 import { formatWord, statusWord } from '../labels'
 import { mediaLinks, type MediaLink } from '../media-links'
 import { navigate } from '../router'
+
+/**
+ * Пауза перед заказом меток показанным частям франшизы. Прокрутка полки
+ * приводит их по несколько разом, и без придержки каждая плитка будила бы
+ * очередь ядра отдельно.
+ */
+const SEEN_PAUSE_MS = 200
+
+/**
+ * Сколько открытых карточек держать в памяти показа. Пяти хватает на обычный
+ * заход по франшизе туда и обратно; больше незачем — карточка с деревом
+ * и оценками не самая мелкая запись.
+ */
+const SHOWN_KEEP = 5
 
 /** Оценка площадки для героя. */
 export interface Rating {
@@ -51,6 +76,14 @@ export interface MineFact {
 
 /** Виды правки, доступные с карточки. Удаление записи сюда пока не входит. */
 type CardEdit = 'status' | 'score' | 'progress' | 'repeat' | 'startedAt' | 'completedAt' | 'notes'
+
+/** Уже открытая карточка целиком: возврат назад показывает её без вопросов. */
+interface Shown {
+  card: MediaCard
+  russian: RussianTitle | null
+  ratings: TitleRatings | null
+  franchise: FranchiseWork[] | null
+}
 
 /** Всё, что разметка карточки берёт готовым. */
 export interface MediaCardView {
@@ -85,6 +118,7 @@ export interface MediaCardView {
   franchiseStatus: (work: FranchiseWork) => string | null
   franchiseHint: (work: FranchiseWork) => string
   franchisePlay: (work: FranchiseWork) => PlayState | null
+  onPartSeen: (work: FranchiseWork) => void
   openFranchiseWork: (work: FranchiseWork) => void
   openStudio: (studioId: number) => void
   onOpen: (url: string) => void
@@ -156,6 +190,24 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   /** Номер показа: ответ на старое аниме пришёл не вовремя и ему места нет. */
   let run = 0
 
+  /**
+   * Открытые за этот заход карточки. Возврат назад достаёт аниме отсюда:
+   * ни пустоты на экране, ни повторных доборов дерева, имён и оценок.
+   */
+  const shown = new Map<number, Shown>()
+
+  /** Части полки, чьи плитки человек уже видел: только о них спрашиваются источники. */
+  const seenParts = new Set<number>()
+
+  let seenTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Что должно быть готово до вопросов источникам. Заказ в сеть ждёт этого:
+   * спрашивать чужие службы о том, что вот-вот приедет с диска, — худший
+   * из возможных запросов.
+   */
+  let priming: Promise<void> = Promise.resolve()
+
   // Ответы очереди приходят вразброд и по одному, а часть из них — чужие
   // вопросы с других экранов про те же самые части: подписка показывает
   // каждый такой ответ сразу, а не в конце своего захода.
@@ -166,6 +218,13 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
   // Очередь живёт дольше карточки: неснятая подписка держала бы всю её
   // область в памяти и била бы счётчик уже закрытого показа.
   onScopeDispose(stopPlayWatch)
+
+  // Отложенный заказ меток тоже переживал бы карточку и будил очередь
+  // ради полки, которой на экране больше нет.
+  onScopeDispose(() => {
+    if (seenTimer !== null) clearTimeout(seenTimer)
+    seenTimer = null
+  })
 
   /**
    * Своя запись из памяти. Счётчик правок в зависимостях не случаен:
@@ -399,76 +458,169 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     )
   })
 
+  /** Прокручивает полку франшизы к нынешнему аниме. */
+  function scrollToHere(): void {
+    void nextTick(() => {
+      franList.value
+        ?.querySelector('.am-part__hit--here')
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    })
+  }
+
+  /** Снимает показанное: на экране будет другое аниме. */
+  function forgetShown(): void {
+    card.value = null
+    russian.value = null
+    platformRatings.value = null
+    franchise.value = null
+  }
+
+  /** Кладёт открытую карточку в память захода, вытесняя самую давнюю. */
+  function keepShown(): void {
+    const found = card.value
+    if (found === null) return
+
+    // Перезапись поднимает запись в конец очереди вытеснения: Map помнит
+    // порядок вставки, и заново вставленный ключ становится самым свежим.
+    shown.delete(found.mediaId)
+    shown.set(found.mediaId, {
+      card: found,
+      russian: russian.value,
+      ratings: platformRatings.value,
+      franchise: franchise.value,
+    })
+
+    // Самое давнее лежит первым: удаление по ходу обхода Map безопасно.
+    for (const key of shown.keys()) {
+      if (shown.size <= SHOWN_KEEP) break
+      shown.delete(key)
+    }
+  }
+
+  /** Снимает отложенный заказ меток: показанное относилось к прошлой полке. */
+  function dropSeen(): void {
+    if (seenTimer !== null) clearTimeout(seenTimer)
+    seenTimer = null
+    seenParts.clear()
+  }
+
+  /** Чем спрашивать источники про часть: номера и названия по убыванию пригодности. */
+  function partAsk(work: FranchiseWork, id: number): PlayAsk {
+    const names = [...new Set([work.name, peekRussianName(id) ?? ''])]
+
+    return {
+      mediaId: id,
+      malId: work.malId,
+      titles: names.filter((name) => name !== ''),
+      year: typeof work.year === 'number' ? work.year : undefined,
+    }
+  }
+
   /**
-   * Метки доступности частям франшизы. Сначала склад — он отвечает даром
-   * и разом по всей полке, — и только потом сеть.
-   *
-   * Полка франшизы — то место, где метка полезнее всего: человек смотрит
-   * на дерево именно чтобы решить, что смотреть дальше, и обрыв меток
-   * на середине дерева читался бы как «дальше ничего нет». Потому спрашивается
-   * вся полка: очередь ядра сама держит темп и оптовый вопрос.
+   * Поднимает метки полки со склада. Сети не касается вовсе, поэтому
+   * спрашивается всё дерево разом, включая хвост за прокруткой: однажды
+   * спрошенное показывается целиком и даром.
    */
-  async function warmFranchisePlay(
-    mine: number,
-    works: readonly FranchiseWork[],
-    ids: readonly number[],
-  ): Promise<void> {
-    const primed = await primePlayable(ids)
-    if (mine !== run) return
-    if (primed > 0) playStamp.value += 1
+  async function primeFranchisePlay(mine: number, ids: readonly number[]): Promise<void> {
+    try {
+      const primed = await primePlayable(ids)
+      if (mine !== run) return
+      if (primed > 0) playStamp.value += 1
+    } catch (e) {
+      // Без метки полка живая: плитка про доступность просто молчит.
+      Logger('WARN', 'Карточка: метки франшизы со склада не поднялись', e)
+    }
+  }
+
+  /**
+   * Что готовится до вопросов источникам: метки со склада и русские имена
+   * частей. Склад отвечает даром, а имя важнее скорости — источники ищут
+   * словами, и без русского названия часть находится заметно хуже.
+   */
+  async function readyForAsk(mine: number, ids: readonly number[]): Promise<void> {
+    await primeFranchisePlay(mine, ids)
+
+    try {
+      await prefetchRussianNames(ids)
+      if (mine !== run) return
+
+      franchiseStamp.value += 1
+    } catch (e) {
+      Logger('WARN', 'Карточка: русские имена франшизы не добрались', e)
+    }
+  }
+
+  /**
+   * Заказывает метки показанным частям полки. Ответы приезжают подпиской,
+   * поэтому ждать здесь нечего: темп источников держит очередь ядра.
+   */
+  async function askSeenParts(): Promise<void> {
+    await priming
+
+    const works = franchise.value
+    if (works === null) {
+      seenParts.clear()
+      return
+    }
 
     const asks: PlayAsk[] = []
 
     for (const work of works) {
       const id = work.mediaId
-      if (id === null || work.type === 'MANGA') continue
+      if (id === null || !seenParts.has(id)) continue
       if (peekPlayable(id) !== null) continue
 
-      const names = [...new Set([work.name, peekRussianName(id) ?? ''])]
-
-      asks.push({
-        mediaId: id,
-        malId: work.malId,
-        titles: names.filter((name) => name !== ''),
-        year: typeof work.year === 'number' ? work.year : undefined,
-      })
+      asks.push(partAsk(work, id))
     }
+
+    seenParts.clear()
 
     if (asks.length === 0) return
 
     // Реестр источников собирает слой api: ядро своих поставщиков не зовёт.
     setupVideoSources()
 
-    await warmPlayable(asks)
-    if (mine !== run) return
-
-    playStamp.value += 1
+    requestPlayable(asks)
   }
 
-  /** Дерево франшизы: склад или сеть, затем русские имена частей фоном. */
+  /**
+   * Плитка части показалась человеку. Номера копятся пачкой: прокрутка полки
+   * приводит их по несколько разом, и очередь ядра не должна просыпаться
+   * на каждую плитку отдельно.
+   *
+   * Нынешнее аниме с полки не спрашивается: карточка обещает спросить
+   * источники при открытии плеера, и тот же вопрос дважды ей не нужен.
+   */
+  function onPartSeen(work: FranchiseWork): void {
+    const id = work.mediaId
+    if (id === null || id === mediaId.value || work.type === 'MANGA') return
+    if (peekPlayable(id) !== null) return
+
+    seenParts.add(id)
+    if (seenTimer !== null) return
+
+    seenTimer = setTimeout(() => {
+      seenTimer = null
+      void askSeenParts()
+    }, SEEN_PAUSE_MS)
+  }
+
+  /** Дерево франшизы: склад или сеть, затем имена и метки со склада фоном. */
   async function beginFranchise(mine: number, id: number, found: MediaCard): Promise<void> {
     const works = await fetchFranchise(id, found.malId)
     if (mine !== run || works === null) return
 
     franchise.value = works
-    void nextTick(() => {
-      franList.value
-        ?.querySelector('.am-part__hit--here')
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    })
+    scrollToHere()
 
-    // Русские имена частей — тем же фоновым проходом. Манга из дерева
-    // не показывается, и спрашивать её названия незачем.
+    // Манга из дерева не показывается: ни имён, ни меток ей не нужно.
     const ids = works.flatMap((w) => (w.type !== 'MANGA' && w.mediaId !== null ? [w.mediaId] : []))
     if (ids.length === 0) return
 
-    await prefetchRussianNames(ids)
-    if (mine !== run) return
-
-    franchiseStamp.value += 1
-
-    // Метки доступности — после имён: имя важнее, без него часть не узнать.
-    await warmFranchisePlay(mine, works, ids)
+    // Плитки уже на экране и вот-вот отметятся показанными: их заказ ждёт
+    // именно этого захода, поэтому обещание кладётся до первого await.
+    priming = readyForAsk(mine, ids)
+    await priming
   }
 
   /** Забирает подробности и русскую карточку. Фоновые доборы её не ждут. */
@@ -476,17 +628,39 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     const mine = ++run
     const id = mediaId.value
 
-    card.value = null
-    russian.value = null
-    platformRatings.value = null
-    franchise.value = null
+    // Уходящее аниме остаётся в памяти захода: возврат назад покажет его сразу.
+    keepShown()
+    dropSeen()
+
     trouble.value = ''
 
     if (id === 0) {
+      forgetShown()
       busy.value = false
       return
     }
 
+    const seen = shown.get(id)
+    if (seen !== undefined) {
+      // Эту карточку в заходе уже открывали: показываем как было. Ни сети,
+      // ни доборов — подробности, дерево и оценки лежат готовыми.
+      card.value = seen.card
+      russian.value = seen.russian
+      platformRatings.value = seen.ratings
+      franchise.value = seen.franchise
+      priming = Promise.resolve()
+      busy.value = false
+
+      // Память имён и ответов живёт вне реактивности Vue: без счётчиков полка
+      // осталась бы с прежними метками и латинскими именами.
+      nameStamp.value += 1
+      franchiseStamp.value += 1
+      playStamp.value += 1
+      scrollToHere()
+      return
+    }
+
+    forgetShown()
     busy.value = true
 
     // Имя — сразу из памяти или датасета: ждать сетевую карточку ради
@@ -679,6 +853,7 @@ export function useMediaCard(mediaId: Ref<number>): MediaCardView {
     franchiseStatus,
     franchiseHint,
     franchisePlay,
+    onPartSeen,
     openFranchiseWork,
     openStudio,
     onOpen,
