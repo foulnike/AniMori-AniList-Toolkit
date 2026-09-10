@@ -22,6 +22,18 @@
 // впереди — отбор выкидывал анонсы и повторы, а число плиток бралось
 // из остатка. Ровную порцию держит сама лента: лишнее со страницы ждёт
 // в запасе до следующего нажатия.
+//
+// МЕТКИ ДОСТУПНОСТИ СПРАШИВАЮТСЯ ПО ПОКАЗУ
+// Склад доступности поднимается по всем приехавшим плиткам разом: он лежит
+// в своей базе, отвечает даром и одним заходом. А чужие службы — Aniliberty,
+// Kodik, AnimeThemes — спрашиваются только про плитки, попавшие в окно.
+// Витрина главной — это своя полка, пять каруселей по четырнадцать постеров
+// и лента на три десятка: прежний заход спрашивал сотню с лишним аниме сразу
+// после запуска, а видно из них было от силы полтора ряда. Карусель к тому же
+// едет вбок, и её правый конец не виден вовсе, пока туда не прокрутят.
+// Русские названия остались на прежнем заходе: они приходят из датасета,
+// лежащего на диске, и в сеть уходят только на промахах. Плитка без имени
+// нечитаема, а плитка без метки просто молчит.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { emptyPick, pickIsSet, pickKey, type CatalogPick } from '@/api/anilist-catalog'
@@ -44,7 +56,7 @@ import {
   onPlayableChange,
   peekPlayable,
   primePlayable,
-  warmPlayable,
+  requestPlayable,
   type PlayAsk,
   type PlayState,
 } from '@/core/playable'
@@ -78,6 +90,11 @@ const SHELF_MIN = 3
     по девять плиток: сетка широкого экрана кладёт в ряд девять,
     и прежние два десятка обрывали нижний ряд на середине. */
 const FEED_WANT = 36
+
+/** Сколько ждать после первого показа, прежде чем спросить. Прокрутка
+    поднимает плитки по одной, и без паузы каждая уходила бы своим вопросом,
+    а очередь ядра любит оптовые пачки. */
+const SEEN_PAUSE_MS = 200
 
 /** Плитка своей полки. Тот же вид, что в списках: вид аниме везде один. */
 interface Row {
@@ -139,6 +156,18 @@ let titleRun = 0
 let playRun = 0
 let recsRun = 0
 let feedRun = 0
+let askRun = 0
+
+/** Показанные плитки, о которых ещё не спрашивали, и номера уже отправленных
+    вопросов. Второе множество нужно потому, что одно и то же аниме стоит
+    и на своей полке, и в витрине, и в ленте: платить за него трижды незачем. */
+const seenTiles = new Set<number>()
+const askedTiles = new Set<number>()
+let seenTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Общий заход подъёма склада. Вопрос по показу ждёт его: иначе первый же
+    экран уедет к чужой службе за тем, что уже лежит на диске. */
+let priming: Promise<void> = Promise.resolve()
 
 /** Стоит ли сейчас хоть одно условие отбора. */
 const picked = computed(() => pickIsSet(homePick.value))
@@ -335,39 +364,32 @@ async function fillTitles(): Promise<void> {
   }
 }
 
+/** Держит подъём склада в общем заходе: askSeen ждёт его целиком, а не
+    ту полку, что приехала последней. */
+function keepPriming(job: Promise<void>): void {
+  priming = Promise.all([priming, job]).then(() => undefined)
+}
+
 /**
- * Ставит метку «Есть видео» на свою полку: сначала подъём склада по всей
- * полке даром, потом вопрос источникам про всё остальное.
+ * Поднимает склад доступности по своей полке. Склад лежит в своей базе,
+ * отвечает даром и разом по всем номерам, поэтому спрашивается целиком —
+ * все четырнадцать постеров, видны они сейчас или нет.
  *
- * Полка короткая — четырнадцать постеров, — и она про «что смотреть
- * сейчас»: резать её по шести было нечем оправдать даже при старом
- * штучном вопросе, а с очередью и оптом — тем более.
+ * В сеть за остальным идёт askSeen, и только про плитки в окне.
  */
-async function fillOwnPlay(): Promise<void> {
-  const mine = ++playRun
+function loadOwnMarks(): void {
   if (ownEntries.length === 0) return
 
-  try {
-    const primed = await primePlayable(ownEntries.map((entry) => entry.mediaId))
-    if (mine !== playRun) return
-    if (primed > 0) redrawOwn()
+  const mine = ++playRun
+  const job = primePlayable(ownEntries.map((entry) => entry.mediaId))
+    .then((primed) => {
+      if (mine === playRun && primed > 0) redrawOwn()
+    })
+    .catch((e) => {
+      Logger('WARN', 'Главная: склад доступности своей полки не поднялся', e)
+    })
 
-    const asks = ownEntries.filter((entry) => peekPlayable(entry.mediaId) === null).map(playAskOf)
-
-    if (asks.length === 0) return
-
-    // Реестр источников собирает не ядро, а слой api, и до плеера человек
-    // может и не дойти. Повторный зов ничего не стоит: сборка идёт один раз.
-    setupVideoSources()
-
-    await warmPlayable(asks)
-    if (mine !== playRun) return
-
-    redrawOwn()
-  } catch (e) {
-    // Без ответа плитка останется без метки, а не с ложной: так и задумано.
-    Logger('WARN', 'Главная: метки своей полки не доехали', e)
-  }
+  keepPriming(job)
 }
 
 /** Своя полка: продолжение просмотра и пересмотра. */
@@ -380,7 +402,7 @@ function buildOwn(): void {
   redrawOwn()
   void fillLooks()
   void fillTitles()
-  void fillOwnPlay()
+  loadOwnMarks()
 }
 
 /** Состав витрины. Порядок важен дважды: по нему полки стоят на экране
@@ -429,6 +451,102 @@ const stopPlayWatch = onPlayableChange(() => {
   drawFeed()
 })
 
+/**
+ * Вопрос об источниках по номеру показанной плитки. Плитка приходит с трёх
+ * сторон, и вопрос у каждой собирается по-своему: у своей полки есть номер
+ * MAL из снимка, у каталога — заголовки брифа.
+ *
+ * Анонс не спрашивается вовсе: у него не вышло ни одной части, и ответ
+ * известен заранее.
+ */
+function askFor(mediaId: number): PlayAsk | null {
+  const own = ownEntries.find((entry) => entry.mediaId === mediaId)
+  if (own !== undefined) return playAskOf(own)
+
+  for (const items of staged.values()) {
+    const brief = items.find((item) => item.mediaId === mediaId)
+    if (brief === undefined) continue
+
+    return brief.status === SOON_STATUS ? null : toPlayAsk(brief)
+  }
+
+  const inFeed = feedKeep.items.find((item) => item.mediaId === mediaId)
+  if (inFeed === undefined) return null
+
+  return inFeed.status === SOON_STATUS ? null : toPlayAsk(inFeed)
+}
+
+/** Забывает показанное: смена отбора и уход с экрана снимают накопленное
+    вместе с недоспрошенной пачкой. */
+function dropSeen(): void {
+  askRun++
+
+  if (seenTimer !== null) {
+    clearTimeout(seenTimer)
+    seenTimer = null
+  }
+
+  seenTiles.clear()
+  askedTiles.clear()
+}
+
+/**
+ * Спрашивает чужие службы про показанные плитки одной пачкой.
+ *
+ * Ждёт подъёма склада: иначе первый же экран уедет в сеть за тем, что лежит
+ * на диске. Темп дальше держит очередь ядра — она одна на приложение,
+ * спрашивает оптом и сама раскладывает вопросы во времени.
+ */
+async function askSeen(): Promise<void> {
+  const mine = askRun
+
+  await priming
+  if (mine !== askRun) return
+
+  const wanted: PlayAsk[] = []
+  for (const mediaId of seenTiles) {
+    if (askedTiles.has(mediaId) || peekPlayable(mediaId) !== null) continue
+
+    const ask = askFor(mediaId)
+    if (ask === null) continue
+
+    askedTiles.add(mediaId)
+    wanted.push(ask)
+  }
+  seenTiles.clear()
+
+  if (wanted.length === 0) return
+
+  try {
+    // Реестр источников собирает не ядро, а слой api, и до плеера человек
+    // может и не дойти. Повторный зов ничего не стоит: сборка идёт один раз.
+    setupVideoSources()
+
+    await requestPlayable(wanted)
+    if (mine !== askRun) return
+
+    redrawOwn()
+    publish()
+    drawFeed()
+  } catch (e) {
+    // Без ответа плитка останется без метки, а не с ложной: так и задумано.
+    Logger('WARN', 'Главная: метки доступности не доехали', e)
+  }
+}
+
+/** Плитка попала в окно: копим номер и спрашиваем пачкой после паузы. */
+function onTileSeen(mediaId: number): void {
+  if (askedTiles.has(mediaId) || peekPlayable(mediaId) !== null) return
+
+  seenTiles.add(mediaId)
+  if (seenTimer !== null) return
+
+  seenTimer = setTimeout(() => {
+    seenTimer = null
+    void askSeen()
+  }, SEEN_PAUSE_MS)
+}
+
 /** Добирает русские названия плиткам полки витрины. */
 async function warmRecTitles(mine: number, key: string): Promise<void> {
   const items = staged.get(key)
@@ -453,60 +571,48 @@ async function warmRecTitles(mine: number, key: string): Promise<void> {
 }
 
 /**
- * Ставит метку «Есть видео» на полку витрины.
+ * Поднимает склад доступности по приехавшей полке витрины: даром и разом.
  *
- * Сначала склад: он отвечает даром и разом по всей полке, потом сеть —
- * всем остальным плиткам без потолка и без общего бюджета захода.
- * Именно эти два потолка давали «десяток меток и тишина»: двадцать
- * вопросов на шесть полок заканчивались на второй же полке. Темп теперь
- * держит очередь ядра: она одна на приложение, спрашивает оптом и сама
- * раскладывает вопросы во времени.
- *
- * Анонсы не спрашиваются вовсе: у них не вышло ни одной части, и ответ
- * известен заранее.
+ * Вопрос чужим службам ставит показ плитки, а не приезд полки. Пять полок
+ * по четырнадцать постеров — это семь десятков вопросов сразу после запуска,
+ * из которых видно от силы полтора ряда; остальное оплачивалось впустую
+ * и упиралось в потолки захода, отчего метки и обрывались «десятком».
  */
-async function warmRecPlay(mine: number, key: string): Promise<void> {
+function primeShelfMarks(mine: number, key: string): void {
   const items = staged.get(key)
-  if (items === undefined) return
+  if (items === undefined || items.length === 0) return
 
-  try {
-    const primed = await primePlayable(items.map((brief) => brief.mediaId))
-    if (mine !== recsRun) return
-    if (primed > 0) publish()
-  } catch (e) {
-    Logger('WARN', 'Главная: склад доступности не поднялся', e)
-  }
+  const job = primePlayable(items.map((brief) => brief.mediaId))
+    .then((primed) => {
+      if (mine === recsRun && primed > 0) publish()
+    })
+    .catch((e) => {
+      Logger('WARN', 'Главная: склад доступности витрины не поднялся', e)
+    })
 
-  const asks: PlayAsk[] = items
-    .filter((brief) => brief.status !== SOON_STATUS && peekPlayable(brief.mediaId) === null)
-    .map(toPlayAsk)
-
-  if (asks.length === 0) return
-
-  try {
-    // Реестр источников собирает не ядро, а слой api, и до плеера человек может
-    // и не дойти. Повторный зов ничего не стоит: сборка идёт один раз за запуск.
-    setupVideoSources()
-
-    await warmPlayable(asks)
-    if (mine !== recsRun) return
-
-    publish()
-  } catch (e) {
-    // Без ответа плитка останется без метки, а не с ложной: так и задумано.
-    Logger('WARN', 'Главная: метки доступности не доехали', e)
-  }
+  keepPriming(job)
 }
 
-/** Добор одной полки: сначала имена, потом метки. Имя важнее: без него
-    плитку не узнать вовсе, а без метки она просто молчит. */
+/** Добор одной полки: склад ставится сразу и не ждёт никого, а имена идут
+    заходами. Имя важнее метки: без него плитку не узнать вовсе. */
 async function warmRecShelf(mine: number, key: string): Promise<void> {
+  primeShelfMarks(mine, key)
   await warmRecTitles(mine, key)
-  await warmRecPlay(mine, key)
 }
 
-/** Тот же добор для новой порции ленты: имена, потом склад, потом сеть. */
+/** Тот же добор для новой порции ленты: склад разом, имена заходами,
+    а вопросы в сеть — по показу. */
 async function warmFeed(mine: number, items: MediaBrief[]): Promise<void> {
+  const job = primePlayable(items.map((brief) => brief.mediaId))
+    .then((primed) => {
+      if (mine === feedRun && primed > 0) drawFeed()
+    })
+    .catch((e) => {
+      Logger('WARN', 'Главная: склад доступности ленты не поднялся', e)
+    })
+
+  keepPriming(job)
+
   const wanted = items
     .filter((brief) => peekRussianName(brief.mediaId) === null)
     .map((brief) => brief.mediaId)
@@ -522,31 +628,6 @@ async function warmFeed(mine: number, items: MediaBrief[]): Promise<void> {
     }
   } catch (e) {
     Logger('WARN', 'Главная: названия ленты добрать не вышло', e)
-  }
-
-  try {
-    const primed = await primePlayable(items.map((brief) => brief.mediaId))
-    if (mine !== feedRun) return
-    if (primed > 0) drawFeed()
-  } catch (e) {
-    Logger('WARN', 'Главная: склад доступности ленты не поднялся', e)
-  }
-
-  const asks: PlayAsk[] = items
-    .filter((brief) => brief.status !== SOON_STATUS && peekPlayable(brief.mediaId) === null)
-    .map(toPlayAsk)
-
-  if (asks.length === 0) return
-
-  try {
-    setupVideoSources()
-
-    await warmPlayable(asks)
-    if (mine !== feedRun) return
-
-    drawFeed()
-  } catch (e) {
-    Logger('WARN', 'Главная: метки ленты не доехали', e)
   }
 }
 
@@ -730,6 +811,7 @@ onBeforeUnmount(() => {
   playRun++
   recsRun++
   feedRun++
+  dropSeen()
 
   // Очередь живёт дольше экрана: неснятая подписка держала бы всю витрину
   // в памяти и пересобирала её на каждый ответ чужого экрана.
@@ -743,6 +825,10 @@ watch(
   () => pickKey(homePick.value),
   () => {
     if (busy.value) return
+
+    // Прежняя витрина уходит целиком, и недоспрошенная пачка вместе с ней:
+    // новые полки поднимут свои плитки сами, когда встанут в окно.
+    dropSeen()
     loadRecs()
     startFeed()
   },
@@ -817,6 +903,9 @@ watch(
     </div>
 
     <template v-else>
+      <!-- v-seen на плитке: метку доступности спрашиваем только про то, что
+           попало в окно. Карусель едет вбок, и её хвост не виден вовсе,
+           пока туда не прокрутят. -->
       <section v-if="ownRows.length > 0" class="am-shelf am-shelf--mine">
         <div class="am-bar">
           <h2 class="am-h2">Продолжаю смотреть</h2>
@@ -828,6 +917,7 @@ watch(
           <MediaTile
             v-for="row in ownRows"
             :key="row.mediaId"
+            v-seen="() => onTileSeen(row.mediaId)"
             :title="row.title"
             :facts="row.facts"
             :cover="row.cover"
@@ -852,6 +942,7 @@ watch(
           <MediaTile
             v-for="row in shelf.rows"
             :key="row.mediaId"
+            v-seen="() => onTileSeen(row.mediaId)"
             :title="row.title"
             :facts="row.facts"
             :cover="row.cover"
@@ -882,6 +973,7 @@ watch(
           <MediaTile
             v-for="row in feedRows"
             :key="row.mediaId"
+            v-seen="() => onTileSeen(row.mediaId)"
             :title="row.title"
             :facts="row.facts"
             :cover="row.cover"
