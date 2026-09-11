@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // Окно переноса списков Shikimori → AniList.
 
-import { isAnonymousShikiAccess } from '../../api/shikimori-user'
 import {
   AL_DEVELOPER_URL,
   AL_REDIRECT_URL,
@@ -22,14 +21,6 @@ import {
 } from './sync-state'
 
 const modeLabel = syncMode === 'export' ? 'экспорт' : 'импорт'
-
-/**
- * В десктопе списки читаются анонимно и открытый профиль обязателен. В юзерскрипте
- * запрос идёт с куками браузера, поэтому требования нет — нужен лишь выполненный
- * вход на Shikimori в том же браузере. Показывать браузерному пользователю чужое
- * требование нечестно, поэтому текст предупреждения зависит от платформы.
- */
-const anonymous = isAnonymousShikiAccess()
 
 const FIELD_STYLE = 'flex:1;width:auto;'
 
@@ -61,6 +52,8 @@ const AUTH_LINK_STYLE =
       </div>
 
       <div class="amk-body">
+        <!-- Списки читаются под сессией того же браузера, поэтому требования открытого
+             профиля нет: достаточно выполненного входа на Shikimori. -->
         <div
           class="amk-row-hint"
           style="
@@ -72,15 +65,8 @@ const AUTH_LINK_STYLE =
             line-height: 1.4;
           "
         >
-          <template v-if="anonymous">
-            ⚠️ Списки читаются без входа в аккаунт, поэтому ваш профиль на Shikimori должен быть
-            открыт (публичен) на время переноса. Если профиль скрыт настройками приватности, сервер
-            откажет в доступе.
-          </template>
-          <template v-else>
-            ℹ️ Списки читаются с Shikimori под вашей сессией в этом же браузере. Если вы не вошли в
-            аккаунт, скрытый профиль будет недоступен.
-          </template>
+          ℹ️ Списки читаются с Shikimori под вашей сессией в этом же браузере. Если вы не вошли в
+          аккаунт, скрытый профиль будет недоступен.
         </div>
 
         <div style="display: flex; gap: 10px">
