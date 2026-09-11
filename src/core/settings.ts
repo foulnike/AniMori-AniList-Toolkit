@@ -34,21 +34,6 @@ export interface AniMoriSettings {
    */
   accentCustom: string
   /**
-   * Блокировать всплывающие окна плеера. В юзерскрипте потребителя нет и быть не может:
-   * Kodik крутится в кросс-доменном фрейме, работает только on_new_window в Tauri.
-   * Тот ловит НОВЫЕ окна: редиректы текущего фрейма и оверлеи им не отсекаются.
-   * Выключен по умолчанию вместе с hideAds: блокировка режет рекламу партнёров
-   * источников, и такое решение принимает человек, а не установщик. Дефолт общий
-   * с hideAds: один тумблер панели пишет оба ключа, и при разных значениях он
-   * выглядел бы включённым, ничего не блокируя.
-   */
-  blockPlayerPopups: boolean
-  /**
-   * Резать рекламные блоки самого AniList. В отличие от blockPlayerPopups работает
-   * всюду: баннеры живут в главном фрейме на том же домене, что и скрипт.
-   */
-  hideAds: boolean
-  /**
    * Показывать ли пилюлю «Перенос». Скрывается только кнопка: окно остаётся
    * смонтированным и доступным программно, смысл ключа чисто интерфейсный.
    */
@@ -90,8 +75,6 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
   enableLogger: true,
   accentPreset: 'site',
   accentCustom: '',
-  blockPlayerPopups: false,
-  hideAds: false,
   showSyncButton: true,
   showCompareButton: true,
   translateTitles: true,
@@ -100,8 +83,8 @@ const DEFAULT_SETTINGS: AniMoriSettings = {
 async function readSettings(): Promise<AniMoriSettings> {
   const storage = Bridge.storage
 
-  // Все ключи читаются одним залпом: в Tauri последовательный await дал бы два
-  // десятка вызовов через IPC на старте приложения.
+  // Все ключи читаются одним залпом: последовательный await дал бы два десятка
+  // обращений к хранилищу менеджера на самом горячем участке старта.
   const [
     translateInterface,
     storedTitlePrimary,
@@ -124,8 +107,6 @@ async function readSettings(): Promise<AniMoriSettings> {
     enableLogger,
     accentPreset,
     accentCustom,
-    blockPlayerPopups,
-    hideAds,
     showSyncButton,
     showCompareButton,
   ] = await Promise.all([
@@ -150,8 +131,6 @@ async function readSettings(): Promise<AniMoriSettings> {
     storage.get('set_logger', DEFAULT_SETTINGS.enableLogger),
     storage.get<AccentPreset>('am_accent', DEFAULT_SETTINGS.accentPreset),
     storage.get('am_accent_custom', DEFAULT_SETTINGS.accentCustom),
-    storage.get('set_block_popups', DEFAULT_SETTINGS.blockPlayerPopups),
-    storage.get('set_hide_ads', DEFAULT_SETTINGS.hideAds),
     storage.get('set_btn_sync', DEFAULT_SETTINGS.showSyncButton),
     storage.get('set_btn_compare', DEFAULT_SETTINGS.showCompareButton),
   ])
@@ -182,8 +161,6 @@ async function readSettings(): Promise<AniMoriSettings> {
     enableLogger,
     accentPreset,
     accentCustom,
-    blockPlayerPopups,
-    hideAds,
     showSyncButton,
     showCompareButton,
     translateTitles: titlePrimary !== 'off',

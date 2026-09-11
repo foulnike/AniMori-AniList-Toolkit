@@ -1,9 +1,6 @@
 /** AniMori userscript entry point. */
 
 import './style.scss'
-// Через псевдопуть, а не из features/adblock: прямой импорт оставил бы оба модуля
-// в графе юзерскрипта вопреки алиасу.
-import { destroyAdblock, destroyNetProbe, initAdblock, initNetProbe } from '@adblock-impl'
 import { loadInterfaceDictionary } from './api/dictionary'
 import { loadAlToken } from './api/anilist'
 import { amSetAccent } from './core/accent'
@@ -37,7 +34,7 @@ const GC_DELAY_MS = 15000
 const DOM_POLL_MS = 16
 
 /**
- * Ждёт появления `document.body` (дефект A2): менеджер вставляет скрипт раньше,
+ * Ждёт появления `document.body`: менеджер вставляет скрипт раньше,
  * чем браузер собрал дерево. Опрос рядом с событием — на случай, если
  * DOMContentLoaded пройдёт до подписки.
  */
@@ -64,7 +61,7 @@ function whenDomReady(): Promise<void> {
 }
 
 /**
- * Выполняет один шаг старта, не давая его падению унести остаток (дефект A1).
+ * Выполняет один шаг старта, не давая его падению унести остаток.
  * Не замена проверкам внутри подсистем: упавший шаг свою работу не сделал.
  */
 // unknown принимает и синхронную функцию, и любой промис; возврат отбрасывается.
@@ -99,15 +96,12 @@ function wireLifecycle(): void {
 
   // Разбор идёт в обратном порядке, по выгрузке страницы.
   registerShutdownTask('vue:all', unmountAll)
-  // Обе задачи уходят в заглушки из '@adblock-impl': резать рекламу нам нечем.
-  registerShutdownTask('adblock', destroyAdblock)
-  registerShutdownTask('net-probe', destroyNetProbe)
 
   initLifecycle()
 }
 
 /**
- * Порядок взят из init() монолита: DOM и настройки → перехватчики → акцент → панели →
+ * Порядок старта: DOM и настройки → перехватчики → акцент → панели →
  * БД → словарь → переводчик → поиск → виджеты → SPA-обвязка → сборщик мусора.
  * Всё, что читает settings, идёт строго после loadSettings(); каждый шаг в step().
  */
@@ -131,14 +125,6 @@ async function bootstrap(): Promise<void> {
     Promise.all([loadCustomLinks(), loadUserDict()]),
   )
 
-  // Заглушка: рекламу в браузере режет расширение пользователя. Шаг оставлен
-  // потому, что точка входа не знает, что стоит за '@adblock-impl'.
-  await step('адблок', initAdblock)
-
-  // Вторая заглушка оттуда же: разведка вложенных фреймов собирала адреса
-  // для блокировщика, которого здесь нет.
-  await step('сетевая разведка', initNetProbe)
-
   // Без этого вызова сохранённый пресет игнорируется.
   await step('акцентный цвет', () => amSetAccent(settings.accentPreset, settings.accentCustom))
 
@@ -153,7 +139,7 @@ async function bootstrap(): Promise<void> {
   // До всего, что ходит в сеть: подписка не знает о прошлых отказах.
   await step('предупреждение о сети', initNetToast)
 
-  // Отказ БД не фатален (дефект A3): потребители кэша работают без него.
+  // Отказ БД не фатален: потребители кэша работают без него.
   await step('IndexedDB', openDB)
 
   const needTranslator =
@@ -222,7 +208,7 @@ function reportPageAlive(): void {
 // На чужом домене корня #app нет и быть не должно — сторожить там нечего.
 if (IS_ANILIST) reportPageAlive()
 
-// Последняя сетка (дефект A1): сбой самого каркаса старта обязан попасть в журнал.
+// Последняя сетка: сбой самого каркаса старта обязан попасть в журнал.
 void bootstrap().catch((e) => {
   Logger('ERROR', 'Старт AniMori оборвался', e)
 })
