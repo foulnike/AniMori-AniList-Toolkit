@@ -26,11 +26,9 @@
     "sourceMap": true,
 
     "baseUrl": ".",
+    // Один алиас на весь проект, ровно как в resolve.alias в vite.config.ts.
     "paths": {
-      "@/*": ["src/*"],
-      // Та же цель, что и в resolve.alias в vite.config.ts: мост к GM_*-функциям.
-      // Расхождение двух мест дало бы проверку типов по одному файлу и сборку по другому.
-      "@bridge-impl": ["src/bridge/MonkeyBridge"]
+      "@/*": ["src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"],
