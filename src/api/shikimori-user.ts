@@ -1,6 +1,8 @@
 // Транспорт приватных эндпоинтов Shikimori: списки из профиля пользователя.
 // Отдельно от shikimori.ts: там шлюз темпа и свой 404, здесь 404 — «страниц больше нет».
-// РИСК №2 из docs/DECISIONS.md решается здесь и только здесь.
+//
+// Куки сессии подставляет менеджер юзерскриптов, поэтому закрытый профиль читается
+// так же, как его видит сам владелец в соседней вкладке.
 
 import { Bridge } from '@/bridge'
 import { SHIKI_DOMAINS } from '../core/constants'
@@ -13,31 +15,14 @@ import { Logger } from '../utils/logger'
  */
 const TIMEOUT_MS = 20000
 
-/** Предупреждение об анонимном доступе показывается один раз за сессию. */
-let anonymousNoticeShown = false
-
 /** Идентификатор зеркала в учёте состояния сети. Совпадает с api/shikimori.ts намеренно. */
 function netId(domain: string): string {
   return `shikimori:${domain}`
 }
 
-/**
- * Уходят ли запросы без куки сессии.
- * Проверяется платформа моста: в WebView window есть, а сессии Shikimori в нём нет.
- */
-export function isAnonymousShikiAccess(): boolean {
-  return Bridge.platform !== 'userscript'
-}
-
-/**
- * Текст отказа в доступе: в десктопе причина другая, чем в браузере.
- * Одинаковое «Профиль скрыт.» гнало бы в настройки приватности вместо транспорта.
- */
+/** Текст отказа в доступе к спискам закрытого профиля. */
 export function hiddenProfileMessage(): string {
-  return isAnonymousShikiAccess()
-    ? 'Профиль скрыт либо недоступен анонимно. В десктопной версии списки читаются без ' +
-        'входа в аккаунт, поэтому профиль Shikimori должен быть открыт (публичен).'
-    : 'Профиль скрыт.'
+  return 'Профиль скрыт.'
 }
 
 export interface ShikiUserResponse<T> {
@@ -55,19 +40,6 @@ export interface ShikiUserResponse<T> {
  * @param path Путь, начинающийся со слэша. Домен подставляется сам.
  */
 export async function shikiUserGet<T>(path: string): Promise<ShikiUserResponse<T>> {
-  const anonymous = isAnonymousShikiAccess()
-
-  if (anonymous && !anonymousNoticeShown) {
-    anonymousNoticeShown = true
-    Logger(
-      'WARN',
-      'Shikimori: запросы к спискам уходят анонимно, куки сессии недоступны. ' +
-        'Профиль должен быть открыт, иначе сервер ответит отказом.',
-    )
-  }
-
-  // Юзерскрипт подставляет куки сессии через мост; из Rust их не видно, оттого omit.
-  const credentials: 'include' | 'omit' = anonymous ? 'omit' : 'include'
   let lastError: unknown = null
 
   for (const domain of SHIKI_DOMAINS) {
@@ -84,7 +56,8 @@ export async function shikiUserGet<T>(path: string): Promise<ShikiUserResponse<T
         method: 'GET',
         url,
         headers: { Accept: 'application/json' },
-        credentials,
+        // Явно: без куки сессии закрытый профиль ответит отказом своему же владельцу.
+        credentials: 'include',
         timeoutMs: TIMEOUT_MS,
       })
       status = res.status
