@@ -36,7 +36,7 @@ AniMori — неофициальный проект и не связан с ко
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/assets/screenshots/home.webp" width="900" alt="Каталог AniList с переведённым интерфейсом и русскими названиями">
+<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/script/assets/screenshots/home.webp" width="900" alt="Каталог AniList с переведённым интерфейсом и русскими названиями">
 
 </div>
 
@@ -44,7 +44,7 @@ AniMori — неофициальный проект и не связан с ко
 <summary><b>Страница аниме</b> — русское описание с указанием источника, рейтинги, музыкальные темы, дерево франшизы, внешние ссылки</summary>
 <br>
 <div align="center">
-<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/assets/screenshots/media.webp" width="900" alt="Страница аниме с блоками AniMori">
+<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/script/assets/screenshots/media.webp" width="900" alt="Страница аниме с блоками AniMori">
 </div>
 </details>
 
@@ -52,7 +52,7 @@ AniMori — неофициальный проект и не связан с ко
 <summary><b>Плеер</b> — выбор озвучки с избранным и переключение серий без перезагрузки страницы</summary>
 <br>
 <div align="center">
-<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/main/assets/screenshots/player.webp" width="900" alt="Встроенный плеер с панелями озвучек и эпизодов">
+<img src="https://raw.githubusercontent.com/foulnike/AniMori-AniList-Toolkit/script/assets/screenshots/player.webp" width="900" alt="Встроенный плеер с панелями озвучек и эпизодов">
 </div>
 </details>
 
@@ -129,8 +129,8 @@ AniMori — неофициальный проект и не связан с ко
 ```bash
 npm install
 npm run build       # → dist/animori.user.js и dist/animori.meta.js
-npm run dev         # сборка с пересборкой на лету
 npm run typecheck   # проверка типов
+npm run format      # форматирование prettier
 ```
 
 Выпуск делает тег вида `script-2.1.0`: прогон сверяет номер в теге с `package.json`, собирает скрипт и создаёт релиз с описанием из верхнего раздела `CHANGELOG.md`. На Greasy Fork новая версия выкладывается отдельно — именно оттуда приходят обновления к людям.
