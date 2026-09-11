@@ -1,6 +1,6 @@
 // Слой IndexedDB: кэш Shikimori, MAL-соответствий и франшиз.
 // Инстанс базы приватен: наружу идут только функции, сырой IDBDatabase не достать.
-// Через Bridge прятать не нужно: IndexedDB есть и в юзерскрипте, и в WebView Tauri.
+// Через мост прятать не нужно: IndexedDB доступна из контекста страницы напрямую.
 
 import { CACHE_TIME, DB_NAME, DB_VERSION } from './constants'
 import { Logger } from '../utils/logger'
