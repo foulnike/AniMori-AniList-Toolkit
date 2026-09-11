@@ -1,15 +1,12 @@
 /// <reference types="vite/client" />
 
-// Платформа сборки (см. define в vite.config.ts).
-declare const __ANIMORI_PLATFORM__: 'userscript'
-
 // Номер версии из package.json (см. define в vite.config.ts).
 // Подставляет сборка: число версии руками в коде не пишем (инвариант 11).
 declare const __ANIMORI_VERSION__: string
 
 // ==== GM_* API ====
 // @types/greasemonkey описывает только GM.* (GM4), а мы зовём GM_*.
-// Зовёт их один MonkeyBridge (инвариант 9); описано ровно то, что есть в @grant.
+// Зовёт их один мост, src/bridge/index.ts (инвариант 9); описано ровно то, что есть в @grant.
 declare function GM_getValue<T>(key: string, defaultValue: T): T
 declare function GM_getValue(key: string): unknown
 declare function GM_setValue(key: string, value: unknown): void
@@ -33,10 +30,10 @@ declare interface GMXhrDetails {
   responseType?: 'text' | 'json' | 'blob' | 'arraybuffer'
   timeout?: number
   /**
-   * Не отправлять куки текущей сессии. Реализует режим credentials: 'omit' из IBridge.
+   * Не отправлять куки текущей сессии. Реализует режим credentials: 'omit' из моста.
    *
    * Поддерживается Tampermonkey и Violentmonkey, но не Greasemonkey 4. Менеджеры без
-   * поддержки просто игнорируют поле и отправляют куки — см. предупреждение в MonkeyBridge.
+   * поддержки просто игнорируют поле и отправляют куки — см. предупреждение в src/bridge/index.ts.
    */
   anonymous?: boolean
   onload?: (response: GMXhrResponse) => void
@@ -48,7 +45,7 @@ declare interface GMXhrDetails {
 declare function GM_xmlhttpRequest(details: GMXhrDetails): { abort: () => void }
 
 // Информация о менеджере юзерскриптов. Доступна без отдельного @grant.
-// Нужна MonkeyBridge, чтобы понять, поддерживается ли анонимный запрос.
+// Нужна мосту, чтобы понять, поддерживается ли анонимный запрос.
 declare const GM_info:
   | {
       scriptHandler?: string
