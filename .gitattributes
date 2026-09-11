@@ -10,9 +10,7 @@
 *.md   text eol=lf
 *.yml  text eol=lf
 *.yaml text eol=lf
-*.rs   text eol=lf
-*.toml text eol=lf
 
-# Монолит хранится байт-в-байт (у него CRLF): никаких конвертаций
-# и никаких предупреждений про LF/CRLF на каждый git add.
-animori.user.js -text
+# Скриншоты для README — двоичные, конвертировать нечего.
+*.webp binary
+*.png  binary
